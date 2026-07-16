@@ -1,0 +1,396 @@
+{
+  "tenants": [
+    {
+      "id": "default-tenant",
+      "name": "Apex Tech Global Ltd",
+      "email": "admin@apextech.com",
+      "phone": "+2348012345678",
+      "createdAt": "2026-07-06T22:14:05.877Z"
+    }
+  ],
+  "users": [
+    {
+      "id": "admin-user",
+      "tenant_id": "default-tenant",
+      "firstName": "Utibeabasi",
+      "lastName": "Essien",
+      "email": "admin@apextech.com",
+      "phone": "+2348123456789",
+      "role": "company_admin",
+      "status": "active",
+      "createdAt": "2026-07-08T22:14:05.877Z"
+    },
+    {
+      "id": "lead-alice",
+      "tenant_id": "default-tenant",
+      "firstName": "Alice",
+      "lastName": "Mendez",
+      "email": "alice@apextech.com",
+      "phone": "+2348111222333",
+      "role": "team_lead",
+      "department_id": "dept-eng",
+      "status": "active",
+      "title": "Engineering Solutions Lead",
+      "createdAt": "2026-06-08T22:14:05.878Z"
+    },
+    {
+      "id": "worker-bob",
+      "tenant_id": "default-tenant",
+      "firstName": "Bob",
+      "lastName": "Aris",
+      "email": "bob@apextech.com",
+      "phone": "+2348111222444",
+      "role": "team_member",
+      "department_id": "dept-eng",
+      "status": "active",
+      "title": "Senior Fullstack Engineer",
+      "createdAt": "2026-06-08T22:14:05.878Z"
+    },
+    {
+      "id": "lead-clara",
+      "tenant_id": "default-tenant",
+      "firstName": "Clara",
+      "lastName": "Okon",
+      "email": "clara@apextech.com",
+      "phone": "+2348111222555",
+      "role": "team_lead",
+      "department_id": "dept-sales",
+      "status": "active",
+      "title": "Global Enterprise Sales Lead",
+      "createdAt": "2026-06-08T22:14:05.878Z"
+    },
+    {
+      "id": "worker-david",
+      "tenant_id": "default-tenant",
+      "firstName": "David",
+      "lastName": "Ade",
+      "email": "david@apextech.com",
+      "phone": "+2348111222666",
+      "role": "team_member",
+      "department_id": "dept-hr",
+      "status": "active",
+      "title": "HR Payroll Specialist",
+      "createdAt": "2026-06-08T22:14:05.878Z"
+    }
+  ],
+  "departments": [
+    {
+      "id": "dept-eng",
+      "tenant_id": "default-tenant",
+      "name": "Engineering Solutions",
+      "leadId": "lead-alice"
+    },
+    {
+      "id": "dept-hr",
+      "tenant_id": "default-tenant",
+      "name": "Human Resources",
+      "leadId": ""
+    },
+    {
+      "id": "dept-sales",
+      "tenant_id": "default-tenant",
+      "name": "Enterprise Commerce",
+      "leadId": "lead-clara"
+    }
+  ],
+  "departmentLeadHistory": [
+    {
+      "id": "hist-1",
+      "department_id": "dept-eng",
+      "worker_id": "lead-alice",
+      "tenant_id": "default-tenant",
+      "start_date": "2026-06-28T22:14:05.878Z",
+      "end_date": null,
+      "appointed_by": "admin-user",
+      "active": true,
+      "timestamp": "2026-06-28T22:14:05.878Z"
+    },
+    {
+      "id": "hist-2",
+      "department_id": "dept-sales",
+      "worker_id": "lead-clara",
+      "tenant_id": "default-tenant",
+      "start_date": "2026-06-23T22:14:05.878Z",
+      "end_date": null,
+      "appointed_by": "admin-user",
+      "active": true,
+      "timestamp": "2026-06-23T22:14:05.878Z"
+    }
+  ],
+  "attendance": [
+    {
+      "id": "att-alice-0",
+      "tenant_id": "default-tenant",
+      "worker_id": "lead-alice",
+      "department_id": "dept-eng",
+      "date": "2026-07-08",
+      "timeIn": "07:52:12",
+      "statusIn": "present",
+      "timeOut": "17:05:00",
+      "statusOut": "Normal",
+      "coveredTime": 33180
+    },
+    {
+      "id": "att-bob-0",
+      "tenant_id": "default-tenant",
+      "worker_id": "worker-bob",
+      "department_id": "dept-eng",
+      "date": "2026-07-08",
+      "timeIn": "08:14:45",
+      "statusIn": "late",
+      "timeOut": "17:15:00",
+      "statusOut": "Normal",
+      "coveredTime": 32400
+    },
+    {
+      "id": "att-clara-0",
+      "tenant_id": "default-tenant",
+      "worker_id": "lead-clara",
+      "department_id": "dept-sales",
+      "date": "2026-07-08",
+      "timeIn": "07:44:11",
+      "statusIn": "present",
+      "timeOut": "17:00:00",
+      "statusOut": "Normal",
+      "coveredTime": 33300
+    },
+    {
+      "id": "att-david-0",
+      "tenant_id": "default-tenant",
+      "worker_id": "worker-david",
+      "department_id": "dept-hr",
+      "date": "2026-07-08",
+      "timeIn": "07:55:00",
+      "statusIn": "present",
+      "timeOut": "17:02:00",
+      "statusOut": "Normal",
+      "coveredTime": 32820
+    },
+    {
+      "id": "att-alice-1",
+      "tenant_id": "default-tenant",
+      "worker_id": "lead-alice",
+      "department_id": "dept-eng",
+      "date": "2026-07-07",
+      "timeIn": "07:52:12",
+      "statusIn": "present",
+      "timeOut": "17:05:00",
+      "statusOut": "Normal",
+      "coveredTime": 33180
+    },
+    {
+      "id": "att-bob-1",
+      "tenant_id": "default-tenant",
+      "worker_id": "worker-bob",
+      "department_id": "dept-eng",
+      "date": "2026-07-07",
+      "timeIn": "07:58:30",
+      "statusIn": "present",
+      "timeOut": "17:15:00",
+      "statusOut": "Normal",
+      "coveredTime": 33360
+    },
+    {
+      "id": "att-clara-1",
+      "tenant_id": "default-tenant",
+      "worker_id": "lead-clara",
+      "department_id": "dept-sales",
+      "date": "2026-07-07",
+      "timeIn": "07:44:11",
+      "statusIn": "present",
+      "timeOut": "17:00:00",
+      "statusOut": "Normal",
+      "coveredTime": 33300
+    },
+    {
+      "id": "att-david-1",
+      "tenant_id": "default-tenant",
+      "worker_id": "worker-david",
+      "department_id": "dept-hr",
+      "date": "2026-07-07",
+      "timeIn": "07:55:00",
+      "statusIn": "present",
+      "timeOut": "17:02:00",
+      "statusOut": "Normal",
+      "coveredTime": 32820
+    },
+    {
+      "id": "att-alice-2",
+      "tenant_id": "default-tenant",
+      "worker_id": "lead-alice",
+      "department_id": "dept-eng",
+      "date": "2026-07-06",
+      "timeIn": "07:52:12",
+      "statusIn": "present",
+      "timeOut": "17:05:00",
+      "statusOut": "Normal",
+      "coveredTime": 33180
+    },
+    {
+      "id": "att-bob-2",
+      "tenant_id": "default-tenant",
+      "worker_id": "worker-bob",
+      "department_id": "dept-eng",
+      "date": "2026-07-06",
+      "timeIn": "08:14:45",
+      "statusIn": "late",
+      "timeOut": "17:15:00",
+      "statusOut": "Normal",
+      "coveredTime": 32400
+    },
+    {
+      "id": "att-clara-2",
+      "tenant_id": "default-tenant",
+      "worker_id": "lead-clara",
+      "department_id": "dept-sales",
+      "date": "2026-07-06",
+      "timeIn": "07:44:11",
+      "statusIn": "present",
+      "timeOut": "17:00:00",
+      "statusOut": "Normal",
+      "coveredTime": 33300
+    }
+  ],
+  "permissions": [
+    {
+      "id": "perm-bob-1",
+      "tenant_id": "default-tenant",
+      "worker_id": "worker-bob",
+      "reason": "Medical",
+      "startDate": "2026-07-09",
+      "endDate": "2026-07-10",
+      "remarks": "Post-surgery recovery routine checkup",
+      "status": "approved"
+    },
+    {
+      "id": "perm-david-1",
+      "tenant_id": "default-tenant",
+      "worker_id": "worker-david",
+      "reason": "Personal",
+      "startDate": "2026-07-03",
+      "endDate": "2026-07-03",
+      "remarks": "Bank transaction issues",
+      "status": "approved"
+    },
+    {
+      "id": "perm-alice-1",
+      "tenant_id": "default-tenant",
+      "worker_id": "lead-alice",
+      "reason": "Official",
+      "startDate": "2026-07-08",
+      "endDate": "2026-07-08",
+      "remarks": "Client site integration work",
+      "status": "pending"
+    }
+  ],
+  "notifications": [],
+  "subscriptions": [
+    {
+      "id": "sub-default",
+      "tenant_id": "default-tenant",
+      "planCode": "business",
+      "price": 30000,
+      "status": "trial",
+      "startDate": "2026-07-06T22:14:05.983Z",
+      "endDate": "2026-07-09T22:14:05.983Z",
+      "paymentMethod": "paystack",
+      "verified": true
+    }
+  ],
+  "settings": [
+    {
+      "tenant_id": "default-tenant",
+      "theme": "light",
+      "language": "en",
+      "activityDays": {
+        "Sunday": false,
+        "Monday": true,
+        "Tuesday": true,
+        "Wednesday": true,
+        "Thursday": true,
+        "Friday": true,
+        "Saturday": false
+      },
+      "dailyShiftTimes": {
+        "Sunday": "08:00",
+        "Monday": "08:00",
+        "Tuesday": "08:00",
+        "Wednesday": "08:00",
+        "Thursday": "08:00",
+        "Friday": "08:00",
+        "Saturday": "08:00"
+      },
+      "dailyShiftOutTimes": {
+        "Sunday": "17:00",
+        "Monday": "17:00",
+        "Tuesday": "17:00",
+        "Wednesday": "17:00",
+        "Thursday": "17:00",
+        "Friday": "17:00",
+        "Saturday": "17:00"
+      },
+      "checkIn": {
+        "time": "08:00",
+        "latenessThreshold": 10,
+        "soundEnabled": false,
+        "soundName": "none",
+        "latenessActive": false
+      },
+      "checkOut": {
+        "time": "17:00",
+        "soundEnabled": true
+      },
+      "locationTracking": {
+        "enabled": false,
+        "latitude": 9.0765,
+        "longitude": 7.3986,
+        "radius": 100
+      },
+      "onlyShowTimeIn": true,
+      "overtimeEnabled": false,
+      "overtimeHours": 2,
+      "selectedIntervalDays": 20
+    },
+    {
+      "tenant_id": "tenant-xf192o7d3",
+      "theme": "dark",
+      "language": "en",
+      "activityDays": {
+        "Sunday": false,
+        "Monday": true,
+        "Tuesday": true,
+        "Wednesday": true,
+        "Thursday": true,
+        "Friday": true,
+        "Saturday": false
+      },
+      "checkIn": {
+        "time": "07:30",
+        "latenessThreshold": 10,
+        "soundEnabled": true,
+        "latenessActive": false
+      },
+      "checkOut": {
+        "time": "16:30",
+        "soundEnabled": true
+      },
+      "overtimeHours": 2,
+      "overtimeEnabled": false,
+      "onlyShowTimeIn": true,
+      "selectedIntervalDays": 20
+    }
+  ],
+  "reportJobs": [],
+  "auditLogs": [
+    {
+      "id": "log-seed-1",
+      "tenant_id": "default-tenant",
+      "user_id": "admin-user",
+      "action": "TENANT_SEEDED",
+      "timestamp": "2026-07-08T22:14:05.983Z",
+      "details": "Apex Tech Seed dataset established for initial demo compliance"
+    }
+  ],
+  "visitorLogs": [],
+  "pendingSubscriptions": []
+}

@@ -1,0 +1,7247 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useRef } from "react";
+import { motion, AnimatePresence } from "motion/react";
+import {
+  Users,
+  Clock,
+  FileText,
+  CheckCircle2,
+  XCircle,
+  Sliders,
+  Menu,
+  BarChart3,
+  RefreshCw,
+  FolderSync,
+  Search,
+  Filter,
+  Compass,
+  ArrowRight,
+  TrendingUp,
+  Download,
+  Shield,
+  Briefcase,
+  Layers,
+  ArrowUpDown,
+  BookOpen,
+  QrCode,
+  LogOut,
+  Calendar,
+  ChevronLeft,
+  ChevronRight,
+  ChevronDown,
+  X,
+  Building,
+  AlertTriangle,
+  LayoutGrid,
+  List,
+  Plus,
+  Edit,
+  Trash2,
+  Settings,
+  History,
+  Bell,
+  Info,
+} from "lucide-react";
+import { AttendanceStatus, PermissionStatus, UserRole } from "../types.js";
+import { formatDateToCustomString } from "../utils/dateFormatter.js";
+import { playCheckInSound } from "../utils/soundSynth.js";
+import { Volume2 } from "lucide-react";
+import CustomSelect from "./CustomSelect";
+import CustomDatePicker from "./CustomDatePicker";
+import CustomTimePicker from "./CustomTimePicker";
+import { useAdminViewModel } from "../viewmodels/useAdminViewModel.js";
+import { IMAGES } from "../assets/assets.js";
+
+function getLocalDateString(dateInput?: Date): string {
+  const d = dateInput || new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseLocalDate(dateStr: string): Date {
+  const parts = dateStr.split("-").map(Number);
+  return new Date(parts[0], parts[1] - 1, parts[2]);
+}
+
+interface AdminDashboardProps {
+  user: any;
+  tenant: any;
+  subscription: any;
+  initialSettings: any;
+  translations: any;
+  onLogout: () => void;
+  onNotifyAdmin: (title: string, msg: string) => void;
+  onSettingsChange?: (newSettings: any) => void;
+  onSubscriptionChange?: (newSubscription: any) => void;
+}
+
+const generateBezierPaths = (
+  pts: { x: number; y: number }[],
+  yFloor: number,
+) => {
+  if (pts.length === 0) return { strokeD: "", fillD: "" };
+  let strokeD = `M ${pts[0].x},${pts[0].y}`;
+  let curves = "";
+  for (let i = 1; i < pts.length; i++) {
+    const prev = pts[i - 1];
+    const curr = pts[i];
+    const cp1x = prev.x + (curr.x - prev.x) / 3;
+    const cp1y = prev.y;
+    const cp2x = curr.x - (curr.x - prev.x) / 3;
+    const cp2y = curr.y;
+    curves += ` C ${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${curr.x.toFixed(1)},${curr.y.toFixed(1)}`;
+  }
+  strokeD += curves;
+  const fillD = `M ${pts[0].x.toFixed(1)},${yFloor} L ${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}${curves} L ${pts[pts.length - 1].x.toFixed(1)},${yFloor} Z`;
+  return { strokeD, fillD };
+};
+
+export default function AdminDashboard({
+  user,
+  tenant,
+  subscription: initialSub,
+  initialSettings,
+  translations,
+  onLogout,
+  onNotifyAdmin,
+  onSettingsChange,
+  onSubscriptionChange,
+}: AdminDashboardProps) {
+  const [showSplash, setShowSplash] = React.useState(true);
+  React.useEffect(() => {
+    const timer = setTimeout(() => setShowSplash(false), 1500);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const {
+    activeTab,
+    setActiveTab,
+    workers,
+    attendanceRecords,
+    permissions,
+    departments,
+    leadHistory,
+    settings,
+    setSettings,
+    subscription,
+    showSettingsMenu,
+    setShowSettingsMenu,
+    showConfirmLogout,
+    setShowConfirmLogout,
+    activeLeaderModal,
+    setActiveLeaderModal,
+    isDeptManagementExpanded,
+    setIsDeptManagementExpanded,
+    adminPhotoUrl,
+    adminFileInputRef,
+    handleAdminDpUpload,
+    handleAdminDpDelete,
+    companyLogoUrl,
+    companyLogoFileInputRef,
+    handleCompanyLogoUpload,
+    handleCompanyLogoDelete,
+    newDeptName,
+    setNewDeptName,
+    renamingDeptId,
+    setRenamingDeptId,
+    renamingDeptName,
+    setRenamingDeptName,
+    confirmDeleteDeptId,
+    setConfirmDeleteDeptId,
+    filterName,
+    setFilterName,
+    filterDept,
+    setFilterDept,
+    filterStatus,
+    setFilterStatus,
+    filterDateStart,
+    setFilterDateStart,
+    filterDateEnd,
+    setFilterDateEnd,
+    selectedPlanCode,
+    setSelectedPlanCode,
+    gatewaySelected,
+    setGatewaySelected,
+    billingProgress,
+    reportFeedback,
+    showQrModal,
+    setShowQrModal,
+    qrDataUrl,
+    notifications,
+    handleMarkNotifRead,
+    handleMarkAllNotifsRead,
+    handleClearNotifs,
+    handleSaveSettings,
+    handleAddDept,
+    handleRenameDept,
+    handleDeleteDept,
+    handleAssignLead,
+    handleAssignWorkerToDept,
+    handleEvaluatePermission,
+    requestReportCompile,
+    handleBillingRenewalSubmit,
+    formatCompact,
+    filteredLogsList,
+    visitorLogs,
+    setVisitorLogs,
+    rankedLeaderboard,
+    departmentAverages,
+    isDark,
+    calculateWorkerAttendanceMetrics,
+    syncAdminResources,
+  } = useAdminViewModel({
+    user,
+    tenant,
+    initialSub,
+    initialSettings,
+    translations,
+    onNotifyAdmin,
+    onSettingsChange,
+    onSubscriptionChange,
+  });
+
+  const [showAdminNotifDrawer, setShowAdminNotifDrawer] = React.useState(false);
+
+  const [expandedPhotoUrl, setExpandedPhotoUrl] = React.useState<string | null>(null);
+
+  const [selectedNotificationDetail, setSelectedNotificationDetail] = React.useState<any>(null);
+
+  const [localSettings, setLocalSettings] = React.useState<any>(null);
+  
+  // Custom states for newly requested features
+  const [profilesViewMode, setProfilesViewMode] = React.useState<"card" | "list">("card");
+  const [permissionsViewMode, setPermissionsViewMode] = React.useState<"card" | "list">("card");
+  const [deptConfirmModal, setDeptConfirmModal] = React.useState<{
+    type: "create" | "rename" | "delete" | "assign_worker";
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  } | null>(null);
+
+  const [showAddWorkerModal, setShowAddWorkerModal] = React.useState(false);
+  const [showEditWorkerModal, setShowEditWorkerModal] = React.useState<any | null>(null);
+  const [activeSummaryTab, setActiveSummaryTab] = React.useState<"info" | "analytics" | "hours" | "history" | "actions">("info");
+  const [calendarViewYear, setCalendarViewYear] = React.useState(new Date().getFullYear());
+  const [calendarViewMonth, setCalendarViewMonth] = React.useState(new Date().getMonth());
+  const [selectedCalendarDay, setSelectedCalendarDay] = React.useState<any>(null);
+  const [showManageDeptModal, setShowManageDeptModal] = React.useState(false);
+  const [localNewDeptName, setLocalNewDeptName] = React.useState("");
+  const [assignWorkerId, setAssignWorkerId] = React.useState("");
+  const [assignDeptId, setAssignDeptId] = React.useState("");
+
+  // Form states for worker management:
+  const [workerFormFirstName, setWorkerFormFirstName] = React.useState("");
+  const [workerFormLastName, setWorkerFormLastName] = React.useState("");
+  const [workerFormEmail, setWorkerFormEmail] = React.useState("");
+  const [workerFormPhone, setWorkerFormPhone] = React.useState("");
+  const [workerFormRole, setWorkerFormRole] = React.useState<any>(UserRole.TEAM_MEMBER);
+  const [workerFormDeptId, setWorkerFormDeptId] = React.useState("");
+  const [workerFormGender, setWorkerFormGender] = React.useState("Not Specified");
+  const [workerFormActivityDays, setWorkerFormActivityDays] = React.useState<{[key: string]: boolean}>({});
+
+  const [leadModalDeptId, setLeadModalDeptId] = React.useState("");
+  const [isAssignDropdownOpen, setIsAssignDropdownOpen] = React.useState(false);
+
+  React.useEffect(() => {
+    if (activeLeaderModal) {
+      setLeadModalDeptId(activeLeaderModal.department_id || "");
+      setActiveSummaryTab("info");
+      setModalTimeframe("daily");
+      setCalendarViewYear(new Date().getFullYear());
+      setCalendarViewMonth(new Date().getMonth());
+      setSelectedCalendarDay(null);
+    } else {
+      setLeadModalDeptId("");
+    }
+    setIsAssignDropdownOpen(false);
+  }, [activeLeaderModal]);
+
+  // Double Confirmation state:
+  const [doubleConfirmState, setDoubleConfirmState] = React.useState<{
+    step: 1 | 2;
+    title: string;
+    message: string;
+    actionType?: "add" | "update" | "delete" | string;
+    payload?: any;
+    onConfirm: () => void;
+  } | null>(null);
+
+  // Custom Time wheel selection:
+  const [isCustomWheelOpen, setIsCustomWheelOpen] = React.useState(false);
+
+  // Location Proximity Scanner state:
+  const [isRadarScanning, setIsRadarScanning] = React.useState(false);
+  const [radarResult, setRadarResult] = React.useState<any>(null);
+
+  const [isGatewayWorkspaceSelected, setIsGatewayWorkspaceSelected] =
+    React.useState(false);
+  const [analyticsViewTab, setAnalyticsViewTab] = React.useState<"workers" | "departments">(
+    "workers",
+  );
+  const [hoveredIdx, setHoveredIdx] = React.useState<number | null>(null);
+  
+  // Responsive chart sizing
+  const [chartDimensions, setChartDimensions] = React.useState({ width: 500, height: 290 });
+  const chartContainerRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!chartContainerRef.current) return;
+    const observer = new ResizeObserver((entries) => {
+      for (let entry of entries) {
+        const { width, height } = entry.contentRect;
+        setChartDimensions({
+          width: width || 500,
+          height: height || 290,
+        });
+      }
+    });
+    observer.observe(chartContainerRef.current);
+    return () => observer.disconnect();
+  }, []);
+  const [chartViewMode, setChartViewMode] = React.useState<"bar" | "line">(
+    "line",
+  );
+  const [showResetLogoConfirm, setShowResetLogoConfirm] = React.useState(false);
+  const [showClearNotifsConfirm, setShowClearNotifsConfirm] = React.useState(false);
+  const [showUploadLogoConfirm, setShowUploadLogoConfirm] =
+    React.useState(false);
+  const [selectedLogoFile, setSelectedLogoFile] = React.useState<File | null>(
+    null,
+  );
+  const [timeframe, setTimeframe] = React.useState<
+    "daily" | "weekly" | "monthly" | "yearly"
+  >("daily");
+
+  const [analyticsSearchQuery, setAnalyticsSearchQuery] = React.useState("");
+  const [permissionsSearchQuery, setPermissionsSearchQuery] =
+    React.useState("");
+  const [profilesSearchQuery, setProfilesSearchQuery] = React.useState("");
+  const [permissionsQueryTab, setPermissionsQueryTab] = React.useState<
+    "all" | "pending" | "approved" | "rejected"
+  >("all");
+
+  const totalPendingPermissions = React.useMemo(() => {
+    return permissions.filter((p: any) => (p.status || "").toLowerCase() === "pending").length;
+  }, [permissions]);
+
+  const [leaderboardView, setLeaderboardView] = React.useState<
+    "worker" | "department"
+  >("worker");
+  const [selectedLeaderboardWorker, setSelectedLeaderboardWorker] =
+    React.useState<any | null>(null);
+  const [selectedLeaderboardDept, setSelectedLeaderboardDept] = React.useState<
+    any | null
+  >(null);
+  const [modalTimeframe, setModalTimeframe] = React.useState<
+    "daily" | "weekly" | "monthly" | "yearly"
+  >("daily");
+
+  const getPersonalWorkerMetrics = React.useCallback(
+    (worker: any, tf: "daily" | "weekly" | "monthly" | "yearly" | "cumulative" = "monthly") => {
+      if (!worker) {
+        return {
+          expectedDays: 0,
+          attendedDays: 0,
+          lateCount: 0,
+          onTimeCount: 0,
+          approvedPermissionDays: 0,
+          absentDays: 0,
+          inactiveDays: 0,
+          overdueDays: 0,
+          attendancePercentage: 0,
+          availabilityPercentage: 0,
+          performancePercentage: 0,
+          workHours: 0
+        };
+      }
+
+      // 1. Worker registration date
+      const regDateStr = worker.createdAt ? worker.createdAt.substring(0, 10) : "2026-06-11";
+      const registrationDate = new Date(regDateStr);
+
+      // 2. Worker active work days
+      const activeDays = worker.activityDays || settings?.activityDays || {
+        Monday: true,
+        Tuesday: true,
+        Wednesday: true,
+        Thursday: true,
+        Friday: true,
+        Saturday: false,
+        Sunday: false
+      };
+
+      const dayOfWeekNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+      const latestDateStr = attendanceRecords.reduce(
+        (max, r) => (r.date > max ? r.date : max),
+        "2026-07-04"
+      );
+      const latestDate = new Date(latestDateStr);
+
+      // Determine date range based on calendar period tf
+      let startDate: Date;
+      let endDate: Date;
+
+      if (tf === "daily") {
+        startDate = new Date(latestDateStr);
+        endDate = new Date(latestDateStr);
+      } else if (tf === "weekly") {
+        // Sunday to Saturday of the calendar week containing latestDate
+        const day = latestDate.getDay();
+        startDate = new Date(latestDate);
+        startDate.setDate(latestDate.getDate() - day);
+        endDate = new Date(startDate);
+        endDate.setDate(startDate.getDate() + 6);
+      } else if (tf === "monthly") {
+        // Precise calendar month of latestDate
+        startDate = new Date(latestDate.getFullYear(), latestDate.getMonth(), 1);
+        endDate = new Date(latestDate.getFullYear(), latestDate.getMonth() + 1, 0); // last day of month
+      } else if (tf === "yearly") {
+        // Calendar year of latestDate
+        startDate = new Date(latestDate.getFullYear(), 0, 1);
+        endDate = new Date(latestDate.getFullYear(), 11, 31);
+      } else { // cumulative
+        startDate = new Date(registrationDate);
+        endDate = new Date(latestDate);
+      }
+
+      // Align times
+      startDate.setHours(0, 0, 0, 0);
+      endDate.setHours(23, 59, 59, 999);
+
+      // Adjust start range to not be earlier than registration date
+      if (startDate < registrationDate) {
+        startDate = new Date(registrationDate);
+        startDate.setHours(0, 0, 0, 0);
+      }
+
+      let expectedDays = 0;
+      let attendedDays = 0;
+      let lateCount = 0;
+      let onTimeCount = 0;
+      let approvedPermissionDays = 0;
+      let inactiveDaysCount = 0;
+      let absentDays = 0;
+      let totalCoveredSeconds = 0;
+
+      const todayStr = getLocalDateString();
+
+      const cur = new Date(startDate);
+      while (cur <= endDate) {
+        const dateStr = getLocalDateString(cur);
+        const dayName = dayOfWeekNames[cur.getDay()];
+        const isActiveWorkDay = activeDays[dayName] === true;
+        const isEmployed = dateStr >= regDateStr;
+
+        const hasPermission = permissions.some(p => 
+          p.worker_id === worker.id && 
+          (p.status || "").toLowerCase() === "approved" && 
+          p.startDate <= dateStr && 
+          p.endDate >= dateStr
+        );
+
+        const atts = attendanceRecords.filter(r => r.worker_id === worker.id && r.date === dateStr);
+        const hasSuccessfulCheckin = atts.length > 0 && atts.some(r => 
+          r.statusIn === "PRESENT" || r.statusIn === "present" || 
+          r.statusIn === "LATE" || r.statusIn === "late"
+        );
+
+        if (!isEmployed) {
+          // Inactive Days represent dates before employment
+          inactiveDaysCount++;
+        } else {
+          // Worker is employed
+          if (hasPermission) {
+            // Approved Exemptions reduce expected attendance
+            if (isActiveWorkDay) {
+              approvedPermissionDays++;
+            }
+          } else if (isActiveWorkDay) {
+            // Expected Work Days
+            expectedDays++;
+          }
+        }
+
+        // Attendance check
+        if (hasSuccessfulCheckin) {
+          attendedDays++;
+          if (atts.some(r => r.statusIn === "LATE" || r.statusIn === "late")) {
+            lateCount++;
+          } else if (atts.some(r => r.statusIn === "PRESENT" || r.statusIn === "present")) {
+            onTimeCount++;
+          }
+
+          // Calculate hours worked for this day from Punch History
+          const r = atts[0];
+          let hoursWorked = 0;
+          if (r.timeIn && r.timeOut) {
+            const [h1, m1, s1] = r.timeIn.split(":").map(Number);
+            const [h2, m2, s2] = r.timeOut.split(":").map(Number);
+            const sIn = h1 * 3600 + m1 * 60 + (s1 || 0);
+            const sOut = h2 * 3600 + m2 * 60 + (s2 || 0);
+            if (sOut > sIn) {
+              hoursWorked = (sOut - sIn) / 3600;
+            } else if (r.coveredTime) {
+              hoursWorked = r.coveredTime / 3600;
+            } else {
+              hoursWorked = 0;
+            }
+          } else if (r.coveredTime) {
+            hoursWorked = r.coveredTime / 3600;
+          } else {
+            hoursWorked = 0;
+          }
+          totalCoveredSeconds += hoursWorked * 3600;
+        } else {
+          // No attendance
+          if (isEmployed && isActiveWorkDay && !hasPermission) {
+            absentDays++;
+          }
+        }
+
+        cur.setDate(cur.getDate() + 1);
+      }
+
+      const performancePercentage = expectedDays > 0 
+        ? Math.min(100, Number(((attendedDays / expectedDays) * 100).toFixed(2))) 
+        : 100.00;
+
+      const attendancePercentage = expectedDays > 0 
+        ? Math.min(100, Number(((attendedDays / expectedDays) * 100).toFixed(2))) 
+        : 100.00;
+
+      const availabilityPercentage = (expectedDays + approvedPermissionDays) > 0 
+        ? Math.min(100, Number((((attendedDays + approvedPermissionDays) / (expectedDays + approvedPermissionDays)) * 100).toFixed(2))) 
+        : 100.00;
+
+      const workHours = Number((totalCoveredSeconds / 3600).toFixed(2));
+
+      return {
+        expectedDays,
+        attendedDays,
+        lateCount,
+        onTimeCount,
+        approvedPermissionDays,
+        absentDays,
+        inactiveDays: inactiveDaysCount,
+        overdueDays: inactiveDaysCount, // keep as fallback
+        attendancePercentage,
+        availabilityPercentage,
+        performancePercentage,
+        workHours,
+        registrationDate: regDateStr,
+        activeDays
+      };
+    },
+    [attendanceRecords, permissions, settings]
+  );
+
+  const calculateMetricsForTimeframe = React.useCallback(
+    (workerId: string, tf: "daily" | "weekly" | "monthly" | "yearly") => {
+      const w = workers.find(x => x.id === workerId);
+      const m = getPersonalWorkerMetrics(w, tf);
+      return {
+        present: m.attendedDays,
+        late: m.lateCount,
+        exempt: m.approvedPermissionDays,
+        perf: m.performancePercentage,
+        eligible: m.expectedDays
+      };
+    },
+    [workers, getPersonalWorkerMetrics]
+  );
+
+  const rankedLeaderboardForTimeframe = React.useMemo(() => {
+    const list = workers
+      .filter((w) => w.role !== UserRole.COMPANY_ADMIN)
+      .map((w) => {
+        const stats = calculateMetricsForTimeframe(w.id, timeframe);
+        const deptLabel =
+          departments.find((d) => d.id === w.department_id)?.name ||
+          "Unassigned";
+        return {
+          ...w,
+          deptLabel,
+          perf: stats.perf,
+          present: stats.present,
+          late: stats.late,
+          exempt: stats.exempt,
+        };
+      });
+    return list.sort((a, b) => b.perf - a.perf);
+  }, [workers, departments, timeframe, calculateMetricsForTimeframe]);
+
+  const departmentAveragesForTimeframe = React.useMemo(() => {
+    return departments.map((d) => {
+      const unitWorkers = workers.filter((w) => w.department_id === d.id);
+      if (unitWorkers.length === 0) return { ...d, avg: 0 };
+      const sum = unitWorkers.reduce((acc, curr) => {
+        return acc + calculateMetricsForTimeframe(curr.id, timeframe).perf;
+      }, 0);
+      const avg = Number((sum / unitWorkers.length).toFixed(2));
+      return {
+        ...d,
+        avg,
+      };
+    });
+  }, [departments, workers, timeframe, calculateMetricsForTimeframe]);
+
+  const rankedDepartmentsForTimeframe = React.useMemo(() => {
+    return departmentAveragesForTimeframe
+      .map((d) => {
+        const leadUser = workers.find((w) => w.id === d.leadId);
+        const teamSize = workers.filter((w) => w.department_id === d.id).length;
+        return {
+          ...d,
+          leadName: leadUser
+            ? `${leadUser.firstName} ${leadUser.lastName}`
+            : "No Lead Assigned",
+          teamSize,
+        };
+      })
+      .sort((a, b) => b.avg - a.avg);
+  }, [departmentAveragesForTimeframe, workers]);
+
+  const filteredLeaderboardForTimeframe = React.useMemo(() => {
+    if (!analyticsSearchQuery.trim()) return rankedLeaderboardForTimeframe;
+    const q = analyticsSearchQuery.toLowerCase();
+    return rankedLeaderboardForTimeframe.filter((w) => {
+      const first = w.firstName || "";
+      const last = w.lastName || "";
+      const dept = w.deptLabel || "";
+      return (
+        first.toLowerCase().includes(q) ||
+        last.toLowerCase().includes(q) ||
+        dept.toLowerCase().includes(q)
+      );
+    });
+  }, [rankedLeaderboardForTimeframe, analyticsSearchQuery]);
+
+  const filteredDepartmentsForTimeframe = React.useMemo(() => {
+    if (!analyticsSearchQuery.trim()) return rankedDepartmentsForTimeframe;
+    const q = analyticsSearchQuery.toLowerCase();
+    return rankedDepartmentsForTimeframe.filter((d) => {
+      const name = d.name || "";
+      const lead = d.leadName || "";
+      return name.toLowerCase().includes(q) || lead.toLowerCase().includes(q);
+    });
+  }, [rankedDepartmentsForTimeframe, analyticsSearchQuery]);
+
+  const filteredWorkersForProfiles = React.useMemo(() => {
+    const list = workers.filter((w) => w.role !== UserRole.COMPANY_ADMIN);
+    if (!profilesSearchQuery.trim()) return list;
+    const q = profilesSearchQuery.toLowerCase();
+    return list.filter((w) => {
+      const deptLabel =
+        departments.find((d) => d.id === w.department_id)?.name || "";
+      const first = w.firstName || "";
+      const last = w.lastName || "";
+      const title = w.title || "";
+      const phone = w.phone || "";
+      return (
+        first.toLowerCase().includes(q) ||
+        last.toLowerCase().includes(q) ||
+        title.toLowerCase().includes(q) ||
+        deptLabel.toLowerCase().includes(q) ||
+        phone.toLowerCase().includes(q)
+      );
+    });
+  }, [workers, profilesSearchQuery, departments]);
+
+  const groupedLogs = React.useMemo(() => {
+    const groups: { [date: string]: typeof filteredLogsList } = {};
+    filteredLogsList.forEach((r) => {
+      if (!groups[r.date]) {
+        groups[r.date] = [];
+      }
+      groups[r.date].push(r);
+    });
+    return Object.keys(groups)
+      .sort((a, b) => b.localeCompare(a))
+      .map((date) => ({
+        date,
+        records: groups[date],
+      }));
+  }, [filteredLogsList]);
+
+  const dateIntervals = React.useMemo(() => {
+    // Find latest date in attendanceRecords to anchor our timeline, fallback to "2026-06-29"
+    const latestDateStr = attendanceRecords.reduce(
+      (max, r) => (r.date > max ? r.date : max),
+      "2026-06-29",
+    );
+    const latestDate = parseLocalDate(latestDateStr);
+
+    let intervals: { label: string; startDate: string; endDate: string; displayDate: string }[] = [];
+
+    if (timeframe === "daily") {
+      // 7 days ending on latestDate
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(latestDate);
+        d.setDate(d.getDate() - (6 - i));
+        const dateStr = getLocalDateString(d);
+        intervals.push({
+          label: dateStr,
+          startDate: dateStr,
+          endDate: dateStr,
+          displayDate: dateStr,
+        });
+      }
+    } else if (timeframe === "weekly") {
+      // 6 weeks ending on latestDate
+      for (let i = 0; i < 6; i++) {
+        const dEnd = new Date(latestDate);
+        dEnd.setDate(dEnd.getDate() - (5 - i) * 7);
+        const dStart = new Date(dEnd);
+        dStart.setDate(dStart.getDate() - 6);
+        
+        const endStr = getLocalDateString(dEnd);
+        const startStr = getLocalDateString(dStart);
+        intervals.push({
+          label: `Week ${i + 1}`,
+          startDate: startStr,
+          endDate: endStr,
+          displayDate: endStr,
+        });
+      }
+    } else if (timeframe === "monthly") {
+      // 6 months ending on latestDate
+      for (let i = 0; i < 6; i++) {
+        const d = new Date(latestDate.getFullYear(), latestDate.getMonth() - (5 - i), 15);
+        const startOfMonth = new Date(d.getFullYear(), d.getMonth(), 1);
+        const endOfMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+        
+        intervals.push({
+          label: d.toLocaleString('en-US', { month: 'short' }),
+          startDate: getLocalDateString(startOfMonth),
+          endDate: getLocalDateString(endOfMonth),
+          displayDate: getLocalDateString(startOfMonth),
+        });
+      }
+    } else if (timeframe === "yearly") {
+      // 6 bi-months ending on latestDate
+      for (let i = 0; i < 6; i++) {
+        const d = new Date(latestDate.getFullYear(), latestDate.getMonth() - (5 - i) * 2, 15);
+        const startOfBiMonth = new Date(d.getFullYear(), d.getMonth(), 1);
+        const endOfBiMonth = new Date(d.getFullYear(), d.getMonth() + 2, 0);
+        
+        intervals.push({
+          label: d.getFullYear().toString(),
+          startDate: getLocalDateString(startOfBiMonth),
+          endDate: getLocalDateString(endOfBiMonth),
+          displayDate: getLocalDateString(startOfBiMonth),
+        });
+      }
+    }
+
+    return intervals;
+  }, [attendanceRecords, timeframe]);
+
+  const formatGraphDateLabel = React.useCallback((dateStr: string): string => {
+    if (!dateStr) return "";
+    try {
+      const parts = dateStr.split("-");
+      if (parts.length === 3) {
+        const monthIdx = parseInt(parts[1], 10) - 1;
+        const day = parseInt(parts[2], 10);
+        const shortMonths = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        const monthStr = shortMonths[monthIdx] || "Jan";
+        return `${monthStr} ${day}`;
+      }
+      const d = new Date(dateStr);
+      if (!isNaN(d.getTime())) {
+        const shortMonths = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        return `${shortMonths[d.getMonth()]} ${d.getDate()}`;
+      }
+      return dateStr;
+    } catch (e) {
+      return dateStr;
+    }
+  }, []);
+
+  const workerTrendData = React.useMemo(() => {
+    return dateIntervals.map((interval, idx) => {
+      const records = attendanceRecords.filter(
+        (r) => r.date >= interval.startDate && r.date <= interval.endDate
+      );
+
+      let perf = 0;
+      let totalCount = records.length;
+
+      if (totalCount > 0) {
+        const onTime = records.filter(
+          (r) => r.statusIn === AttendanceStatus.PRESENT,
+        ).length;
+        perf = Math.round((onTime / totalCount) * 100);
+      }
+
+      return {
+        date: interval.displayDate,
+        dateLabel: formatGraphDateLabel(interval.displayDate),
+        workerCount: totalCount,
+        perf: perf,
+      };
+    });
+  }, [dateIntervals, attendanceRecords, formatGraphDateLabel]);
+
+  const deptTrendData = React.useMemo(() => {
+    return dateIntervals.map((interval, idx) => {
+      const records = attendanceRecords.filter(
+        (r) => r.date >= interval.startDate && r.date <= interval.endDate
+      );
+
+      let perf = 0;
+      if (records.length > 0) {
+        const onTime = records.filter(
+          (r) => r.statusIn === AttendanceStatus.PRESENT,
+        ).length;
+        perf = Math.round((onTime / records.length) * 100);
+      }
+
+      return {
+        date: interval.displayDate,
+        dateLabel: formatGraphDateLabel(interval.displayDate),
+        workerCount: records.length,
+        perf: perf,
+      };
+    });
+  }, [dateIntervals, attendanceRecords, formatGraphDateLabel]);
+
+  const filteredPermissions = React.useMemo(() => {
+    return permissions.filter((p) => {
+      // 1. Filter by query tab (All, Pending, Approved, Rejected)
+      if (permissionsQueryTab !== "all") {
+        if ((p.status || "").toLowerCase() !== permissionsQueryTab) {
+          return false;
+        }
+      }
+
+      // 2. Filter by search query
+      if (!permissionsSearchQuery.trim()) return true;
+      const q = permissionsSearchQuery.toLowerCase();
+      const targetUser = workers.find((w) => w.id === p.worker_id);
+      if (!targetUser) return false;
+      const deptName =
+        departments.find((d) => d.id === targetUser.department_id)?.name || "";
+      const first = targetUser.firstName || "";
+      const last = targetUser.lastName || "";
+      const remarks = p.remarks || "";
+      const pDate = p.date || "";
+
+      return (
+        first.toLowerCase().includes(q) ||
+        last.toLowerCase().includes(q) ||
+        deptName.toLowerCase().includes(q) ||
+        remarks.toLowerCase().includes(q) ||
+        pDate.includes(q)
+      );
+    });
+  }, [
+    permissions,
+    permissionsQueryTab,
+    permissionsSearchQuery,
+    workers,
+    departments,
+  ]);
+
+  React.useEffect(() => {
+    if (showSettingsMenu && settings) {
+      const cloned = JSON.parse(JSON.stringify(settings));
+      if (!cloned.dailyShiftTimes) {
+        cloned.dailyShiftTimes = {};
+      }
+      if (!cloned.dailyShiftOutTimes) {
+        cloned.dailyShiftOutTimes = {};
+      }
+      [
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+      ].forEach((day) => {
+        if (!cloned.dailyShiftTimes[day]) {
+          cloned.dailyShiftTimes[day] = cloned.checkIn?.time || "08:00";
+        }
+        if (!cloned.dailyShiftOutTimes[day]) {
+          cloned.dailyShiftOutTimes[day] = cloned.checkOut?.time || "17:00";
+        }
+      });
+      setLocalSettings(cloned);
+    } else {
+      setLocalSettings(null);
+    }
+  }, [showSettingsMenu, settings]);
+
+  React.useEffect(() => {
+    if (activeTab === "permissions" || activeTab === "profiles") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }, [activeTab]);
+
+  const tabRowRef = useRef<HTMLDivElement>(null);
+  const summaryTabRowRef = useRef<HTMLDivElement>(null);
+  const adminPunchHistoryRef = useRef<HTMLDivElement>(null);
+  const attendanceTableContainerRef = useRef<HTMLDivElement>(null);
+  const leaderboardTableContainerRef = useRef<HTMLDivElement>(null);
+  const workerGraphContainerRef = useRef<HTMLDivElement>(null);
+  const deptGraphContainerRef = useRef<HTMLDivElement>(null);
+  const graphContainerRef = useRef<HTMLDivElement>(null);
+
+  const scrollContainer = (
+    ref: React.RefObject<HTMLDivElement | null>,
+    direction: "left" | "right",
+  ) => {
+    if (ref.current) {
+      const amount = direction === "left" ? -280 : 280;
+      ref.current.scrollBy({ left: amount, behavior: "smooth" });
+    }
+  };
+
+  const handleNextTab = () => {
+    const tabs: (
+      "attendance" | "analytics" | "permissions" | "profiles" | "billing"
+    )[] = ["attendance", "analytics", "permissions", "profiles", "billing"];
+    const currentIdx = tabs.indexOf(activeTab);
+    const nextIdx = (currentIdx + 1) % tabs.length;
+    setActiveTab(tabs[nextIdx]);
+    if (tabRowRef.current) {
+      const el = tabRowRef.current;
+      const step = el.scrollWidth / tabs.length;
+      el.scrollTo({ left: step * nextIdx - 40, behavior: "smooth" });
+    }
+  };
+
+  const handlePrevTab = () => {
+    const tabs: (
+      "attendance" | "analytics" | "permissions" | "profiles" | "billing"
+    )[] = ["attendance", "analytics", "permissions", "profiles", "billing"];
+    const currentIdx = tabs.indexOf(activeTab);
+    const prevIdx = (currentIdx - 1 + tabs.length) % tabs.length;
+    setActiveTab(tabs[prevIdx]);
+    if (tabRowRef.current) {
+      const el = tabRowRef.current;
+      const step = el.scrollWidth / tabs.length;
+      el.scrollTo({ left: step * prevIdx - 40, behavior: "smooth" });
+    }
+  };
+
+  const handleNextSummaryTab = () => {
+    const tabs: ("info" | "analytics" | "hours" | "history" | "actions")[] = [
+      "info", "analytics", "hours", "history", "actions"
+    ];
+    const currentIdx = tabs.indexOf(activeSummaryTab);
+    const nextIdx = (currentIdx + 1) % tabs.length;
+    setActiveSummaryTab(tabs[nextIdx]);
+    if (summaryTabRowRef.current) {
+      const el = summaryTabRowRef.current;
+      const step = el.scrollWidth / tabs.length;
+      el.scrollTo({ left: step * nextIdx - 40, behavior: "smooth" });
+    }
+  };
+
+  const handlePrevSummaryTab = () => {
+    const tabs: ("info" | "analytics" | "hours" | "history" | "actions")[] = [
+      "info", "analytics", "hours", "history", "actions"
+    ];
+    const currentIdx = tabs.indexOf(activeSummaryTab);
+    const prevIdx = (currentIdx - 1 + tabs.length) % tabs.length;
+    setActiveSummaryTab(tabs[prevIdx]);
+    if (summaryTabRowRef.current) {
+      const el = summaryTabRowRef.current;
+      const step = el.scrollWidth / tabs.length;
+      el.scrollTo({ left: step * prevIdx - 40, behavior: "smooth" });
+    }
+  };
+
+  const theme = settings?.theme || "dark";
+
+  const adminThemeClass = React.useMemo(() => {
+    switch (theme) {
+      case "army":
+        return {
+          bg: "bg-[#141C10] text-[#E5F3DD]",
+          navBg: "bg-[#182313]/90 border-[#2C3E25]",
+          cardBg: "bg-[#182413] border-[#2D3E24]",
+          innerBg: "bg-[#25361E] border-[#374C2E]",
+          textTitle: "text-[#E6F4DE]",
+          textMuted: "text-[#A1C094]",
+          accentText: "text-emerald-400",
+          accentBorder: "border-[#4A633F]",
+          buttonSelected:
+            "bg-[#25361E] text-emerald-450 border border-[#436134]",
+          tableRowHover: "hover:bg-[#1E2E18]/50 border-[#2C3E25]",
+          tableRowDivider: "divide-[#2D3E24] border-[#2D3E24]",
+          inputBg:
+            "bg-[#182413] focus:bg-[#1E2C18] text-[#E5F3DD] border-[#2D3E24]",
+        };
+      case "navy":
+        return {
+          bg: "bg-[#0B132B] text-[#E1E8F0]",
+          navBg: "bg-[#111A35]/90 border-[#1B2952]",
+          cardBg: "bg-[#111A31] border-[#1C2B54]",
+          innerBg: "bg-[#243361] border-[#233566]",
+          textTitle: "text-[#ECEFF4]",
+          textMuted: "text-[#94A5C1]",
+          accentText: "text-cyan-400",
+          accentBorder: "border-[#20315F]",
+          buttonSelected: "bg-[#243361] text-cyan-455 border border-[#34498C]",
+          tableRowHover: "hover:bg-[#152244]/50 border-[#1C2B54]",
+          tableRowDivider: "divide-[#1C2B54] border-[#1C2B54]",
+          inputBg:
+            "bg-[#111A31] focus:bg-[#162342] text-[#E1E8F0] border-[#1C2B54]",
+        };
+      case "dark":
+        return {
+          bg: "bg-[#0A0A0A] text-[#E5E5E5]",
+          navBg: "bg-[#0D0D0D]/90 border-[#262626]",
+          cardBg: "bg-[#0D0D0D] border-[#262626]",
+          innerBg: "bg-[#1A1A1A] border-[#262626]",
+          textTitle: "text-white",
+          textMuted: "text-neutral-400",
+          accentText: "text-cyan-400",
+          accentBorder: "border-[#262626]",
+          buttonSelected: "bg-[#1A1A1A] text-cyan-400 border border-[#333]",
+          tableRowHover: "hover:bg-[#121212]/50 border-[#262626]",
+          tableRowDivider: "divide-[#262626] border-[#262626]",
+          inputBg: "bg-[#111] focus:bg-[#151515] text-white border-[#262626]",
+        };
+      case "light":
+      default:
+        return {
+          bg: "bg-neutral-50 text-neutral-800",
+          navBg: "bg-white/90 border-neutral-200",
+          cardBg: "bg-white border-neutral-200 shadow-sm",
+          innerBg: "bg-neutral-50 border-neutral-200",
+          textTitle: "text-slate-900",
+          textMuted: "text-slate-600",
+          accentText: "text-cyan-600",
+          accentBorder: "border-neutral-200",
+          buttonSelected:
+            "bg-white text-cyan-600 shadow-xs border border-neutral-200",
+          tableRowHover: "hover:bg-neutral-50/50 border-neutral-200",
+          tableRowDivider: "divide-neutral-200/60 border-neutral-200/60",
+          inputBg:
+            "bg-neutral-50 focus:bg-white text-slate-900 border-neutral-300",
+        };
+    }
+  }, [theme]);
+
+  return (
+    <div
+      className={`min-h-screen flex flex-col font-sans select-none pb-20 justify-start transition-colors duration-300 ${adminThemeClass.bg}`}
+    >
+      {/* Upper Navigation Bar */}
+      <nav
+        className={`px-6 py-4 border-b backdrop-blur-md flex items-center justify-between sticky top-0 z-30 shadow-xl transition-colors duration-300 ${adminThemeClass.navBg}`}
+      >
+        <div className="flex items-center space-x-3 select-none min-w-0">
+          <div className="h-10 w-10 bg-gradient-to-r from-cyan-500 to-blue-600 rounded-xl flex items-center justify-center text-white overflow-hidden shadow-lg shadow-cyan-950/45 transition-all select-none shrink-0">
+            {companyLogoUrl ? (
+              <img
+                src={companyLogoUrl}
+                alt="Company Logo"
+                className="h-full w-full object-cover select-none pointer-events-none"
+              />
+            ) : (
+              <Shield className="h-5 w-5" />
+            )}
+          </div>
+          <div className="min-w-0">
+            <h1
+              className={`font-display font-bold text-xs sm:text-sm md:text-base leading-tight whitespace-nowrap truncate max-w-[120px] sm:max-w-[200px] md:max-w-xs ${adminThemeClass.textTitle}`}
+              title={tenant.name}
+            >
+              {tenant.name}
+            </h1>
+            <p
+              className={`text-[9px] sm:text-[10px] font-mono tracking-wide whitespace-nowrap truncate max-w-[120px] sm:max-w-[200px] md:max-w-xs ${adminThemeClass.textMuted}`}
+            >
+              Admin Portal
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center space-x-3">
+          {/* Notification Broadcaster Button */}
+          <div className="relative">
+            <button
+              id="admin_open_notifications"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowAdminNotifDrawer(!showAdminNotifDrawer);
+              }}
+              className={`h-9 w-9 sm:h-10 sm:w-10 rounded-xl border flex items-center justify-center cursor-pointer transition-all relative ${adminThemeClass.inputBg}`}
+              title="System Notifications"
+            >
+              <Bell className="h-4 w-4 text-cyan-400" />
+              {notifications.filter((n: any) => !n.read).length > 0 && (
+                <span className="absolute -top-1 -right-1 h-3.5 w-3.5 rounded-full bg-cyan-500 text-black text-[8px] font-bold flex items-center justify-center shrink-0">
+                  {notifications.filter((n: any) => !n.read).length}
+                </span>
+              )}
+            </button>
+          </div>
+
+          {/* QR Code Action Button Beside Settings */}
+          <button
+            id="admin_open_qr"
+            onClick={() => setShowQrModal(true)}
+            className={`h-9 w-9 sm:h-10 sm:w-10 rounded-xl border flex items-center justify-center cursor-pointer transition-all ${adminThemeClass.inputBg}`}
+            title="Terminal QR Code"
+          >
+            <QrCode className="h-4 w-4 text-cyan-400" />
+          </button>
+
+          <button
+            id="admin_open_settings"
+            onClick={() => setShowSettingsMenu(!showSettingsMenu)}
+            className={`h-9 w-9 sm:h-10 sm:w-10 rounded-xl flex items-center justify-center cursor-pointer border transition-all ${adminThemeClass.inputBg}`}
+            title={translations.settingsTitle}
+          >
+            <Menu className="h-4 w-4 text-cyan-400" />
+          </button>
+        </div>
+      </nav>
+
+      <AnimatePresence>
+        {showAdminNotifDrawer && (
+          <>
+            <div 
+              className="fixed inset-0 z-[9990] cursor-default bg-black/45 backdrop-blur-md" 
+              onClick={() => { 
+                setShowAdminNotifDrawer(false); 
+                setSelectedNotificationDetail(null); 
+              }} 
+            />
+            
+            <div
+              onClick={() => {
+                setShowAdminNotifDrawer(false);
+                setSelectedNotificationDetail(null);
+              }}
+              className="fixed top-20 left-4 right-4 max-h-[calc(100vh-6rem)] md:fixed md:top-20 md:left-auto md:right-6 md:w-auto md:max-h-[calc(100vh-6rem)] flex flex-col md:flex-row-reverse items-stretch md:items-start gap-4 z-[9991] pointer-events-auto overflow-y-auto pr-1"
+            >
+              {/* Mother Modal */}
+              <motion.div
+                initial={{ opacity: 0, y: 12, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 12, scale: 0.95 }}
+                transition={{ duration: 0.15 }}
+                onClick={(e) => e.stopPropagation()}
+                className={`w-full md:w-80 h-[360px] sm:h-[400px] md:h-[420px] rounded-2xl border p-5 shadow-2xl flex flex-col transition-all duration-300 shrink-0 ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle}`}
+              >
+                <div className={`flex items-center justify-between border-b pb-3 mb-4 shrink-0 ${adminThemeClass.accentBorder}`}>
+                  <div className="flex items-center space-x-2">
+                    <Bell className="h-4 w-4 text-cyan-400" />
+                    <span className={`font-display font-bold text-sm ${adminThemeClass.textTitle}`}>Alert Broadcaster</span>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setShowAdminNotifDrawer(false);
+                      setSelectedNotificationDetail(null);
+                    }}
+                    className={`font-light text-xs cursor-pointer ${adminThemeClass.textMuted} hover:${adminThemeClass.textHighlight}`}
+                  >
+                    &times;
+                  </button>
+                </div>
+
+                <div className="space-y-3 overflow-y-auto flex-1 scrollbar-none pr-1">
+                  {notifications.length === 0 ? (
+                    <div className={`py-6 text-center text-xs font-light leading-relaxed ${adminThemeClass.textMuted}`}>
+                      Broadcaster queue is clear. No active alerts.
+                    </div>
+                  ) : (
+                    notifications.map((n: any, idx: number) => {
+                      const isSelected = selectedNotificationDetail?.id === n.id;
+                      return (
+                        <div 
+                          key={idx} 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!n.read) {
+                              handleMarkNotifRead(n.id);
+                            }
+                            setSelectedNotificationDetail(n);
+                          }}
+                          className={`p-3 rounded-xl border flex items-start justify-between space-x-2.5 text-[11px] leading-relaxed transition-all cursor-pointer hover:bg-cyan-500/10 ${
+                            isSelected 
+                              ? `ring-2 ring-cyan-500 ${adminThemeClass.inputBg} ${adminThemeClass.accentBorder}`
+                              : n.read 
+                                ? `${adminThemeClass.inputBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted}` 
+                                : `bg-cyan-500/5 border-cyan-500/20`
+                          }`}
+                        >
+                          <div className="flex-1 min-w-0 font-normal">
+                            <strong className={`block font-semibold mb-0.5 truncate ${adminThemeClass.textTitle}`}>{n.title}</strong>
+                            <p className={n.read ? `${adminThemeClass.textMuted} line-clamp-2` : `${adminThemeClass.textHighlight} font-medium`}>{n.message}</p>
+                            <span className={`block text-[9px] tracking-wider font-mono mt-1.5 ${adminThemeClass.textMuted}`}>{new Date(n.timestamp).toLocaleTimeString()}</span>
+                          </div>
+                          {!n.read && (
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleMarkNotifRead(n.id);
+                                setSelectedNotificationDetail(n);
+                              }}
+                              className={`text-[9px] font-bold hover:underline shrink-0 cursor-pointer text-cyan-400 bg-cyan-500/10 hover:bg-cyan-500/20 px-2 py-0.5 rounded-md`}
+                            >
+                              Read
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                {notifications.length > 0 && (
+                  <div className={`border-t pt-3 mt-3 flex justify-between items-center shrink-0 ${adminThemeClass.accentBorder}`}>
+                    <button
+                      type="button"
+                      onClick={handleMarkAllNotifsRead}
+                      className="text-[10px] font-bold text-cyan-400 hover:text-cyan-300 hover:underline cursor-pointer"
+                    >
+                      Mark All As Read
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAdminNotifDrawer(false);
+                        setSelectedNotificationDetail(null);
+                        setShowClearNotifsConfirm(true);
+                      }}
+                      className="text-[10px] font-bold text-red-400 hover:text-red-300 hover:underline cursor-pointer"
+                    >
+                      Clear All
+                    </button>
+                  </div>
+                )}
+              </motion.div>
+
+              {/* Child Modal (Detail Panel) */}
+              {selectedNotificationDetail && (
+                <motion.div
+                  initial={{ opacity: 0, x: 20, scale: 0.95 }}
+                  animate={{ opacity: 1, x: 0, scale: 1 }}
+                  exit={{ opacity: 0, x: 20, scale: 0.95 }}
+                  transition={{ duration: 0.15 }}
+                  onClick={(e) => e.stopPropagation()}
+                  className={`w-full md:w-80 h-[360px] sm:h-[400px] md:h-[420px] rounded-2xl border p-5 shadow-2xl flex flex-col transition-all duration-300 shrink-0 ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle}`}
+                >
+                  <div className={`flex items-center justify-between border-b pb-3 mb-4 shrink-0 ${adminThemeClass.accentBorder}`}>
+                    <div className="flex items-center space-x-2 text-cyan-400">
+                      <Info className="h-4 w-4" />
+                      <span className="font-display font-bold text-sm">Alert Details</span>
+                    </div>
+                    <button 
+                      onClick={() => setSelectedNotificationDetail(null)} 
+                      className={`font-light text-sm cursor-pointer ${adminThemeClass.textMuted} hover:${adminThemeClass.textHighlight}`}
+                    >
+                      &times;
+                    </button>
+                  </div>
+                  <div className="space-y-3 flex-1 flex flex-col min-h-0">
+                    <h4 className="font-bold text-xs uppercase tracking-wider text-cyan-400 shrink-0 truncate">
+                      {selectedNotificationDetail.title}
+                    </h4>
+                    <div className={`text-xs leading-relaxed font-normal p-3 rounded-xl flex-1 overflow-y-auto whitespace-pre-wrap ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textHighlight}`}>
+                      {selectedNotificationDetail.message}
+                    </div>
+                    <div className={`text-[10px] font-mono border-t pt-2 mt-2 shrink-0 ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted} flex justify-between`}>
+                      <span>Broadcaster Time:</span>
+                      <span>{new Date(selectedNotificationDetail.timestamp).toLocaleTimeString()}</span>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Primary Dashboard Body Grid */}
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-8 select-none">
+        {/* Verification Alert banners */}
+        {subscription?.status === "trial" && (
+          <div className="bg-amber-500 text-white px-5 py-4 rounded-2xl text-xs sm:text-sm font-semibold flex items-center justify-between shadow-xs select-none">
+            <span className="flex items-center space-x-1.5">
+              <span>⚠️</span>
+              <span>{translations.trialRemaining}</span>
+            </span>
+            <button
+              onClick={() => setActiveTab("billing")}
+              className="bg-white text-amber-700 px-4 py-2 rounded-xl text-xs font-bold hover:bg-opacity-90 active:scale-95 transition-all text-center min-h-[44px] flex items-center cursor-pointer"
+            >
+              Verify SaaS Account Billing
+            </button>
+          </div>
+        )}
+
+        {reportFeedback && (
+          <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-4 rounded-xl text-xs font-bold font-mono">
+            🖨️ {reportFeedback}
+          </div>
+        )}
+
+        {/* Dynamic Summary Cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div
+            className={`p-6 rounded-3xl border shadow-xl hover:brightness-110 active:brightness-95 transition-all ${adminThemeClass.cardBg}`}
+          >
+            <span
+              className={`text-[10px] uppercase font-bold tracking-wide flex items-center space-x-1 ${adminThemeClass.textMuted}`}
+            >
+              <Clock className="h-3.5 w-3.5 text-cyan-600 dark:text-cyan-400" />
+              <span>{translations.totCheckins}</span>
+            </span>
+            <h3
+              className={`text-3xl font-display font-bold mt-2 ${adminThemeClass.textTitle}`}
+            >
+              {formatCompact(attendanceRecords.length)}
+            </h3>
+          </div>
+
+          <div
+            className={`p-6 rounded-3xl border shadow-xl hover:brightness-110 active:brightness-95 transition-all ${adminThemeClass.cardBg}`}
+          >
+            <span
+              className={`text-[10px] uppercase font-bold tracking-wide flex items-center space-x-1 ${adminThemeClass.textMuted}`}
+            >
+              <Users className="h-3.5 w-3.5 text-teal-600 dark:text-teal-400" />
+              <span>{translations.activeToday}</span>
+            </span>
+            <h3
+              className={`text-3xl font-display font-bold mt-2 ${adminThemeClass.textTitle}`}
+            >
+              {
+                attendanceRecords.filter(
+                  (a) => a.date === getLocalDateString(),
+                ).length
+              }
+            </h3>
+          </div>
+
+          <div
+            className={`p-6 rounded-3xl border shadow-xl hover:brightness-110 active:brightness-95 transition-all ${adminThemeClass.cardBg}`}
+          >
+            <span
+              className={`text-[10px] uppercase font-bold tracking-wide flex items-center space-x-1 ${adminThemeClass.textMuted}`}
+            >
+              <Layers className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+              <span>{translations.deptRatio}</span>
+            </span>
+            <h3
+              className={`text-3xl font-display font-bold mt-2 ${adminThemeClass.textTitle}`}
+            >
+              {(() => {
+                const todayStr2 = getLocalDateString();
+                const activeDeptsToday = new Set(
+                  attendanceRecords
+                    .filter((a) => a.date === todayStr2)
+                    .map((a) => a.department_id)
+                    .filter(Boolean),
+                );
+                return `${activeDeptsToday.size}/${departments.length}`;
+              })()}
+            </h3>
+          </div>
+
+          <div
+            className={`p-6 rounded-3xl border shadow-xl hover:brightness-110 active:brightness-95 transition-all ${adminThemeClass.cardBg}`}
+          >
+            <span
+              className={`text-[10px] uppercase font-bold tracking-wide flex items-center space-x-1 ${adminThemeClass.textMuted}`}
+            >
+              <FileText className="h-3.5 w-3.5 text-red-500 dark:text-red-400" />
+              <span>{translations.permRequests}</span>
+            </span>
+            <h3
+              className={`text-3xl font-display font-bold mt-2 ${adminThemeClass.textTitle}`}
+            >
+              {
+                permissions.filter((p) => p.status === PermissionStatus.PENDING)
+                  .length
+              }
+            </h3>
+          </div>
+        </div>
+
+        {/* Segment Tabs Navigation Card */}
+        <div className="relative group w-full">
+          {/* Left Arrow Button */}
+          <button
+            type="button"
+            onClick={handlePrevTab}
+            className={`absolute left-2 top-1/2 -translate-y-1/2 z-20 h-8 w-8 rounded-full border shadow-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 hover:scale-110 active:scale-90 cursor-pointer ${adminThemeClass.innerBg}`}
+            title="Navigate to Previous Tab"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+
+          <div
+            ref={tabRowRef}
+            className={`flex rounded-2xl p-1 shadow-lg border overflow-x-auto scrollbar-none whitespace-nowrap ${adminThemeClass.cardBg}`}
+          >
+            <button
+              id="admin_tab_attendance"
+              onClick={() => setActiveTab("attendance")}
+              className={`px-6 py-3.5 text-xs sm:text-sm font-semibold rounded-xl text-center shrink-0 cursor-pointer transition-all flex items-center space-x-1.5 ${activeTab === "attendance" ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/45 font-bold" : "text-neutral-550 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white"}`}
+            >
+              <Clock className="h-4 w-4" />
+              <span>{translations.tabAttendance}</span>
+            </button>
+
+            <button
+              id="admin_tab_analytics"
+              onClick={() => setActiveTab("analytics")}
+              className={`px-6 py-3.5 text-xs sm:text-sm font-semibold rounded-xl text-center shrink-0 cursor-pointer transition-all flex items-center space-x-1.5 ${activeTab === "analytics" ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/45 font-bold" : "text-neutral-550 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white"}`}
+            >
+              <BarChart3 className="h-4 w-4" />
+              <span>{translations.tabAnalytics}</span>
+            </button>
+
+            <button
+              id="admin_tab_permissions"
+              onClick={() => setActiveTab("permissions")}
+              className={`px-6 py-3.5 text-xs sm:text-sm font-semibold rounded-xl text-center shrink-0 cursor-pointer transition-all flex items-center space-x-1.5 relative ${activeTab === "permissions" ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/45 font-bold" : "text-neutral-550 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white"}`}
+            >
+              <FileText className="h-4 w-4" />
+              <span>{translations.tabPermissions}</span>
+              {totalPendingPermissions > 0 && (
+                <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-[10px] font-bold text-white shadow-lg animate-pulse z-10">
+                  {totalPendingPermissions}
+                </span>
+              )}
+            </button>
+
+            <button
+              id="admin_tab_profiles"
+              onClick={() => setActiveTab("profiles")}
+              className={`px-6 py-3.5 text-xs sm:text-sm font-semibold rounded-xl text-center shrink-0 cursor-pointer transition-all flex items-center space-x-1.5 ${activeTab === "profiles" ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/45 font-bold" : "text-neutral-550 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white"}`}
+            >
+              <Users className="h-4 w-4" />
+              <span>{translations.tabProfiles}</span>
+            </button>
+
+            <button
+              id="admin_tab_billing"
+              onClick={() => setActiveTab("billing")}
+              className={`px-6 py-3.5 text-xs sm:text-sm font-semibold rounded-xl text-center shrink-0 cursor-pointer transition-all flex items-center space-x-1.5 ${activeTab === "billing" ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/45 font-bold" : "text-neutral-550 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white"}`}
+            >
+              <Shield className="h-4 w-4" />
+              <span>{translations.tabBilling || "Billing Workspace"}</span>
+            </button>
+          </div>
+
+          {/* Right Arrow Button */}
+          <button
+            type="button"
+            onClick={handleNextTab}
+            className="absolute right-2 top-1/2 -translate-y-1/2 z-20 h-8 w-8 rounded-full border border-neutral-200 dark:border-[#262626] bg-white/95 dark:bg-[#0D0D0D]/90 shadow-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 hover:scale-110 active:scale-90 cursor-pointer text-slate-700 dark:text-neutral-400"
+            title="Navigate to Next Tab"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* -------------------- TAB AREA: ATTENDANCE LOGS -------------------- */}
+        {activeTab === "attendance" && (
+          <div className="space-y-6">
+            {/* Filter Drawer */}
+            <div
+              className={`p-6 rounded-3xl border shadow-xl space-y-4 ${adminThemeClass.cardBg}`}
+            >
+              <div
+                className={`flex items-center justify-between border-b pb-3 mb-2 ${adminThemeClass.accentBorder}`}
+              >
+                <h4
+                  className={`font-semibold text-xs uppercase tracking-wider flex items-center space-x-1 ${adminThemeClass.textTitle}`}
+                >
+                  <Filter className="h-4 w-4 text-cyan-600 dark:text-cyan-400" />
+                  <span>Interactive Search Filters</span>
+                </h4>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="flex flex-col space-y-1">
+                  <label
+                    className={`text-[10px] font-bold uppercase ${adminThemeClass.textMuted}`}
+                  >
+                    Search Employee
+                  </label>
+                  <div className="relative w-full">
+                    <input
+                      type="text"
+                      placeholder="Search by worker name..."
+                      value={filterName}
+                      onChange={(e) => setFilterName(e.target.value)}
+                      className="w-full border border-neutral-300 rounded-xl pl-4 pr-10 py-2.5 text-xs outline-none focus:border-cyan-500 min-h-[44px] bg-white text-neutral-900 placeholder-neutral-400 caret-neutral-900 cursor-text shadow-xs"
+                    />
+                    {filterName && (
+                      <button
+                        type="button"
+                        onClick={() => setFilterName("")}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-900 p-1 hover:bg-neutral-100 rounded-full transition-colors cursor-pointer"
+                        title="Clear Search"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex flex-col space-y-1">
+                  <label
+                    className={`text-[10px] font-bold uppercase ${adminThemeClass.textMuted}`}
+                  >
+                    Department
+                  </label>
+                  <CustomSelect
+                    value={filterDept}
+                    onChange={(val) => setFilterDept(val)}
+                    className={`border rounded-xl px-4 py-2.5 text-xs outline-none focus:border-cyan-500 min-h-[44px] ${adminThemeClass.inputBg}`}
+                    options={[
+                      { value: "all", label: "All Departments" },
+                      ...departments.map((d) => ({
+                        value: d.id,
+                        label: d.name,
+                      })),
+                    ]}
+                    theme={theme}
+                  />
+                </div>
+
+                <div className="flex flex-col space-y-1">
+                  <label
+                    className={`text-[10px] font-bold uppercase ${adminThemeClass.textMuted}`}
+                  >
+                    Arrival Flag
+                  </label>
+                  <CustomSelect
+                    value={filterStatus}
+                    onChange={(val) => setFilterStatus(val)}
+                    className={`border rounded-xl px-4 py-2.5 text-xs outline-none focus:border-cyan-500 min-h-[44px] ${adminThemeClass.inputBg}`}
+                    options={[
+                      { value: "all", label: "Any Status Flag" },
+                      { value: AttendanceStatus.PRESENT, label: "On Time" },
+                      { value: AttendanceStatus.LATE, label: "Late Arrivals" },
+                    ]}
+                    theme={theme}
+                  />
+                </div>
+
+                <div className="flex flex-col space-y-1">
+                  <label
+                    className={`text-[10px] font-bold uppercase ${adminThemeClass.textMuted}`}
+                  >
+                    Date Bounds
+                  </label>
+                  <div className="flex space-x-2">
+                    <div className="w-1/2">
+                      <CustomDatePicker
+                        value={filterDateStart}
+                        onChange={setFilterDateStart}
+                        className={`border ${adminThemeClass.inputBg}`}
+                        placeholder="Start Date"
+                        theme={theme}
+                      />
+                    </div>
+                    <div className="w-1/2">
+                      <CustomDatePicker
+                        value={filterDateEnd}
+                        onChange={setFilterDateEnd}
+                        className={`border ${adminThemeClass.inputBg}`}
+                        placeholder="End Date"
+                        alignRight={true}
+                        theme={theme}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Exports triggers */}
+              <div
+                className={`flex justify-end pt-2 border-t mt-2 space-x-3 ${adminThemeClass.accentBorder}`}
+              >
+                <button
+                  onClick={() => requestReportCompile("attendance", "csv")}
+                  className={`px-4 py-2 border rounded-xl text-xs font-semibold flex items-center space-x-1 transition-all min-h-[44px] cursor-pointer ${adminThemeClass.inputBg}`}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span>{translations.exportCsv}</span>
+                </button>
+                <button
+                  onClick={() => requestReportCompile("attendance", "pdf")}
+                  className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white rounded-xl text-xs font-semibold flex items-center space-x-1 transition-all shadow-md min-h-[44px] cursor-pointer"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span>{translations.exportPdf}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Attendance Double Tables: Check-In/Check-Out list */}
+            <div
+              className={`rounded-3xl border overflow-hidden shadow-xl ${adminThemeClass.cardBg}`}
+            >
+              <div className={`px-6 py-4 border-b ${adminThemeClass.innerBg}`}>
+                <span
+                  className={`font-bold text-xs uppercase tracking-wider ${adminThemeClass.textTitle}`}
+                >
+                  Shift Register
+                </span>
+              </div>
+
+              <div className="relative group/scroll w-full">
+                {/* Left invisible/hover scroll icon */}
+                <button
+                  type="button"
+                  onClick={() =>
+                    scrollContainer(attendanceTableContainerRef, "left")
+                  }
+                  className="absolute left-2 top-1/2 -translate-y-1/2 z-20 p-2.5 rounded-full bg-white/40 dark:bg-black/40 border border-neutral-200 dark:border-neutral-850 backdrop-blur-md opacity-0 group-hover/scroll:opacity-100 transition-opacity duration-200 cursor-pointer text-slate-700 dark:text-neutral-300 hover:scale-110 active:scale-95 shadow-sm"
+                  title="Scroll Left"
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
+
+                <div
+                  ref={attendanceTableContainerRef}
+                  className="overflow-x-auto scrollbar-none"
+                >
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr
+                        className={`border-b font-bold uppercase tracking-wider select-none text-[10px] ${adminThemeClass.innerBg} ${adminThemeClass.textMuted}`}
+                      >
+                        <th className="p-4">{translations.sn}</th>
+                        <th className="p-4">{translations.colDate}</th>
+                        <th className="p-4">{translations.colWorker}</th>
+                        <th className="p-4">{translations.colIn}</th>
+                        <th className="p-4">{translations.colStatusIn}</th>
+                        {settings.onlyShowTimeIn === false && (
+                          <>
+                            <th className="p-4">{translations.colOut}</th>
+                            <th className="p-4">{translations.colStatusOut}</th>
+                            <th className="p-4">Shift Hours</th>
+                          </>
+                        )}
+                        <th className="p-4">{translations.colDept}</th>
+                      </tr>
+                    </thead>
+                    <tbody
+                      className={`divide-y font-sans ${adminThemeClass.tableRowDivider}`}
+                    >
+                      {groupedLogs.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={settings.onlyShowTimeIn !== false ? 6 : 9}
+                            className="p-10 text-center text-neutral-500 font-light"
+                          >
+                            No corresponding shift logs match check conditions.
+                          </td>
+                        </tr>
+                      ) : (
+                        groupedLogs.map((group) => (
+                          <React.Fragment key={group.date}>
+                            <tr className={`border-t border-b ${adminThemeClass.innerBg}`}>
+                              <td
+                                colSpan={settings.onlyShowTimeIn !== false ? 6 : 9}
+                                className={`px-4 py-3 font-bold font-mono text-[10px] uppercase tracking-wider ${adminThemeClass.accentText}`}
+                              >
+                                {formatDateToCustomString(group.date)}
+                              </td>
+                            </tr>
+                            {group.records.map((r, idx) => {
+                              const targetUser = workers.find(
+                                (w) => w.id === r.worker_id,
+                              );
+                              const fullName = targetUser
+                                ? `${targetUser.firstName} ${targetUser.lastName}`
+                                : "Unknown";
+                              const deptName =
+                                departments.find((d) => d.id === r.department_id)
+                                  ?.name || "Unassigned Unit";
+
+                              return (
+                                <tr
+                                  key={`${r.date}-${r.worker_id}-${idx}`}
+                                  className={`transition-colors duration-100 border-b ${adminThemeClass.tableRowHover}`}
+                                >
+                                  <td className="p-4 font-mono font-medium text-neutral-550">
+                                    {idx + 1}
+                                  </td>
+                                  <td
+                                    className={`p-4 font-mono font-normal ${adminThemeClass.textTitle}`}
+                                  >
+                                    {formatDateToCustomString(r.date)}
+                                  </td>
+                                  <td className="p-4">
+                                    <div className="flex items-center space-x-2.5">
+                                      <img
+                                        src={
+                                          targetUser?.profilePhoto?.small ||
+                                          IMAGES.defaultWorkerAvatar
+                                        }
+                                        alt=""
+                                        className={`h-8 w-8 rounded-lg object-cover bg-neutral-100 border ${adminThemeClass.accentBorder}`}
+                                      />
+                                      <strong
+                                        className={`font-bold ${adminThemeClass.textTitle}`}
+                                      >
+                                        {fullName}
+                                      </strong>
+                                    </div>
+                                  </td>
+                                  <td
+                                    className={`p-4 font-mono ${adminThemeClass.textHighlight}`}
+                                  >
+                                    {r.timeIn}
+                                  </td>
+                                  <td className="p-4">
+                                    <span
+                                      className={`inline-block px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase border ${r.statusIn === AttendanceStatus.PRESENT ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/30" : "bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-850/30"}`}
+                                    >
+                                      {r.statusIn === AttendanceStatus.PRESENT
+                                        ? "ON TIME"
+                                        : "LATE"}
+                                    </span>
+                                  </td>
+                                  {settings.onlyShowTimeIn === false && (
+                                    <>
+                                      <td
+                                        className={`p-4 font-mono ${adminThemeClass.textHighlight}`}
+                                      >
+                                        {r.timeOut || "Active Shift"}
+                                      </td>
+                                      <td
+                                        className={`p-4 font-normal ${adminThemeClass.textMuted}`}
+                                      >
+                                        {r.statusOut || "In Progress"}
+                                      </td>
+                                      <td
+                                        className={`p-4 font-mono font-bold ${adminThemeClass.accentText}`}
+                                      >
+                                        {r.coveredTime
+                                          ? (r.coveredTime / 3600).toFixed(2)
+                                          : "0.00"}{" "}
+                                        hrs
+                                      </td>
+                                    </>
+                                  )}
+                                  <td
+                                    className={`p-4 font-medium ${adminThemeClass.textMuted}`}
+                                  >
+                                    {deptName}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </React.Fragment>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Right invisible/hover scroll icon */}
+                <button
+                  type="button"
+                  onClick={() =>
+                    scrollContainer(attendanceTableContainerRef, "right")
+                  }
+                  className="absolute right-2 top-1/2 -translate-y-1/2 z-20 p-2.5 rounded-full bg-white/40 dark:bg-black/40 border border-neutral-200 dark:border-neutral-850 backdrop-blur-md opacity-0 group-hover/scroll:opacity-100 transition-opacity duration-200 cursor-pointer text-slate-700 dark:text-neutral-300 hover:scale-110 active:scale-95 shadow-sm"
+                  title="Scroll Right"
+                >
+                  <ChevronRight className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div
+                className={`p-4 border-t text-[10px] font-semibold text-right ${adminThemeClass.innerBg} ${adminThemeClass.textMuted} ${adminThemeClass.accentBorder}`}
+              >
+                Records pagination active: Showing up to 200 records per
+                dashboard requirement bounds.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* -------------------- TAB AREA: ANALYTICS DESK -------------------- */}
+        {activeTab === "analytics" && (
+          <div className="space-y-8 select-none">
+            {/* Exports triggers */}
+            <div
+              className={`flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border rounded-2xl gap-4 ${adminThemeClass.cardBg}`}
+            >
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-cyan-50 dark:bg-cyan-950/20 rounded-xl">
+                  <BarChart3 className="h-5 w-5 text-cyan-600 dark:text-cyan-400" />
+                </div>
+                <div>
+                  <h4
+                    className={`font-bold text-sm ${adminThemeClass.textTitle}`}
+                  >
+                    {translations.tabAnalytics || "Analytics Desk"}
+                  </h4>
+                  <p className={`text-[11px] ${adminThemeClass.textMuted}`}>
+                    {translations.precomputedMetrics ||
+                      "Precomputed workspace metrics graphs"}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => requestReportCompile("attendance", "csv")}
+                className="px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:brightness-110 text-white rounded-xl text-xs font-semibold flex items-center justify-center space-x-1.5 transition-all min-h-[44px] cursor-pointer shadow-sm shrink-0"
+              >
+                <Download className="h-4 w-4" />
+                <span>
+                  {translations.downloadCsv || "Download CSV Compiles"}
+                </span>
+              </button>
+            </div>
+
+            {/* Custom SVG Charts of Workers Compare & Department Trends (Consolidated) */}
+            <div
+              className={`p-6 rounded-3xl border shadow-xl relative overflow-visible ${adminThemeClass.cardBg}`}
+            >
+              {/* Header and Switches */}
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+                <div>
+                  <h4
+                    className={`font-semibold text-base font-sans ${adminThemeClass.textTitle}`}
+                    style={{ fontFamily: "Montserrat, sans-serif" }}
+                  >
+                    {analyticsViewTab === "workers"
+                      ? (translations.workerPerformanceComparison || "Worker Attendance Performance Comparison")
+                      : (translations.businessUnitAverages || "Department Performance Trends")}
+                  </h4>
+                  <p
+                    className={`text-xs font-light mt-1 font-sans ${adminThemeClass.textMuted}`}
+                    style={{ fontFamily: "Montserrat, sans-serif" }}
+                  >
+                    {analyticsViewTab === "workers"
+                      ? "Calculated active performance ratios based on the actual calendar days of each month."
+                      : (translations.averagesCalculated || "Averages calculated across active team member sets.")}
+                  </p>
+                </div>
+
+                {/* Switches */}
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* View Switching Tabs (Workers vs Departments) */}
+                  <div
+                    className={`flex rounded-2xl p-1 border select-none divide-x-0 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAnalyticsViewTab("workers");
+                        setHoveredIdx(null);
+                      }}
+                      className={`py-1.5 px-3.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${analyticsViewTab === "workers" ? `text-cyan-600 dark:text-cyan-400 shadow-sm font-extrabold ${adminThemeClass.cardBg}` : `hover:text-cyan-600 ${adminThemeClass.textMuted}`}`}
+                      style={{ fontFamily: "Montserrat, sans-serif" }}
+                    >
+                      Workers View
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAnalyticsViewTab("departments");
+                        setHoveredIdx(null);
+                      }}
+                      className={`py-1.5 px-3.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${analyticsViewTab === "departments" ? `text-teal-600 dark:text-teal-400 font-bold shadow-sm font-extrabold ${adminThemeClass.cardBg}` : `hover:text-teal-600 ${adminThemeClass.textMuted}`}`}
+                      style={{ fontFamily: "Montserrat, sans-serif" }}
+                    >
+                      Departments View
+                    </button>
+                  </div>
+
+                  {/* Chart Type Toggle (Bar vs Line) */}
+                  <div
+                    className={`flex rounded-xl p-1 border shrink-0 select-none ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setChartViewMode("bar");
+                        setHoveredIdx(null);
+                      }}
+                      className={`p-1.5 rounded-lg transition-all cursor-pointer ${chartViewMode === "bar" ? `text-cyan-600 dark:text-cyan-400 shadow-xs font-bold ${adminThemeClass.cardBg}` : `text-gray-400 hover:text-cyan-600 ${adminThemeClass.textMuted}`}`}
+                      title="Bar Chart"
+                    >
+                      <BarChart3 className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setChartViewMode("line");
+                        setHoveredIdx(null);
+                      }}
+                      className={`p-1.5 rounded-lg transition-all cursor-pointer ${chartViewMode === "line" ? `text-cyan-600 dark:text-cyan-400 shadow-xs font-bold ${adminThemeClass.cardBg}` : `text-gray-400 hover:text-cyan-600 ${adminThemeClass.textMuted}`}`}
+                      title="Line Graph"
+                    >
+                      <TrendingUp className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Chart Visual Section */}
+              <div className="relative group/scroll w-full overflow-visible">
+                {/* Left Scroll Chevron */}
+                <button
+                  type="button"
+                  onClick={() => scrollContainer(graphContainerRef, "left")}
+                  className="absolute left-2 top-1/2 -translate-y-1/2 z-20 p-2 rounded-full bg-white/70 dark:bg-black/70 border border-neutral-200 dark:border-neutral-800 backdrop-blur-md opacity-85 md:opacity-0 md:group-hover/scroll:opacity-100 transition-all duration-200 cursor-pointer text-slate-700 dark:text-neutral-300 hover:scale-110 active:scale-95 shadow-sm"
+                  title="Scroll Left"
+                >
+                  <ChevronLeft className="h-4.5 w-4.5" />
+                </button>
+
+                {/* Graph Scrollable Viewport */}
+                <div
+                  ref={graphContainerRef}
+                  className={`overflow-x-auto scrollbar-none w-full rounded-3xl p-4 sm:p-5 border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                >
+                  <div className="w-full h-[380px] flex flex-col justify-between select-none relative overflow-visible">
+                    {/* The Chart SVG container */}
+                    <div className="w-full flex-1 flex flex-col justify-between relative mt-2 overflow-visible">
+                      <div
+                        ref={chartContainerRef}
+                        className="w-full h-[320px] flex items-end justify-center relative pb-1 overflow-visible animate-fade-in"
+                      >
+                        {(() => {
+                          const trendData = analyticsViewTab === "workers" ? workerTrendData : deptTrendData;
+                          
+                          // Determine dimensions dynamically from state (with sensible fallback)
+                          const width = Math.max(chartDimensions.width, 300);
+                          const height = Math.max(chartDimensions.height || 290, 200);
+
+                          const axisLeft = 34;
+                          const axisRight = width - 8;
+                          const axisTop = 10;
+                          const axisBottom = height - 24;
+                          const plotWidth = axisRight - axisLeft;
+                          const plotHeight = axisBottom - axisTop;
+
+                          const isLine = chartViewMode === "line";
+
+                          // For bars, keep some spacing before/after:
+                          const barWidth = Math.min(24, Math.max(8, plotWidth / (trendData.length * 2)));
+
+                          // Helper to get exact X coordinate of a data point by index:
+                          const getX = (idx: number) => {
+                            if (isLine) {
+                              const lineStart = axisLeft;
+                              const lineEnd = axisRight;
+                              const range = lineEnd - lineStart;
+                              const interval = trendData.length > 1 ? range / (trendData.length - 1) : range;
+                              return lineStart + idx * interval;
+                            } else {
+                              const barStart = axisLeft + barWidth / 2 + 6;
+                              const barEnd = axisRight - barWidth / 2 - 6;
+                              const range = barEnd - barStart;
+                              const interval = trendData.length > 1 ? range / (trendData.length - 1) : range;
+                              return barStart + idx * interval;
+                            }
+                          };
+
+                          const peak = Math.max(...trendData.map(d => d.workerCount), 1);
+                          const maxVal = Math.ceil((peak * 1.15) / 4) * 4 || 4;
+
+                          const getY = (count: number) => {
+                            const ratio = count / maxVal;
+                            return axisBottom - ratio * plotHeight;
+                          };
+
+                          const ticks = [
+                            { label: String(maxVal), y: axisTop },
+                            { label: String(Math.round(maxVal * 0.75)), y: axisTop + plotHeight * 0.25 },
+                            { label: String(Math.round(maxVal * 0.5)), y: axisTop + plotHeight * 0.5 },
+                            { label: String(Math.round(maxVal * 0.25)), y: axisTop + plotHeight * 0.75 },
+                            { label: "0", y: axisBottom }
+                          ];
+
+                          return (
+                            <svg
+                              className="w-full h-full overflow-visible"
+                              viewBox={`0 0 ${width} ${height}`}
+                            >
+                              <defs>
+                                <linearGradient
+                                  id="lineGrad"
+                                  x1="0"
+                                  y1="0"
+                                  x2="0"
+                                  y2="1"
+                                >
+                                  <stop
+                                    offset="0%"
+                                    stopColor={analyticsViewTab === "workers" ? "#06b6d4" : "#14b8a6"}
+                                    stopOpacity="0.4"
+                                  />
+                                  <stop
+                                    offset="100%"
+                                    stopColor={analyticsViewTab === "workers" ? "#06b6d4" : "#14b8a6"}
+                                    stopOpacity="0.0"
+                                  />
+                                </linearGradient>
+                                <linearGradient id="workerBarGrad" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="0%" stopColor="#06b6d4" />
+                                  <stop offset="100%" stopColor="#2563eb" />
+                                </linearGradient>
+                                <linearGradient id="deptBarGrad" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="0%" stopColor="#14b8a6" />
+                                  <stop offset="100%" stopColor="#059669" />
+                                </linearGradient>
+                              </defs>
+
+                              {/* Y-Axis Calibration Text and Tick Lines */}
+                              {ticks.map((tick, tIdx) => (
+                                <g key={tIdx} className="opacity-80">
+                                  {/* Grid line */}
+                                  <line
+                                    x1={axisLeft}
+                                    y1={tick.y}
+                                    x2={axisRight}
+                                    y2={tick.y}
+                                    stroke="#888888"
+                                    strokeOpacity="0.12"
+                                    strokeDasharray="4 3"
+                                  />
+                                  {/* Text Label */}
+                                  <text
+                                    x={axisLeft - 12}
+                                    y={tick.y + 3.5}
+                                    textAnchor="end"
+                                    className="text-[10px] font-normal fill-slate-500 dark:fill-neutral-400 font-sans"
+                                    style={{ fontFamily: 'Montserrat, sans-serif' }}
+                                  >
+                                    {tick.label}
+                                  </text>
+                                </g>
+                              ))}
+
+                              {/* Solid Axes */}
+                              <line
+                                x1={axisLeft}
+                                y1={axisTop}
+                                x2={axisLeft}
+                                y2={axisBottom}
+                                stroke="#888888"
+                                strokeOpacity="0.25"
+                                strokeWidth="1.2"
+                              />
+                              <line
+                                x1={axisLeft}
+                                y1={axisBottom}
+                                x2={axisRight}
+                                y2={axisBottom}
+                                stroke="#888888"
+                                strokeOpacity="0.25"
+                                strokeWidth="1.2"
+                              />
+
+                              {/* 1. BAR CHART PRESENTATION */}
+                              {chartViewMode === "bar" && trendData.map((d, idx) => {
+                                const x = getX(idx);
+                                const y = getY(d.workerCount);
+                                const rectHeight = axisBottom - y;
+                                return (
+                                  <rect
+                                    key={idx}
+                                    x={x - barWidth / 2}
+                                    y={y}
+                                    width={barWidth}
+                                    height={Math.max(rectHeight, 2)}
+                                    rx="4"
+                                    fill={analyticsViewTab === "workers" ? "url(#workerBarGrad)" : "url(#deptBarGrad)"}
+                                    className="transition-all duration-350 hover:brightness-110 cursor-pointer"
+                                    onMouseEnter={() => setHoveredIdx(idx)}
+                                    onMouseLeave={() => setHoveredIdx(null)}
+                                  />
+                                );
+                              })}
+
+                              {/* 2. LINE GRAPH PRESENTATION */}
+                              {chartViewMode === "line" && (() => {
+                                const pts = trendData.map((d, idx) => {
+                                  return { x: getX(idx), y: getY(d.workerCount) };
+                                });
+                                const { strokeD, fillD } = generateBezierPaths(pts, axisBottom);
+                                return (
+                                  <>
+                                    <path d={fillD} fill="url(#lineGrad)" />
+                                    <path
+                                      d={strokeD}
+                                      fill="none"
+                                      stroke={analyticsViewTab === "workers" ? "#06b6d4" : "#14b8a6"}
+                                      strokeWidth="1.8"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    />
+                                  </>
+                                );
+                              })()}
+
+                              {/* 3. IMAGINARY BROKEN LINES ON HOVER (CROSSHAIRS) */}
+                              {hoveredIdx !== null && (() => {
+                                const d = trendData[hoveredIdx];
+                                if (!d) return null;
+                                const x = getX(hoveredIdx);
+                                const y = getY(d.workerCount);
+                                return (
+                                  <g className="pointer-events-none">
+                                    {/* Horizontal dashed tracer */}
+                                    <line
+                                      x1={axisLeft}
+                                      y1={y}
+                                      x2={x}
+                                      y2={y}
+                                      stroke={analyticsViewTab === "workers" ? "#06b6d4" : "#14b8a6"}
+                                      strokeOpacity="0.25"
+                                      strokeDasharray="3 3"
+                                      strokeWidth="0.8"
+                                    />
+                                    {/* Vertical dashed tracer */}
+                                    <line
+                                      x1={x}
+                                      y1={axisBottom}
+                                      x2={x}
+                                      y2={y}
+                                      stroke={analyticsViewTab === "workers" ? "#06b6d4" : "#14b8a6"}
+                                      strokeOpacity="0.25"
+                                      strokeDasharray="3 3"
+                                      strokeWidth="0.8"
+                                    />
+                                  </g>
+                                );
+                              })()}
+
+                              {/* 4. HOVER INTERSECTIONS & HITBOXES */}
+                              {trendData.map((d, idx) => {
+                                const x = getX(idx);
+                                const y = getY(d.workerCount);
+                                const isHovered = hoveredIdx === idx;
+                                const size = isHovered ? 5.0 : 3.0;
+                                const strokeWidth = isHovered ? 2.5 : 1.5;
+                                const strokeColor = analyticsViewTab === "workers" ? "#06b6d4" : "#14b8a6";
+                                return (
+                                  <g
+                                    key={idx}
+                                    className="cursor-pointer"
+                                    onMouseEnter={() => setHoveredIdx(idx)}
+                                    onMouseLeave={() => setHoveredIdx(null)}
+                                  >
+                                    {/* Large invisible catch area for hover */}
+                                    <circle
+                                      cx={x}
+                                      cy={y}
+                                      r="20"
+                                      fill="transparent"
+                                      className="cursor-pointer"
+                                    />
+                                    
+                                    {/* Real visible 'x' intersection marker (Only in line chart mode) */}
+                                    {chartViewMode === "line" && (
+                                      <g className="transition-all duration-150">
+                                        {/* White border back-shadow to contrast with trend line */}
+                                        <line
+                                          x1={x - size}
+                                          y1={y - size}
+                                          x2={x + size}
+                                          y2={y + size}
+                                          stroke="#ffffff"
+                                          strokeWidth={strokeWidth + 1.5}
+                                          strokeLinecap="round"
+                                        />
+                                        <line
+                                          x1={x - size}
+                                          y1={y + size}
+                                          x2={x + size}
+                                          y2={y - size}
+                                          stroke="#ffffff"
+                                          strokeWidth={strokeWidth + 1.5}
+                                          strokeLinecap="round"
+                                        />
+                                        {/* Main colored stroke line */}
+                                        <line
+                                          x1={x - size}
+                                          y1={y - size}
+                                          x2={x + size}
+                                          y2={y + size}
+                                          stroke={strokeColor}
+                                          strokeWidth={strokeWidth}
+                                          strokeLinecap="round"
+                                        />
+                                        <line
+                                          x1={x - size}
+                                          y1={y + size}
+                                          x2={x + size}
+                                          y2={y - size}
+                                          stroke={strokeColor}
+                                          strokeWidth={strokeWidth}
+                                          strokeLinecap="round"
+                                        />
+                                      </g>
+                                    )}
+                                  </g>
+                                );
+                              })}
+
+                              {/* 5. PERFECTLY ALIGNED X-AXIS LABELS INSIDE SVG */}
+                              {trendData.map((d, idx) => {
+                                const labelX = getX(idx);
+                                const isMobile = width < 480;
+                                const showLabel = !isMobile || (trendData.length <= 6) || (idx % 2 === 0);
+                                
+                                if (!showLabel) return null;
+
+                                const labelText = d.dateLabel;
+                                const rotation = isMobile ? -30 : 0;
+                                
+                                return (
+                                  <text
+                                    key={idx}
+                                    x={labelX}
+                                    y={axisBottom + 14}
+                                    textAnchor={isMobile ? "end" : "middle"}
+                                    transform={isMobile ? `rotate(${rotation}, ${labelX}, ${axisBottom + 14})` : undefined}
+                                    className="text-[10px] font-normal fill-slate-500 dark:fill-neutral-400 font-sans"
+                                    style={{ fontFamily: 'Montserrat, sans-serif' }}
+                                  >
+                                    {labelText}
+                                  </text>
+                                );
+                              })}
+                            </svg>
+                          );
+                        })()}
+
+                        {/* 6. CORRESPONDING FLOATING HTML TOOLTIP WITH ABSOLUTE BOUNDS (NO VERTICAL CLIPPING) */}
+                        {hoveredIdx !== null && (() => {
+                          const trendData = analyticsViewTab === "workers" ? workerTrendData : deptTrendData;
+                          const d = trendData[hoveredIdx];
+                          if (!d) return null;
+
+                          const width = Math.max(chartDimensions.width, 300);
+                          const height = Math.max(chartDimensions.height || 290, 200);
+
+                          const axisLeft = 34;
+                          const axisRight = width - 8;
+                          const axisTop = 10;
+                          const axisBottom = height - 24;
+                          const plotWidth = axisRight - axisLeft;
+                          const plotHeight = axisBottom - axisTop;
+
+                          const isLine = chartViewMode === "line";
+
+                          const barWidth = Math.min(24, Math.max(8, plotWidth / (trendData.length * 2)));
+                          const barPadding = barWidth * 0.8;
+                          const barStart = axisLeft + barPadding + barWidth / 2;
+                          const barEnd = axisRight - barPadding - barWidth / 2;
+                          const barWidthRange = barEnd - barStart;
+                          const barInterval = trendData.length > 1 ? barWidthRange / (trendData.length - 1) : barWidthRange;
+
+                          const lineStart = axisLeft;
+                          const lineEnd = axisRight;
+                          const lineWidthRange = lineEnd - lineStart;
+                          const lineInterval = trendData.length > 1 ? lineWidthRange / (trendData.length - 1) : lineWidthRange;
+
+                          const getX = (idx: number) => {
+                            return isLine ? (axisLeft + idx * (trendData.length > 1 ? (axisRight - axisLeft) / (trendData.length - 1) : (axisRight - axisLeft))) : ((axisLeft + barWidth / 2 + 6) + idx * (trendData.length > 1 ? ((axisRight - barWidth / 2 - 6) - (axisLeft + barWidth / 2 + 6)) / (trendData.length - 1) : ((axisRight - barWidth / 2 - 6) - (axisLeft + barWidth / 2 + 6))));
+                          };
+
+                          const peak = Math.max(...trendData.map(d => d.workerCount), 1);
+                          const maxVal = Math.ceil((peak * 1.15) / 4) * 4 || 4;
+
+                          const getY = (count: number) => {
+                            const ratio = count / maxVal;
+                            return axisBottom - ratio * plotHeight;
+                          };
+
+                          const x = getX(hoveredIdx);
+                          const y = getY(d.workerCount);
+                          
+                          const leftPercent = (x / width) * 100;
+                          const topPercent = (y / height) * 100;
+
+                          const xTranslate = hoveredIdx === 0 ? "5%" : hoveredIdx === trendData.length - 1 ? "-105%" : "-50%";
+                          const transformStyle = `translate(${xTranslate}, -105%)`;
+
+                          return (
+                            <div
+                              className="absolute pointer-events-none z-50 transition-all duration-150 ease-out select-none"
+                              style={{
+                                left: `${leftPercent}%`,
+                                top: `${topPercent}%`,
+                                transform: transformStyle,
+                              }}
+                            >
+                              <div className="bg-slate-950/95 dark:bg-neutral-900/95 text-white border border-slate-700/60 dark:border-neutral-850 rounded-2xl p-3.5 shadow-2xl flex flex-col space-y-1.5 min-w-[150px] backdrop-blur-lg animate-fade-in">
+                                {/* Header/Date */}
+                                <div className="text-[11px] font-bold text-slate-200 dark:text-neutral-300 border-b border-slate-800 dark:border-neutral-850 pb-1.5 flex items-center justify-between">
+                                  <span className="font-sans" style={{ fontFamily: 'Montserrat, sans-serif' }}>
+                                    {d.dateLabel}
+                                  </span>
+                                  <span className={`text-[8px] px-1.5 py-0.5 rounded font-extrabold uppercase tracking-wider ${analyticsViewTab === "workers" ? "bg-cyan-950/40 text-cyan-400 border border-cyan-800/30" : "bg-teal-950/40 text-teal-400 border border-teal-800/30"}`}>
+                                    {analyticsViewTab === "workers" ? "Worker" : "Dept"}
+                                  </span>
+                                </div>
+                                {/* Detail Rows */}
+                                <div className="flex items-center justify-between space-x-4 text-[11px] pt-1">
+                                  <span className="text-neutral-400 font-sans" style={{ fontFamily: 'Montserrat, sans-serif' }}>
+                                    {analyticsViewTab === "workers" ? "Active Workers" : "Active Teams"}
+                                  </span>
+                                  <span className="font-bold text-white font-sans" style={{ fontFamily: 'Montserrat, sans-serif' }}>
+                                    {d.workerCount}
+                                  </span>
+                                </div>
+                                <div className="flex items-center justify-between space-x-4 text-[11px]">
+                                  <span className="text-neutral-400 font-sans" style={{ fontFamily: 'Montserrat, sans-serif' }}>
+                                    Perf Rate
+                                  </span>
+                                  <span
+                                    className={`font-extrabold text-xs font-sans ${analyticsViewTab === "workers" ? "text-cyan-400" : "text-teal-400"}`}
+                                    style={{ fontFamily: 'Montserrat, sans-serif' }}
+                                  >
+                                    {d.perf}%
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    </div>
+
+                    <div
+                      className={`text-[9px] flex justify-between font-mono shrink-0 select-none mt-4 border-t pt-2 ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted}`}
+                    >
+                      <span className="font-sans" style={{ fontFamily: 'Montserrat, sans-serif' }}>
+                        {analyticsViewTab === "workers"
+                          ? (translations.activeWorkersCount || "Active Workers Count")
+                          : (translations.activeTeamsCount || "Active Teams Count")}
+                      </span>
+                      <span className="font-sans" style={{ fontFamily: 'Montserrat, sans-serif' }}>
+                        {analyticsViewTab === "workers"
+                          ? (translations.rankTop5 || "Rank Top-5 Providers")
+                          : (translations.enterpriseComparing || "Enterprise Comparing")}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Scroll Chevron */}
+                <button
+                  type="button"
+                  onClick={() => scrollContainer(graphContainerRef, "right")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 z-20 p-2 rounded-full bg-white/70 dark:bg-black/70 border border-neutral-200 dark:border-neutral-800 backdrop-blur-md opacity-85 md:opacity-0 md:group-hover/scroll:opacity-100 transition-all duration-200 cursor-pointer text-slate-700 dark:text-neutral-300 hover:scale-110 active:scale-95 shadow-sm"
+                  title="Scroll Right"
+                >
+                  <ChevronRight className="h-4.5 w-4.5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Timeframe Selector Button Row */}
+            <div
+              className={`flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border rounded-2xl gap-4 mb-6 ${adminThemeClass.cardBg}`}
+            >
+              <div>
+                <span
+                  className={`text-[10px] uppercase font-bold tracking-wider font-mono block mb-1 ${adminThemeClass.textMuted}`}
+                >
+                  Select Reporting Basis Timeframe
+                </span>
+                <p
+                  className={`text-xs font-light ${adminThemeClass.textMuted}`}
+                >
+                  Dynamically recalculate attendance ratios, graphs, metrics,
+                  and leaderboards.
+                </p>
+              </div>
+              <div
+                className={`flex rounded-2xl p-1 border select-none max-w-sm w-full divide-x-0 ${adminThemeClass.innerBg}`}
+              >
+                {(["daily", "weekly", "monthly", "yearly"] as const).map(
+                  (tf) => (
+                    <button
+                      key={tf}
+                      type="button"
+                      onClick={() => setTimeframe(tf)}
+                      className={`flex-1 py-1.5 px-3 text-xs font-semibold rounded-xl text-center capitalize transition-all cursor-pointer ${timeframe === tf ? `text-cyan-600 dark:text-cyan-400 shadow-sm font-bold scale-[1.02] ${adminThemeClass.cardBg}` : `hover:text-cyan-600 ${adminThemeClass.textMuted}`}`}
+                    >
+                      {tf}
+                    </button>
+                  ),
+                )}
+              </div>
+            </div>
+
+            {/* Leaderboard Table Desk */}
+            <div
+              className={`rounded-3xl border overflow-hidden shadow-xl relative ${adminThemeClass.cardBg}`}
+            >
+              <div
+                className={`p-5 border-b flex items-center justify-between flex-wrap gap-4 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+              >
+                <span
+                  className={`font-bold text-xs uppercase tracking-wider flex items-center space-x-1 ${adminThemeClass.textTitle}`}
+                >
+                  <TrendingUp className="h-4.5 w-4.5 text-cyan-600 dark:text-cyan-400" />
+                  <span>
+                    {translations.leaderboard || "Leaderboard - Top Performers"}
+                  </span>
+                </span>
+
+                <div className="flex items-center gap-3 flex-wrap w-full sm:w-auto">
+                  {/* Search Field */}
+                  <div className="relative w-full sm:w-64">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+                    <input
+                      type="text"
+                      value={analyticsSearchQuery}
+                      onChange={(e) => setAnalyticsSearchQuery(e.target.value)}
+                      placeholder="Search leaderboard..."
+                      className="w-full pl-8.5 pr-8 py-1.5 text-xs font-semibold rounded-xl border border-neutral-300 outline-none transition-all duration-200 bg-white text-neutral-900 placeholder-neutral-400 caret-neutral-900 focus:border-cyan-500 shadow-xs"
+                    />
+                    {analyticsSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setAnalyticsSearchQuery("")}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-900 p-0.5 hover:bg-neutral-100 rounded-full transition-colors cursor-pointer"
+                        title="Clear Search"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Right Segmented Control to switch Department -> Worker */}
+                  <div
+                    className={`flex rounded-xl p-0.5 shadow-inner border ${adminThemeClass.innerBg}`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setLeaderboardView("worker")}
+                      className={`px-3 py-1.5 text-[10px] uppercase tracking-wider font-bold rounded-lg cursor-pointer transition-all duration-150 ${
+                        leaderboardView === "worker"
+                          ? adminThemeClass.buttonSelected
+                          : `${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`
+                      }`}
+                    >
+                      Workers view
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLeaderboardView("department")}
+                      className={`px-3 py-1.5 text-[10px] uppercase tracking-wider font-bold rounded-lg cursor-pointer transition-all duration-150 ${
+                        leaderboardView === "department"
+                          ? adminThemeClass.buttonSelected
+                          : `${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`
+                      }`}
+                    >
+                      Departments view
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="relative group/scroll w-full">
+                {/* Left invisible/hover scroll icon */}
+                <button
+                  type="button"
+                  onClick={() =>
+                    scrollContainer(leaderboardTableContainerRef, "left")
+                  }
+                  className="absolute left-2 top-1/2 -translate-y-1/2 z-20 p-2.5 rounded-full bg-white/40 dark:bg-black/40 border border-neutral-200 dark:border-neutral-850 backdrop-blur-md opacity-0 group-hover/scroll:opacity-100 transition-opacity duration-200 cursor-pointer text-slate-700 dark:text-neutral-300 hover:scale-110 active:scale-95 shadow-sm"
+                  title="Scroll Left"
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
+
+                <div
+                  ref={leaderboardTableContainerRef}
+                  className="overflow-x-auto scrollbar-none"
+                >
+                  {leaderboardView === "worker" ? (
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr
+                          className={`border-b font-bold uppercase tracking-wider select-none text-[10px] ${adminThemeClass.innerBg} ${adminThemeClass.textMuted}`}
+                        >
+                          <th className="p-4 w-20">
+                            {translations.rankCol || "Rank"}
+                          </th>
+                          <th className="p-4">
+                            {translations.employeeCol || "Employee"}
+                          </th>
+                          <th className="p-4">
+                            {translations.colDept || "Assigned Unit"}
+                          </th>
+                          <th className="p-4">
+                            {translations.verifiedCheckinsCol ||
+                              "Verified Check-ins"}
+                          </th>
+                          <th className="p-4">
+                            {translations.arrivalStatusCol ||
+                              "Arrival status Flag"}
+                          </th>
+                          <th className="p-4">
+                            {translations.activeExemptionCol ||
+                              "Active Exemption"}
+                          </th>
+                          <th className="p-4">
+                            {translations.attendanceRateCol ||
+                              "Attendance Performance Rate"}
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody
+                        className={`divide-y font-sans ${adminThemeClass.tableRowDivider}`}
+                      >
+                        {filteredLeaderboardForTimeframe.map((w, index) => {
+                          const metrics = calculateMetricsForTimeframe(
+                            w.id,
+                            timeframe,
+                          );
+                          return (
+                            <tr
+                              key={`${w.id}-${w.profilePhoto?.small || ""}`}
+                              onClick={() => {
+                                setSelectedLeaderboardWorker(w);
+                                setModalTimeframe(timeframe);
+                              }}
+                              className={`transition-colors duration-100 border-b cursor-pointer ${adminThemeClass.tableRowHover}`}
+                              title="Click to view summary modal"
+                            >
+                              <td className="p-4">
+                                <span
+                                  className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold border ${index === 0 ? "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800/30" : index === 1 ? "bg-slate-50 dark:bg-slate-900/50 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-800" : `border ${adminThemeClass.innerBg} ${adminThemeClass.textMuted}`}`}
+                                >
+                                  {index + 1}
+                                </span>
+                              </td>
+                              <td
+                                className={`p-4 font-semibold ${adminThemeClass.textTitle}`}
+                              >
+                                <div className="flex items-center space-x-2">
+                                  <img
+                                    src={
+                                      w.profilePhoto?.small ||
+                                      IMAGES.defaultWorkerAvatar
+                                    }
+                                    alt=""
+                                    className={`h-8 w-8 rounded-lg object-cover bg-neutral-100 border ${adminThemeClass.accentBorder}`}
+                                  />
+                                  <span>
+                                    {w.firstName} {w.lastName}
+                                  </span>
+                                </div>
+                              </td>
+                              <td
+                                className={`p-4 ${adminThemeClass.textMuted}`}
+                              >
+                                {w.deptLabel}
+                              </td>
+                              <td
+                                className={`p-4 font-mono font-bold ${adminThemeClass.textTitle}`}
+                              >
+                                {metrics.present} Days
+                              </td>
+                              <td className="p-4 font-mono text-orange-600 dark:text-orange-400">
+                                {metrics.late} Late
+                              </td>
+                              <td className="p-4 font-mono text-cyan-600 dark:text-cyan-400">
+                                {metrics.exempt} Days
+                              </td>
+                              <td className="p-4">
+                                <div className="flex items-center space-x-2">
+                                  <div className="w-24 bg-[#111111] border border-[#262626] rounded-full h-2.5 overflow-hidden">
+                                    <div
+                                      style={{ width: `${metrics.perf}%` }}
+                                      className="bg-gradient-to-r from-cyan-500 to-blue-600 h-2.5 rounded-full"
+                                    ></div>
+                                  </div>
+                                  <span className="font-bold text-cyan-600 dark:text-cyan-400">
+                                    {metrics.perf.toFixed(2)}%
+                                  </span>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr
+                          className={`border-b font-bold uppercase tracking-wider select-none text-[10px] ${adminThemeClass.innerBg} ${adminThemeClass.textMuted}`}
+                        >
+                          <th className="p-4 w-20">Rank</th>
+                          <th className="p-4">Department Unit</th>
+                          <th className="p-4">Department Lead</th>
+                          <th className="p-4">Personnel Count</th>
+                          <th className="p-4">Average Performance Rate</th>
+                        </tr>
+                      </thead>
+                      <tbody
+                        className={`divide-y font-sans ${adminThemeClass.tableRowDivider}`}
+                      >
+                        {filteredDepartmentsForTimeframe.map((d, index) => {
+                          return (
+                            <tr
+                              key={index}
+                              onClick={() => {
+                                setSelectedLeaderboardDept(d);
+                                setModalTimeframe(timeframe);
+                              }}
+                              className={`transition-colors duration-100 border-b cursor-pointer ${adminThemeClass.tableRowHover}`}
+                              title="Click to view summary modal"
+                            >
+                              <td className="p-4">
+                                <span
+                                  className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold border ${index === 0 ? "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800/30" : index === 1 ? "bg-slate-50 dark:bg-slate-900/50 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-800" : `border ${adminThemeClass.innerBg} ${adminThemeClass.textMuted}`}`}
+                                >
+                                  {index + 1}
+                                </span>
+                              </td>
+                              <td
+                                className={`p-4 font-semibold ${adminThemeClass.textTitle}`}
+                              >
+                                {d.name}
+                              </td>
+                              <td
+                                className={`p-4 ${adminThemeClass.textMuted}`}
+                              >
+                                {d.leadName}
+                              </td>
+                              <td
+                                className={`p-4 font-mono ${adminThemeClass.textTitle}`}
+                              >
+                                {d.teamSize} Workers
+                              </td>
+                              <td className="p-4">
+                                <div className="flex items-center space-x-2">
+                                  <div className="w-24 bg-[#111111] border border-[#262626] rounded-full h-2.5 overflow-hidden">
+                                    <div
+                                      style={{ width: `${d.avg}%` }}
+                                      className="bg-gradient-to-r from-emerald-500 to-teal-600 h-2.5 rounded-full"
+                                    ></div>
+                                  </div>
+                                  <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                                    {d.avg.toFixed(2)}%
+                                  </span>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+
+                {/* Right invisible/hover scroll icon */}
+                <button
+                  type="button"
+                  onClick={() =>
+                    scrollContainer(leaderboardTableContainerRef, "right")
+                  }
+                  className="absolute right-2 top-1/2 -translate-y-1/2 z-20 p-2.5 rounded-full bg-white/40 dark:bg-black/40 border border-neutral-200 dark:border-neutral-850 backdrop-blur-md opacity-0 group-hover/scroll:opacity-100 transition-opacity duration-200 cursor-pointer text-slate-700 dark:text-neutral-300 hover:scale-110 active:scale-95 shadow-sm"
+                  title="Scroll Right"
+                >
+                  <ChevronRight className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {/* -------------------- TAB AREA: PERMISSIONS DESK -------------------- */}
+        {activeTab === "permissions" && (
+          <div className="space-y-6 select-none font-sans">
+            <div
+              className={`p-6 rounded-3xl border shadow-xl ${adminThemeClass.cardBg}`}
+            >
+              <h3
+                className={`font-semibold text-lg mb-1 ${adminThemeClass.textTitle}`}
+              >
+                {translations.verifyPermissionsTitle ||
+                  "Verify Active Permission Exemption Requests"}
+              </h3>
+              <p className={`text-xs font-light ${adminThemeClass.textMuted}`}>
+                {translations.verifyPermissionsDesc ||
+                  "Confirming approved permission flags automatically deducts standard workday ratios without penalty calculations."}
+              </p>
+            </div>
+
+            {/* Filter controls row */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+              {/* Search Bar */}
+              <div
+                className="md:col-span-1 p-3 border border-neutral-300 rounded-2xl flex items-center relative bg-white shadow-xs"
+              >
+                <Search className="absolute left-6.5 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" />
+                <input
+                  type="text"
+                  value={permissionsSearchQuery}
+                  onChange={(e) => setPermissionsSearchQuery(e.target.value)}
+                  placeholder="Search workers, units or remarks..."
+                  className="w-full pl-9 pr-9 py-2 text-xs sm:text-sm font-semibold bg-transparent text-neutral-900 placeholder-neutral-400 caret-neutral-900 border-0 outline-none transition-all duration-200 focus:ring-0"
+                />
+                {permissionsSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setPermissionsSearchQuery("")}
+                    className="absolute right-6 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-900 p-1 hover:bg-neutral-100 rounded-full transition-colors cursor-pointer"
+                    title="Clear Search"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Status Query Tabs */}
+              <div
+                className={`md:col-span-2 p-3 border rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${adminThemeClass.cardBg} w-full overflow-hidden`}
+              >
+                <div className="flex items-center space-x-3 shrink-0">
+                  <span
+                    className={`text-[10px] uppercase font-bold tracking-wider font-mono px-2 ${adminThemeClass.textMuted}`}
+                  >
+                    Query Filters
+                  </span>
+                </div>
+
+                {/* Switch View toggles for Permissions and Tabs pushed to the right edge */}
+                <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 sm:ml-auto w-full sm:w-auto justify-between sm:justify-end shrink-0 max-w-full">
+                  {/* Switch View toggles for Permissions */}
+                  <div className={`flex rounded-xl p-0.5 border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} shrink-0`}>
+                    <button
+                      type="button"
+                      onClick={() => setPermissionsViewMode("card")}
+                      title="Card Grid View"
+                      className={`p-2 rounded-lg cursor-pointer transition-all ${
+                        permissionsViewMode === "card"
+                          ? `${adminThemeClass.buttonSelected} shadow-sm`
+                          : `${adminThemeClass.textMuted} hover:${adminThemeClass.textHighlight}`
+                      }`}
+                    >
+                      <LayoutGrid className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPermissionsViewMode("list")}
+                      title="Detailed List View"
+                      className={`p-2 rounded-lg cursor-pointer transition-all ${
+                        permissionsViewMode === "list"
+                          ? `${adminThemeClass.buttonSelected} shadow-sm`
+                          : `${adminThemeClass.textMuted} hover:${adminThemeClass.textHighlight}`
+                      }`}
+                    >
+                      <List className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <div
+                    className={`flex rounded-xl p-1 border select-none divide-x-0 ${adminThemeClass.innerBg} max-w-full sm:max-w-md overflow-x-auto shrink-0`}
+                  >
+                    {(["all", "pending", "approved", "rejected"] as const).map(
+                      (tab) => {
+                        const count = tab === "all"
+                          ? permissions.length
+                          : permissions.filter(
+                              (p) => p.status.toLowerCase() === tab,
+                            ).length;
+                        return (
+                          <button
+                            key={tab}
+                            type="button"
+                            onClick={() => setPermissionsQueryTab(tab)}
+                            className={`py-1.5 px-2.5 sm:px-3 text-xs font-semibold rounded-lg text-center capitalize transition-all cursor-pointer whitespace-nowrap flex items-center justify-center gap-1.5 ${permissionsQueryTab === tab ? `text-cyan-600 dark:text-cyan-400 shadow-sm font-bold scale-[1.02] ${adminThemeClass.cardBg}` : `hover:text-cyan-600 ${adminThemeClass.textMuted}`}`}
+                          >
+                            <span>{tab}</span>
+                            {count > 0 && (
+                              <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded-full ${permissionsQueryTab === tab ? 'bg-cyan-500/20 text-cyan-600 dark:text-cyan-400' : 'bg-neutral-500/20 text-neutral-600 dark:text-neutral-400'}`}>
+                                {count}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      },
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {permissionsViewMode === "card" ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {filteredPermissions.length === 0 ? (
+                  <div
+                    className={`col-span-full p-8 text-center border rounded-2xl ${adminThemeClass.textMuted}`}
+                  >
+                    No permission requests found matching current filter and query
+                    criteria.
+                  </div>
+                ) : (
+                  filteredPermissions.map((p, idx) => {
+                    const targetUser = workers.find((w) => w.id === p.worker_id);
+                    if (!targetUser) return null;
+                    const deptName =
+                      departments.find((d) => d.id === targetUser.department_id)
+                        ?.name ||
+                      translations.unassignedUnit ||
+                      "Unassigned Unit";
+
+                    return (
+                      <div
+                        key={idx}
+                        className={`p-6 rounded-3xl border flex flex-col justify-between space-y-4 shadow-xl ${adminThemeClass.cardBg}`}
+                      >
+                        <div className="flex justify-between items-start">
+                          <div className="flex items-center space-x-3">
+                            <img
+                              src={
+                                targetUser.profilePhoto?.medium ||
+                                IMAGES.defaultWorkerAvatar
+                              }
+                              alt=""
+                              className={`h-10 w-10 rounded-xl object-cover border bg-neutral-100 ${adminThemeClass.accentBorder}`}
+                            />
+                            <div>
+                              <strong
+                                className={`block text-sm ${adminThemeClass.textTitle}`}
+                              >
+                                {targetUser.firstName} {targetUser.lastName}
+                              </strong>
+                              <span
+                                className={`text-[10px] font-semibold ${adminThemeClass.textMuted}`}
+                              >
+                                {deptName} &bull; {targetUser.role.toUpperCase()}
+                              </span>
+                            </div>
+                          </div>
+
+                          <span
+                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase border ${p.status === PermissionStatus.PENDING ? "bg-orange-50 dark:bg-orange-950/40 text-orange-705 dark:text-orange-400 border-orange-200 dark:border-orange-800/30" : p.status === PermissionStatus.APPROVED ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-705 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/30" : "bg-red-50 dark:bg-red-950/40 text-red-705 dark:text-red-400 border-red-200 dark:border-red-800/30"}`}
+                          >
+                            {p.status === PermissionStatus.PENDING
+                              ? translations.pendingStatus || "Pending"
+                              : p.status === PermissionStatus.APPROVED
+                                ? translations.approvedStatus || "Approved"
+                                : translations.rejectedStatus || "Rejected"}
+                          </span>
+                        </div>
+
+                        <div className="space-y-2">
+                          <div
+                            className={`text-xs font-light flex items-center space-x-1.5 ${adminThemeClass.textTitle}`}
+                          >
+                            <span
+                              className={`font-bold uppercase text-[9px] ${adminThemeClass.textMuted}`}
+                            >
+                              {translations.reasonLabel || "Reason:"}
+                            </span>
+                            <strong
+                              className={`font-bold ${adminThemeClass.accentText}`}
+                            >
+                              {p.reason}
+                            </strong>
+                          </div>
+                          <div
+                            className={`text-xs font-light flex items-center space-x-1.5 ${adminThemeClass.textTitle}`}
+                          >
+                            <span
+                              className={`font-bold uppercase text-[9px] ${adminThemeClass.textMuted}`}
+                            >
+                              {translations.intervalLabel || "Interval:"}
+                            </span>
+                            <span>
+                              {formatDateToCustomString(p.startDate)} &rarr;{" "}
+                              {formatDateToCustomString(p.endDate)}
+                            </span>
+                          </div>
+                          <div
+                            className={`p-3 rounded-xl text-xs font-light border italic ${adminThemeClass.innerBg} ${adminThemeClass.textMuted} ${adminThemeClass.accentBorder}`}
+                          >
+                            "{p.remarks}"
+                          </div>
+                        </div>
+
+                        {p.status === PermissionStatus.PENDING && (
+                          <div className="flex space-x-3 pt-2">
+                            <button
+                              onClick={() =>
+                                handleEvaluatePermission(
+                                  p.id,
+                                  PermissionStatus.APPROVED,
+                                )
+                              }
+                              className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-all shadow-md active:scale-95 cursor-pointer flex items-center justify-center space-x-1"
+                            >
+                              <CheckCircle2 className="h-4 w-4" />
+                              <span>
+                                {translations.approveBtn || "Approve Permission"}
+                              </span>
+                            </button>
+                            <button
+                              onClick={() =>
+                                handleEvaluatePermission(
+                                  p.id,
+                                  PermissionStatus.REJECTED,
+                                )
+                              }
+                              className={`flex-1 py-3 border text-xs font-bold rounded-xl transition-all active:scale-95 cursor-pointer flex items-center justify-center space-x-1 ${adminThemeClass.innerBg} ${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle} ${adminThemeClass.accentBorder}`}
+                            >
+                              <XCircle className="h-4 w-4" />
+                              <span>{translations.rejectBtn || "Reject"}</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            ) : (
+              /* High-Quality List / Table View for Permissions */
+              <div className={`overflow-x-auto rounded-3xl border shadow-xl ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}>
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className={`border-b ${adminThemeClass.accentBorder} bg-black/10`}>
+                      <th className={`p-4 font-bold uppercase tracking-wider text-[10px] ${adminThemeClass.textMuted}`}>Employee Name</th>
+                      <th className={`p-4 font-bold uppercase tracking-wider text-[10px] ${adminThemeClass.textMuted}`}>Reason & Remarks</th>
+                      <th className={`p-4 font-bold uppercase tracking-wider text-[10px] ${adminThemeClass.textMuted}`}>Exemption Interval</th>
+                      <th className={`p-4 font-bold uppercase tracking-wider text-[10px] ${adminThemeClass.textMuted}`}>Status</th>
+                      <th className={`p-4 font-bold uppercase tracking-wider text-[10px] text-right ${adminThemeClass.textMuted}`}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredPermissions.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className={`p-8 text-center ${adminThemeClass.textMuted}`}>
+                          No permission requests found matching current filter and query criteria.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredPermissions.map((p, idx) => {
+                        const targetUser = workers.find((w) => w.id === p.worker_id);
+                        if (!targetUser) return null;
+                        const deptName =
+                          departments.find((d) => d.id === targetUser.department_id)
+                            ?.name ||
+                          translations.unassignedUnit ||
+                          "Unassigned Unit";
+
+                        return (
+                          <tr
+                            key={idx}
+                            className={`border-b last:border-none transition-all hover:bg-black/10 ${adminThemeClass.accentBorder}`}
+                          >
+                            <td className="p-4">
+                              <div className="flex items-center space-x-3">
+                                <img
+                                  src={targetUser.profilePhoto?.small || IMAGES.defaultWorkerAvatar}
+                                  alt=""
+                                  className={`h-9 w-9 rounded-xl object-cover border bg-neutral-100 ${adminThemeClass.accentBorder}`}
+                                />
+                                <div>
+                                  <strong className={`font-bold block ${adminThemeClass.textTitle}`}>{targetUser.firstName} {targetUser.lastName}</strong>
+                                  <span className={`text-[10px] ${adminThemeClass.textMuted}`}>{deptName}</span>
+                                </div>
+                              </div>
+                            </td>
+
+                            <td className="p-4 space-y-1 max-w-[240px]">
+                              <strong className={`font-bold block ${adminThemeClass.accentText}`}>{p.reason}</strong>
+                              <p className={`text-[11px] italic font-light truncate ${adminThemeClass.textMuted}`} title={p.remarks}>
+                                "{p.remarks}"
+                              </p>
+                            </td>
+
+                            <td className="p-4 font-mono">
+                              {formatDateToCustomString(p.startDate)} &rarr; {formatDateToCustomString(p.endDate)}
+                            </td>
+
+                            <td className="p-4">
+                              <span
+                                className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase border ${p.status === PermissionStatus.PENDING ? "bg-orange-50 dark:bg-orange-950/40 text-orange-705 dark:text-orange-400 border-orange-200 dark:border-orange-800/30" : p.status === PermissionStatus.APPROVED ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-705 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/30" : "bg-red-50 dark:bg-red-950/40 text-red-705 dark:text-red-400 border-red-200 dark:border-red-800/30"}`}
+                              >
+                                {p.status === PermissionStatus.PENDING
+                                  ? translations.pendingStatus || "Pending"
+                                  : p.status === PermissionStatus.APPROVED
+                                    ? translations.approvedStatus || "Approved"
+                                    : translations.rejectedStatus || "Rejected"}
+                              </span>
+                            </td>
+
+                            <td className="p-4 text-right">
+                              {p.status === PermissionStatus.PENDING ? (
+                                <div className="flex justify-end items-center space-x-2">
+                                  <button
+                                    onClick={() => handleEvaluatePermission(p.id, PermissionStatus.APPROVED)}
+                                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs flex items-center space-x-1 shadow-sm transition-all cursor-pointer"
+                                    title="Approve Exemption"
+                                  >
+                                    <CheckCircle2 className="h-3.5 w-3.5" />
+                                    <span>Approve</span>
+                                  </button>
+                                  <button
+                                    onClick={() => handleEvaluatePermission(p.id, PermissionStatus.REJECTED)}
+                                    className={`px-3 py-1.5 border text-xs font-bold rounded-lg flex items-center space-x-1 transition-all cursor-pointer ${adminThemeClass.innerBg} ${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle} ${adminThemeClass.accentBorder}`}
+                                    title="Reject Exemption"
+                                  >
+                                    <XCircle className="h-3.5 w-3.5" />
+                                    <span>Reject</span>
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className={`text-[10px] italic ${adminThemeClass.textMuted}`}>No action pending</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+        {/* -------------------- TAB AREA: WORKER PROFILES -------------------- */}
+        {/* -------------------- TAB AREA: WORKER PROFILES -------------------- */}
+        {activeTab === "profiles" && (
+          <div className="space-y-6 select-none font-sans">
+            <div
+              className={`p-6 rounded-3xl border shadow-xl flex items-center justify-between flex-wrap gap-4 ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+            >
+              <div>
+                <h3
+                  className={`font-semibold text-lg mb-1 ${adminThemeClass.textTitle}`}
+                >
+                  {translations.corporateDirectories ||
+                    "Corporate Directories roster"}
+                </h3>
+                <p
+                  className={`text-xs font-light ${adminThemeClass.textMuted}`}
+                >
+                  {translations.exploreDirectoriesDesc ||
+                    "Explore lists, filter roles, and inspect historical profiles."}
+                </p>
+              </div>
+
+              {/* Action Suite: Search, Create Employee & Grid/List toggles */}
+              <div className="flex items-center gap-3.5 flex-wrap w-full md:w-auto">
+                {/* Search Box */}
+                <div className="relative flex-1 sm:flex-initial sm:w-64">
+                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <input
+                    type="text"
+                    value={profilesSearchQuery}
+                    onChange={(e) => setProfilesSearchQuery(e.target.value)}
+                    placeholder="Search by name, role..."
+                    className="w-full pl-10 pr-10 py-2.5 text-xs font-semibold rounded-xl border border-neutral-300 outline-none transition-all duration-200 bg-white text-neutral-900 placeholder-neutral-400 caret-neutral-900 focus:border-cyan-500 shadow-xs"
+                  />
+                  {profilesSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setProfilesSearchQuery("")}
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-900 p-1 hover:bg-neutral-100 rounded-full transition-colors cursor-pointer"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Switch View toggles */}
+                <div className={`flex rounded-xl p-0.5 border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                  <button
+                    type="button"
+                    onClick={() => setProfilesViewMode("card")}
+                    title="Card Grid View"
+                    className={`p-2 rounded-lg cursor-pointer transition-all ${
+                      profilesViewMode === "card"
+                        ? `${adminThemeClass.buttonSelected} shadow-sm`
+                        : `${adminThemeClass.textMuted} hover:${adminThemeClass.textHighlight}`
+                    }`}
+                  >
+                    <LayoutGrid className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setProfilesViewMode("list")}
+                    title="Detailed List View"
+                    className={`p-2 rounded-lg cursor-pointer transition-all ${
+                      profilesViewMode === "list"
+                        ? `${adminThemeClass.buttonSelected} shadow-sm`
+                        : `${adminThemeClass.textMuted} hover:${adminThemeClass.textHighlight}`
+                    }`}
+                  >
+                    <List className="h-4 w-4" />
+                  </button>
+                </div>
+
+                {/* Manage Department Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLocalNewDeptName("");
+                    setShowManageDeptModal(true);
+                  }}
+                  className="px-4 py-2.5 bg-neutral-800 text-white border border-neutral-700 hover:bg-neutral-700 font-bold rounded-xl text-xs flex items-center space-x-1.5 shadow-md cursor-pointer min-h-[44px]"
+                >
+                  <Building className="h-4 w-4 text-cyan-500" />
+                  <span>Manage Department</span>
+                </button>
+
+                {/* Add Worker Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWorkerFormFirstName("");
+                    setWorkerFormLastName("");
+                    setWorkerFormEmail("");
+                    setWorkerFormPhone("");
+                    setWorkerFormRole(UserRole.TEAM_MEMBER);
+                    setWorkerFormGender("Not Specified");
+                    setWorkerFormDeptId("unassigned");
+                    setWorkerFormActivityDays(settings?.activityDays || {
+                      Monday: true,
+                      Tuesday: true,
+                      Wednesday: true,
+                      Thursday: true,
+                      Friday: true,
+                      Saturday: false,
+                      Sunday: false
+                    });
+                    setShowAddWorkerModal(true);
+                  }}
+                  className="px-4 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl text-xs flex items-center space-x-1.5 shadow-md shadow-cyan-950/20 cursor-pointer min-h-[44px]"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>Register Employee</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Render Grid / List layouts */}
+            {profilesViewMode === "card" ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredWorkersForProfiles.map((w, idx) => {
+                  const isDeptLead = w.role === UserRole.TEAM_LEAD;
+                  const deptLabel =
+                    departments.find((d) => d.id === w.department_id)?.name ||
+                    translations.unassignedUnit ||
+                    "Unassigned Unit";
+
+                  return (
+                    <div
+                      key={`${w.id}-${w.profilePhoto?.medium || ""}`}
+                      onClick={() => {
+                        const m = calculateMetricsForTimeframe(w.id, timeframe);
+                        setActiveLeaderModal({ ...w, m });
+                      }}
+                      className={`p-6 rounded-3xl border flex flex-col justify-between items-center text-center relative overflow-hidden shadow-xl duration-200 hover:scale-[1.02] cursor-pointer hover:shadow-2xl hover:border-cyan-500/50 ${isDeptLead ? `bg-gradient-to-br from-cyan-500/5 via-neutral-100/10 to-neutral-200/5 ${adminThemeClass.accentBorder}` : `${adminThemeClass.cardBg}`}`}
+                    >
+                      {isDeptLead && (
+                        <span
+                          className={`absolute top-3 right-3 text-[9px] font-bold ${adminThemeClass.accentText} ${adminThemeClass.innerBg} border ${adminThemeClass.accentBorder} px-2.5 py-0.5 rounded-full uppercase`}
+                        >
+                          {translations.deptLeadBadge || "Department Lead"}
+                        </span>
+                      )}
+
+                      <img
+                        src={w.profilePhoto?.medium || IMAGES.defaultWorkerAvatar}
+                        alt=""
+                        className={`h-20 w-20 rounded-2xl object-cover bg-neutral-100/5 border shadow-sm mb-4 ${adminThemeClass.accentBorder}`}
+                      />
+
+                      <div className="space-y-1">
+                        <h4
+                          className={`font-bold text-base leading-tight ${adminThemeClass.textTitle}`}
+                        >
+                          {w.firstName} {w.lastName}
+                        </h4>
+                        <span
+                          className={`text-xs font-semibold uppercase block ${adminThemeClass.textMuted}`}
+                        >
+                          {w.title ||
+                            translations.staffMemberTitle ||
+                            "Staff Member"}
+                        </span>
+                        <span
+                          className={`block text-[11px] font-bold ${adminThemeClass.accentText}`}
+                        >
+                          {deptLabel}
+                        </span>
+                      </div>
+
+                      <div
+                        className={`w-full border-t mt-5 pt-4 flex justify-between text-xs font-mono ${adminThemeClass.textMuted} ${adminThemeClass.accentBorder}`}
+                      >
+                        <span>{w.phone || "No Phone"}</span>
+                        <span
+                          className={`text-[10px] font-sans font-bold hover:underline ${adminThemeClass.accentText}`}
+                        >
+                          {translations.viewMetricsBtn || "View Metrics →"}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              /* High-Quality List / Table View with detailed controls and spacing */
+              <div className={`overflow-x-auto rounded-3xl border shadow-xl ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}>
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className={`border-b ${adminThemeClass.accentBorder} bg-black/10`}>
+                      <th className={`p-4 font-bold uppercase tracking-wider text-[10px] ${adminThemeClass.textMuted}`}>S/N</th>
+                      <th className={`p-4 font-bold uppercase tracking-wider text-[10px] ${adminThemeClass.textMuted}`}>Employee Name</th>
+                      <th className={`p-4 font-bold uppercase tracking-wider text-[10px] ${adminThemeClass.textMuted}`}>Title & Role</th>
+                      <th className={`p-4 font-bold uppercase tracking-wider text-[10px] ${adminThemeClass.textMuted}`}>Department Unit</th>
+                      <th className={`p-4 font-bold uppercase tracking-wider text-[10px] ${adminThemeClass.textMuted}`}>Contact Number</th>
+                      <th className={`p-4 font-bold uppercase tracking-wider text-[10px] text-right ${adminThemeClass.textMuted}`}>Details</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredWorkersForProfiles.map((w, idx) => {
+                      const isDeptLead = w.role === UserRole.TEAM_LEAD;
+                      const deptLabel =
+                        departments.find((d) => d.id === w.department_id)?.name ||
+                        translations.unassignedUnit ||
+                        "Unassigned Unit";
+
+                      return (
+                        <tr
+                          key={`${w.id}-${w.profilePhoto?.small || ""}`}
+                          onClick={() => {
+                            const m = calculateMetricsForTimeframe(w.id, timeframe);
+                            setActiveLeaderModal({ ...w, m });
+                          }}
+                          className={`border-b last:border-none transition-all cursor-pointer hover:bg-black/10 ${adminThemeClass.accentBorder}`}
+                        >
+                          {/* S/N */}
+                          <td className={`p-4 font-mono text-[11px] font-bold ${adminThemeClass.textTitle}`}>
+                            {idx + 1}
+                          </td>
+
+                          {/* Name Card */}
+                          <td className="p-4 flex items-center space-x-3">
+                            <img
+                              src={w.profilePhoto?.small || IMAGES.defaultWorkerAvatar}
+                              alt=""
+                              className={`h-9 w-9 rounded-xl object-cover bg-neutral-100/5 border ${adminThemeClass.accentBorder}`}
+                            />
+                            <div>
+                              <strong className={`font-bold block ${adminThemeClass.textTitle}`}>{w.firstName} {w.lastName}</strong>
+                              <span className="text-[10px] text-gray-400 font-mono">ID: {w.id}</span>
+                            </div>
+                          </td>
+
+                          {/* Role */}
+                          <td className="p-4">
+                            <span className={`font-bold block ${adminThemeClass.textTitle}`}>{w.title || "Staff Member"}</span>
+                            <span className="text-[10px] uppercase font-bold text-[#00bcd4]">{w.role}</span>
+                          </td>
+
+                          {/* Department */}
+                          <td className="p-4">
+                            <span className={`inline-block px-2.5 py-1 rounded-full text-[9px] font-bold font-mono ${isDeptLead ? 'bg-amber-500/10 text-amber-400 border border-amber-500/25' : `${adminThemeClass.innerBg} ${adminThemeClass.textTitle} border ${adminThemeClass.accentBorder}`}`}>
+                              {deptLabel} {isDeptLead && "Lead"}
+                            </span>
+                          </td>
+
+                          {/* Contact */}
+                          <td className="p-4 font-mono font-semibold">
+                            {w.phone || "No phone linked"}
+                          </td>
+
+                          {/* Details */}
+                          <td className="p-4 text-right">
+                            <span className={`text-[10px] font-sans font-bold hover:underline ${adminThemeClass.accentText}`}>
+                              {translations.viewMetricsBtn || "View Metrics →"}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* -------------------- TAB AREA: BILLING & SUBSCRIPTION -------------------- */}
+        {activeTab === "billing" && (
+          <div className="space-y-6 select-none font-sans">
+            {/* Header: Billing Gateway Workspace (Header Card appearing stylishly) */}
+            <div
+              className={`p-6 sm:p-8 rounded-3xl border shadow-xl transition-all duration-300 relative overflow-hidden backdrop-blur-md ${
+                isGatewayWorkspaceSelected
+                  ? "border-cyan-500/60 bg-gradient-to-br from-cyan-500/5 via-cyan-950/10 to-transparent shadow-cyan-950/20"
+                  : `border-dashed hover:border-cyan-500/40 ${adminThemeClass.cardBg}`
+              }`}
+            >
+              {/* Decorative radial ambient glow inside card */}
+              <div className="absolute top-0 right-0 h-48 w-48 bg-cyan-500/5 rounded-full blur-3xl pointer-events-none" />
+
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-5 relative z-10">
+                <div className="space-y-2">
+                  <div className="flex items-center space-x-3">
+                    <div
+                      className={`h-2.5 w-2.5 rounded-full ${isGatewayWorkspaceSelected ? "bg-emerald-400 shadow-md shadow-emerald-400/50 animate-pulse" : "bg-cyan-400 animate-pulse"}`}
+                    />
+                    <h3
+                      className={`font-semibold text-xl ${adminThemeClass.textTitle}`}
+                    >
+                      {translations.billingGatewayWorkspace ||
+                        "Billing Gateway Workspace"}
+                    </h3>
+                  </div>
+                  <p
+                    className={`text-xs font-light max-w-xl leading-relaxed ${adminThemeClass.textMuted}`}
+                  >
+                    {translations.billingGatewayWorkspaceDesc ||
+                      "Unlock limits and upgrade plan slots securely. Handled server-side with zero reliance on local device times to prevent trial abuse. Supported integrations: Opay & Paystack channels."}
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => {
+                    const nextVal = !isGatewayWorkspaceSelected;
+                    setIsGatewayWorkspaceSelected(nextVal);
+                    if (!nextVal) {
+                      // Reset selections if the workspace is deselected
+                      setSelectedPlanCode("");
+                      setGatewaySelected(null);
+                    }
+                  }}
+                  className={`px-6 py-3 rounded-xl text-xs font-bold transition-all duration-200 cursor-pointer shrink-0 ${
+                    isGatewayWorkspaceSelected
+                      ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20"
+                      : "bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-md shadow-cyan-950/30 hover:scale-[1.01] active:scale-95"
+                  }`}
+                >
+                  {isGatewayWorkspaceSelected
+                    ? "✓ Workspace Connected"
+                    : "Select Gateway Workspace"}
+                </button>
+              </div>
+            </div>
+
+            {/* Step 2: Packages appear only when Billing Gateway Workspace is selected */}
+            <AnimatePresence>
+              {isGatewayWorkspaceSelected && (
+                <motion.div
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 15 }}
+                  transition={{ duration: 0.25 }}
+                  className="space-y-4"
+                >
+                  <div className="flex items-center justify-between">
+                    <h4
+                      className={`font-bold text-base ${adminThemeClass.textTitle}`}
+                    >
+                      Available Subscription Packages
+                    </h4>
+                    <span className="text-[10px] font-mono text-cyan-405 dark:text-cyan-400">
+                      Select a package setup below to configure gateway
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                    {/* Starter */}
+                    <div
+                      className={`p-6 rounded-3xl border flex flex-col justify-between transition-all duration-200 ${selectedPlanCode === "starter" ? `border-cyan-500 bg-cyan-500/5 ring-1 ring-cyan-500 ${adminThemeClass.cardBg}` : `${adminThemeClass.cardBg}`}`}
+                    >
+                      <div>
+                        <span
+                          className={`text-[10px] uppercase font-bold ${adminThemeClass.textMuted}`}
+                        >
+                          {translations.starterPlan || "Starter Plan"}
+                        </span>
+                        <h4
+                          className={`text-2xl font-bold mt-1 ${adminThemeClass.textTitle}`}
+                        >
+                          ₦10,000
+                        </h4>
+                        <span
+                          className={`text-xs block pb-4 mb-4 border-b ${adminThemeClass.textMuted} ${adminThemeClass.accentBorder}`}
+                        >
+                          {translations.monthlyRenewalBilling ||
+                            "Monthly renewal billing"}
+                        </span>
+                        <p
+                          className={`text-xs font-light mb-6 font-sans ${adminThemeClass.textMuted}`}
+                        >
+                          {translations.starterPlanDesc ||
+                            "Pragmatic workspace supporting up to 10 employees safely."}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setSelectedPlanCode("starter")}
+                        className={`w-full py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all ${selectedPlanCode === "starter" ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/45" : `${adminThemeClass.innerBg} border ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`}`}
+                      >
+                        {selectedPlanCode === "starter"
+                          ? "✓ Selected"
+                          : translations.selectPlanBtn || "Select Plan"}
+                      </button>
+                    </div>
+
+                    {/* Business */}
+                    <div
+                      className={`p-6 rounded-3xl border flex flex-col justify-between transition-all duration-200 ${selectedPlanCode === "business" ? `border-cyan-500 bg-cyan-500/5 ring-1 ring-cyan-500 ${adminThemeClass.cardBg}` : `${adminThemeClass.cardBg}`}`}
+                    >
+                      <div>
+                        <span
+                          className={`text-[10px] uppercase font-bold ${adminThemeClass.textMuted}`}
+                        >
+                          {translations.businessPlan || "Business Plan"}
+                        </span>
+                        <h4
+                          className={`text-2xl font-bold mt-1 ${adminThemeClass.textTitle}`}
+                        >
+                          ₦30,000
+                        </h4>
+                        <span
+                          className={`text-xs block pb-4 mb-4 border-b ${adminThemeClass.textMuted} ${adminThemeClass.accentBorder}`}
+                        >
+                          {translations.monthlyRenewalBilling ||
+                            "Monthly renewal billing"}
+                        </span>
+                        <p
+                          className={`text-xs font-light mb-6 font-sans ${adminThemeClass.textMuted}`}
+                        >
+                          {translations.businessPlanDesc ||
+                            "Designed for expanding business operations supporting 11-50 employees."}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setSelectedPlanCode("business")}
+                        className={`w-full py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all ${selectedPlanCode === "business" ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/45" : `${adminThemeClass.innerBg} border ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`}`}
+                      >
+                        {selectedPlanCode === "business"
+                          ? "✓ Selected"
+                          : translations.selectPlanBtn || "Select Plan"}
+                      </button>
+                    </div>
+
+                    {/* Growth */}
+                    <div
+                      className={`p-6 rounded-3xl border flex flex-col justify-between transition-all duration-200 ${selectedPlanCode === "growth" ? `border-cyan-500 bg-cyan-500/5 ring-1 ring-cyan-500 ${adminThemeClass.cardBg}` : `${adminThemeClass.cardBg}`}`}
+                    >
+                      <div>
+                        <span
+                          className={`text-[10px] uppercase font-bold ${adminThemeClass.textMuted}`}
+                        >
+                          {translations.growthPlan || "Growth Plan"}
+                        </span>
+                        <h4
+                          className={`text-2xl font-bold mt-1 ${adminThemeClass.textTitle}`}
+                        >
+                          ₦50,050
+                        </h4>
+                        <span
+                          className={`text-xs block pb-4 mb-4 border-b ${adminThemeClass.textMuted} ${adminThemeClass.accentBorder}`}
+                        >
+                          {translations.monthlyRenewalBilling ||
+                            "Monthly renewal billing"}
+                        </span>
+                        <p
+                          className={`text-xs font-light mb-6 font-sans ${adminThemeClass.textMuted}`}
+                        >
+                          {translations.growthPlanDesc ||
+                            "Pragmatic workspace supporting up to 51-100 employees safely."}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setSelectedPlanCode("growth")}
+                        className={`w-full py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all ${selectedPlanCode === "growth" ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/45" : `${adminThemeClass.innerBg} border ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`}`}
+                      >
+                        {selectedPlanCode === "growth"
+                          ? "✓ Selected"
+                          : translations.selectPlanBtn || "Select Plan"}
+                      </button>
+                    </div>
+
+                    {/* Enterprise */}
+                    <div
+                      className={`p-6 rounded-3xl border flex flex-col justify-between transition-all duration-200 ${selectedPlanCode === "enterprise" ? `border-cyan-500 bg-cyan-500/5 ring-1 ring-cyan-500 ${adminThemeClass.cardBg}` : `${adminThemeClass.cardBg}`}`}
+                    >
+                      <div>
+                        <span
+                          className={`text-[10px] uppercase font-bold ${adminThemeClass.textMuted}`}
+                        >
+                          {translations.enterprisePlan || "Enterprise Plan"}
+                        </span>
+                        <h4
+                          className={`text-2xl font-bold mt-1 ${adminThemeClass.textTitle}`}
+                        >
+                          ₦150,000
+                        </h4>
+                        <span
+                          className={`text-xs block pb-4 mb-4 border-b ${adminThemeClass.textMuted} ${adminThemeClass.accentBorder}`}
+                        >
+                          {translations.monthlyRenewalBilling ||
+                            "Monthly renewal billing"}
+                        </span>
+                        <p
+                          className={`text-xs font-light mb-6 font-sans ${adminThemeClass.textMuted}`}
+                        >
+                          {translations.enterprisePlanDesc ||
+                            "Pragmatic workspace supporting unlimited employees and priority compilations."}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setSelectedPlanCode("enterprise")}
+                        className={`w-full py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all ${selectedPlanCode === "enterprise" ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/45" : `${adminThemeClass.innerBg} border ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`}`}
+                      >
+                        {selectedPlanCode === "enterprise"
+                          ? "✓ Selected"
+                          : translations.selectPlanBtn || "Select Plan"}
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Step 3: Complete renewal using gateway providers is invisible UNTIL a package is clicked or selected */}
+            <AnimatePresence>
+              {isGatewayWorkspaceSelected && selectedPlanCode && (
+                <motion.div
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 15 }}
+                  transition={{ duration: 0.25 }}
+                  className={`p-6 sm:p-8 rounded-3xl border shadow-xl relative ${adminThemeClass.cardBg}`}
+                >
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-2">
+                    <div>
+                      <span
+                        className={`text-[10px] font-bold uppercase block mb-1 ${adminThemeClass.textMuted}`}
+                      >
+                        {translations.verifyCheckoutChannels ||
+                          "Verify Active checkout channels"}
+                      </span>
+                      <h4
+                        className={`font-bold text-lg ${adminThemeClass.textTitle}`}
+                      >
+                        {translations.completeRenewalGateway ||
+                          "Complete renewal using gateway providers"}
+                      </h4>
+                    </div>
+                    {/* Active selection tag */}
+                    {gatewaySelected && (
+                      <span className="text-[10px] font-mono tracking-wider text-cyan-405 dark:text-cyan-400 bg-cyan-400/10 px-2.5 py-1 rounded-full uppercase self-start md:self-auto">
+                        Active Gateway: {gatewaySelected}
+                      </span>
+                    )}
+                  </div>
+
+                  {billingProgress && (
+                    <div className="bg-cyan-50 dark:bg-cyan-950/40 border border-cyan-200 dark:border-cyan-800 text-cyan-705 dark:text-cyan-400 p-4 rounded-xl text-xs font-medium mb-6 font-mono">
+                      {billingProgress}
+                    </div>
+                  )}
+
+                  {/* Gateway selections - open for interaction */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-md">
+                    <button
+                      id="gateway_opay"
+                      onClick={() => setGatewaySelected("opay")}
+                      className={`p-4 rounded-2xl border text-left flex items-center justify-between cursor-pointer transition-all duration-150 ${gatewaySelected === "opay" ? "border-emerald-500 bg-emerald-50/75 dark:bg-emerald-950/20 text-emerald-850 dark:text-emerald-300 shadow-md transform scale-[1.01]" : `text-slate-650 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`}`}
+                    >
+                      <div>
+                        <strong className="block text-sm">
+                          {translations.opayTitle || "Opay Checkout Drawer"}
+                        </strong>
+                        <span className="text-[10px] opacity-75">
+                          {translations.opayDesc ||
+                            "Subscription verifier protocol active"}
+                        </span>
+                      </div>
+                      <strong className="text-xs font-extrabold tracking-widest text-emerald-600 dark:text-emerald-400">
+                        OPAY
+                      </strong>
+                    </button>
+
+                    <button
+                      id="gateway_paystack"
+                      onClick={() => setGatewaySelected("paystack")}
+                      className={`p-4 rounded-2xl border text-left flex items-center justify-between cursor-pointer transition-all duration-150 ${gatewaySelected === "paystack" ? "border-cyan-500 bg-cyan-50/70 dark:bg-cyan-950/20 text-cyan-850 dark:text-cyan-300 shadow-md transform scale-[1.01]" : `text-slate-650 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`}`}
+                    >
+                      <div>
+                        <strong className="block text-sm">
+                          {translations.paystackTitle ||
+                            "Paystack Checkout Card"}
+                        </strong>
+                        <span className="text-[10px] font-medium opacity-75">
+                          {translations.paystackDesc ||
+                            "Card & Bank transfer webhook sync"}
+                        </span>
+                      </div>
+                      <strong className="text-xs font-extrabold tracking-widest text-cyan-600 dark:text-cyan-400">
+                        PAYSTACK
+                      </strong>
+                    </button>
+                  </div>
+
+                  {/* Verify / Submission Controls */}
+                  {gatewaySelected && (
+                    <div className="mt-8 pt-6 border-t border-dashed border-neutral-200 dark:border-neutral-800">
+                      <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+                      >
+                        <div className="text-xs">
+                          <span
+                            className={`block font-bold capitalize ${adminThemeClass.textTitle}`}
+                          >
+                            Plan Selected: {selectedPlanCode} plan
+                          </span>
+                          <span
+                            className={`block text-[11px] ${adminThemeClass.textMuted}`}
+                          >
+                            Click below to dispatch renewal simulation webhook.
+                          </span>
+                        </div>
+                        <button
+                          onClick={handleBillingRenewalSubmit}
+                          className="px-8 py-3.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-cyan-950/45 active:scale-95 cursor-pointer max-w-xs"
+                        >
+                          {translations.verifyOnGateway
+                            ? translations.verifyOnGateway.replace(
+                                "{gateway}",
+                                gatewaySelected.toUpperCase(),
+                              )
+                            : `Verify checkout on ${gatewaySelected.toUpperCase()} Gateway`}
+                        </button>
+                      </motion.div>
+                    </div>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
+      </main>
+
+      {/* -------------------- MODAL AREA: MENU SETTINGS -------------------- */}
+      <AnimatePresence>
+        {showSettingsMenu && (
+          <div
+            className="fixed inset-0 bg-black/40 backdrop-blur-xs z-40 flex justify-end"
+            onClick={() => setShowSettingsMenu(false)}
+          >
+            <motion.div
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 220 }}
+              onClick={(e) => e.stopPropagation()}
+              className={`w-full max-w-[100vw] sm:max-w-lg h-full sm:h-[calc(100vh-32px)] sm:my-4 sm:mr-4 sm:rounded-[2rem] flex flex-col justify-between shadow-2xl p-6 select-none border-l sm:border backdrop-blur-3xl bg-opacity-95 dark:bg-opacity-95 ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+            >
+              <div className="overflow-y-auto flex-1 min-h-0 space-y-6 pr-2 mb-4">
+                {(() => {
+                  const currentSettings = localSettings || settings;
+                  if (currentSettings) {
+                    if (!currentSettings.dailyShiftTimes) {
+                      currentSettings.dailyShiftTimes = {};
+                    }
+                    if (!currentSettings.dailyShiftOutTimes) {
+                      currentSettings.dailyShiftOutTimes = {};
+                    }
+                    [
+                      "Sunday",
+                      "Monday",
+                      "Tuesday",
+                      "Wednesday",
+                      "Thursday",
+                      "Friday",
+                      "Saturday",
+                    ].forEach((d) => {
+                      if (!currentSettings.dailyShiftTimes[d]) {
+                        currentSettings.dailyShiftTimes[d] =
+                          currentSettings.checkIn?.time || "08:00";
+                      }
+                      if (!currentSettings.dailyShiftOutTimes[d]) {
+                        currentSettings.dailyShiftOutTimes[d] =
+                          currentSettings.checkOut?.time || "17:00";
+                      }
+                    });
+                  }
+                  return (
+                    <>
+                      <div
+                        className={`flex items-center justify-between border-b pb-4 mb-2 ${adminThemeClass.accentBorder}`}
+                      >
+                        <div className="flex items-center space-x-2">
+                          <Menu className="h-5 w-5 text-indigo-650 dark:text-cyan-400" />
+                          <span
+                            className={`font-display font-bold text-lg ${adminThemeClass.textTitle}`}
+                          >
+                            {translations.settingsTitle}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => setShowSettingsMenu(false)}
+                          className={`font-bold text-xl cursor-pointer ${adminThemeClass.textMuted} hover:${adminThemeClass.textHighlight}`}
+                        >
+                          &times;
+                        </button>
+                      </div>
+
+                      {/* THEME TOGGLE (With theme state update) */}
+                      <div className="space-y-2">
+                        <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider font-mono">
+                          Aesthetics
+                        </span>
+                        <div
+                          className={`grid grid-cols-2 gap-1.5 p-1 rounded-xl border ${adminThemeClass.innerBg}`}
+                        >
+                          <button
+                            type="button"
+                            id="theme_light"
+                            onClick={() => {
+                              const newSObj = {
+                                ...currentSettings,
+                                theme: "light" as const,
+                              };
+                              setLocalSettings(newSObj);
+                            }}
+                            className={`py-2 text-xs font-semibold rounded-lg text-center cursor-pointer transition-all flex items-center justify-center space-x-1 ${currentSettings.theme === "light" ? "bg-white dark:bg-zinc-850 text-indigo-600 dark:text-cyan-400 shadow-xs font-bold border border-neutral-150" : "text-gray-550 dark:text-neutral-400"}`}
+                          >
+                            <span>Light</span>
+                          </button>
+                          <button
+                            type="button"
+                            id="theme_dark"
+                            onClick={() => {
+                              const newSObj = {
+                                ...currentSettings,
+                                theme: "dark" as const,
+                              };
+                              setLocalSettings(newSObj);
+                            }}
+                            className={`py-2 text-xs font-semibold rounded-lg text-center cursor-pointer transition-all flex items-center justify-center space-x-1 ${currentSettings.theme === "dark" ? "bg-[#1A1A1A] text-cyan-400 border border-[#333] shadow-xs font-bold" : "text-gray-550 dark:text-neutral-400 hover:text-white"}`}
+                          >
+                            <span>Dark</span>
+                          </button>
+                          <button
+                            type="button"
+                            id="theme_army"
+                            onClick={() => {
+                              const newSObj = {
+                                ...currentSettings,
+                                theme: "army" as const,
+                              };
+                              setLocalSettings(newSObj);
+                            }}
+                            className={`py-2 text-xs font-semibold rounded-lg text-center cursor-pointer transition-all flex items-center justify-center space-x-1 ${currentSettings.theme === "army" ? "bg-[#25361E] text-emerald-400 border border-[#436134] shadow-xs font-bold" : "text-gray-550 dark:text-neutral-400 hover:text-emerald-400"}`}
+                          >
+                            <span>Army</span>
+                          </button>
+                          <button
+                            type="button"
+                            id="theme_navy"
+                            onClick={() => {
+                              const newSObj = {
+                                ...currentSettings,
+                                theme: "navy" as const,
+                              };
+                              setLocalSettings(newSObj);
+                            }}
+                            className={`py-2 text-xs font-semibold rounded-lg text-center cursor-pointer transition-all flex items-center justify-center space-x-1 ${currentSettings.theme === "navy" ? "bg-[#243361] text-cyan-400 border border-[#34498C] shadow-xs font-bold" : "text-gray-550 dark:text-neutral-400 hover:text-indigo-400"}`}
+                          >
+                            <span>Navy</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Language (English, French, Spanish) */}
+                      <div className="space-y-2">
+                        <span
+                          className={`text-[10px] uppercase font-bold tracking-wider font-mono ${adminThemeClass.textMuted}`}
+                        >
+                          Platform Localization
+                        </span>
+                        <CustomSelect
+                          value={currentSettings.language}
+                          onChange={(val) => {
+                            const newSObj = {
+                              ...currentSettings,
+                              language: val,
+                            };
+                            setLocalSettings(newSObj);
+                          }}
+                          className={`w-full border rounded-xl py-3 px-4 text-xs font-medium outline-none focus:border-cyan-500 min-h-[44px] ${adminThemeClass.inputBg}`}
+                          options={[
+                            {
+                              value: "en",
+                              label: "English (Centralized Suite)",
+                            },
+                            { value: "fr", label: "French (Suite localisée)" },
+                            {
+                              value: "es",
+                              label: "Spanish (Panel de Ajustes)",
+                            },
+                          ]}
+                          theme={theme}
+                        />
+                      </div>
+
+                      {/* Brand Customization: Company Logo */}
+                      <div
+                        className={`p-4 rounded-2xl border space-y-3 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                      >
+                        <span
+                          className={`text-[10px] uppercase font-bold tracking-wider font-mono block ${adminThemeClass.textTitle}`}
+                        >
+                          {translations.updateCompanyLogo ||
+                            "Update Company Logo"}
+                        </span>
+
+                        <div className="flex items-center space-x-4">
+                          <div
+                            className={`h-16 w-16 rounded-2xl border shadow-sm shrink-0 flex items-center justify-center overflow-hidden ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+                          >
+                            {companyLogoUrl ? (
+                              <img
+                                src={companyLogoUrl}
+                                alt="Company Logo Preview"
+                                className="h-full w-full object-cover select-none pointer-events-none"
+                              />
+                            ) : (
+                              <Shield
+                                className={`h-7 w-7 ${adminThemeClass.textMuted}`}
+                              />
+                            )}
+                          </div>
+                          <div className="flex flex-col space-y-1.5 flex-1 block">
+                            <span
+                              className={`text-xs font-medium ${adminThemeClass.textMuted}`}
+                            >
+                              {translations.uploadLogoDesc ||
+                                "Upload your official brand logo. This replaces the default shield icon and represents your portal identity globally."}
+                            </span>
+                            <div className="flex items-center space-x-2">
+                              <input
+                                type="file"
+                                ref={companyLogoFileInputRef}
+                                accept="image/*"
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) {
+                                    setSelectedLogoFile(file);
+                                    setShowUploadLogoConfirm(true);
+                                  }
+                                  e.target.value = "";
+                                }}
+                                className="hidden"
+                              />
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  companyLogoFileInputRef.current?.click()
+                                }
+                                className="px-3.5 py-2 text-[11px] font-bold text-white bg-gradient-to-r from-cyan-500 to-blue-600 hover:brightness-110 rounded-xl cursor-pointer transition-all active:scale-95 flex items-center space-x-1"
+                              >
+                                {translations.uploadLogo || "Upload Logo"}
+                              </button>
+                              {companyLogoUrl && (
+                                <button
+                                  type="button"
+                                  onClick={() => setShowResetLogoConfirm(true)}
+                                  className={`px-3.5 py-2 text-[11px] font-bold border rounded-xl cursor-pointer transition-all active:scale-95 ${adminThemeClass.accentBorder} ${adminThemeClass.accentText} bg-transparent hover:bg-neutral-500/5`}
+                                >
+                                  {translations.resetBtn || "Reset"}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Check-In Lateness Grace settings with switch and custom preset panel + time wheel */}
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <div className="flex flex-col pr-2">
+                            <span
+                              className={`text-[10px] uppercase font-bold tracking-wider font-mono ${adminThemeClass.textTitle}`}
+                            >
+                              Lateness Grace Protocol
+                            </span>
+                            <span className={`text-[11px] font-light leading-snug ${adminThemeClass.textMuted}`}>
+                              Toggle to activate or deactivate late arrival auditing for all staff check-ins.
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={currentSettings.checkIn?.latenessActive === true}
+                            onClick={() => {
+                              const newSObj = {
+                                ...currentSettings,
+                                checkIn: {
+                                  ...currentSettings.checkIn,
+                                  latenessActive: currentSettings.checkIn?.latenessActive === true ? false : true,
+                                },
+                              };
+                              setLocalSettings(newSObj);
+                            }}
+                            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border transition-colors duration-200 ease-in-out ${
+                              currentSettings.checkIn?.latenessActive === true
+                                ? "bg-indigo-650 dark:bg-cyan-600 border-indigo-700 dark:border-cyan-500"
+                                : "bg-neutral-300 dark:bg-neutral-700 border-neutral-400 dark:border-neutral-600"
+                            }`}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white dark:bg-neutral-300 shadow-xs transition duration-200 ease-in-out ${
+                                currentSettings.checkIn?.latenessActive === true ? "translate-x-5" : "translate-x-0"
+                              }`}
+                            />
+                          </button>
+                        </div>
+ 
+                        {currentSettings.checkIn?.latenessActive === true && (
+                          <div className="space-y-3 p-3.5 rounded-2xl border bg-black/5 dark:bg-black/20 border-neutral-200/40 dark:border-neutral-800/40 animate-none">
+                            <span className={`text-[10px] font-semibold block ${adminThemeClass.textMuted}`}>
+                              Select Grace Period Interval
+                            </span>
+                            
+                            {/* Preset Panel alongside */}
+                            <div className="grid grid-cols-3 gap-2">
+                              {[5, 10, 15, 20, 30, 45].map((preset) => {
+                                const isSelected = (currentSettings.checkIn?.latenessThreshold || 10) === preset;
+                                return (
+                                  <button
+                                    key={preset}
+                                    type="button"
+                                    onClick={() => {
+                                      const newSObj = {
+                                        ...currentSettings,
+                                        checkIn: {
+                                          ...currentSettings.checkIn,
+                                          latenessThreshold: preset,
+                                        },
+                                      };
+                                      setLocalSettings(newSObj);
+                                      setIsCustomWheelOpen(false);
+                                    }}
+                                    className={`py-2 text-xs font-bold rounded-xl border transition-all cursor-pointer ${
+                                      isSelected
+                                        ? "bg-cyan-600 text-white border-cyan-500 shadow-md"
+                                        : `${adminThemeClass.innerBg} ${adminThemeClass.textMuted} hover:border-cyan-500/30`
+                                    }`}
+                                  >
+                                    {preset} Min
+                                  </button>
+                                );
+                              })}
+                            </div>
+
+                            {/* Custom Wheel Trigger */}
+                            <div className="pt-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setIsCustomWheelOpen(!isCustomWheelOpen)}
+                                className={`w-full py-2.5 text-xs font-semibold rounded-xl border transition-all cursor-pointer flex items-center justify-center space-x-1.5 ${
+                                  isCustomWheelOpen || ![5,10,15,20,30,45].includes(currentSettings.checkIn?.latenessThreshold || 10)
+                                    ? "bg-indigo-650/10 text-indigo-455 border-indigo-505/30"
+                                    : `${adminThemeClass.innerBg} ${adminThemeClass.textMuted}`
+                                }`}
+                              >
+                                <span>⚙️ {[5,10,15,20,30,45].includes(currentSettings.checkIn?.latenessThreshold || 10) ? "Set Custom Interval Wheel" : `Custom: ${currentSettings.checkIn?.latenessThreshold || 10} min`}</span>
+                              </button>
+                            </div>
+
+                            {/* Modern iOS-Style Scroll Time Wheel */}
+                            {(isCustomWheelOpen || ![5,10,15,20,30,45].includes(currentSettings.checkIn?.latenessThreshold || 10)) && (
+                              <div className="flex flex-col items-center justify-center py-4 bg-black/20 rounded-2xl border border-neutral-850/40 relative">
+                                <span className="text-[9px] font-bold text-gray-500 tracking-widest uppercase mb-3">Modern custom minutes wheel</span>
+                                
+                                <div className="flex items-center space-x-4 relative">
+                                  {/* Decrement Button */}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const newVal = Math.max(1, (currentSettings.checkIn?.latenessThreshold || 10) - 1);
+                                      const newSObj = {
+                                        ...currentSettings,
+                                        checkIn: {
+                                          ...currentSettings.checkIn,
+                                          latenessThreshold: newVal,
+                                        },
+                                      };
+                                      setLocalSettings(newSObj);
+                                    }}
+                                    className="p-1.5 bg-neutral-800 text-white hover:bg-neutral-700 rounded-full cursor-pointer h-7 w-7 flex items-center justify-center font-bold text-xs"
+                                  >
+                                    -
+                                  </button>
+
+                                  {/* Glassmorphic scrolling viewport */}
+                                  <div className="relative h-28 w-24 overflow-hidden border border-neutral-700/30 rounded-2xl flex flex-col items-center bg-black/30 shadow-inner">
+                                    {/* Glass Overlay lens */}
+                                    <div className="absolute top-1/2 -translate-y-1/2 h-8 w-full border-y border-cyan-500/40 bg-cyan-500/10 pointer-events-none" />
+                                    
+                                    {/* Cylindrical scrolling display wheel */}
+                                    <div className="h-full overflow-y-auto scrollbar-none snap-y snap-mandatory py-10 w-full text-center scroll-smooth"
+                                         onScroll={(e) => {
+                                           const target = e.currentTarget;
+                                           const itemHeight = 28; // 28px per item
+                                           const index = Math.round(target.scrollTop / itemHeight);
+                                           const newVal = Math.min(120, Math.max(1, index + 1));
+                                           if (newVal !== (currentSettings.checkIn?.latenessThreshold || 10)) {
+                                             const newSObj = {
+                                               ...currentSettings,
+                                               checkIn: {
+                                                 ...currentSettings.checkIn,
+                                                 latenessThreshold: newVal,
+                                               },
+                                             };
+                                             setLocalSettings(newSObj);
+                                           }
+                                         }}
+                                    >
+                                      {Array.from({ length: 120 }, (_, i) => i + 1).map((m) => {
+                                        const isSelected = (currentSettings.checkIn?.latenessThreshold || 10) === m;
+                                        return (
+                                          <div
+                                            key={m}
+                                            onClick={() => {
+                                              const newSObj = {
+                                                ...currentSettings,
+                                                checkIn: {
+                                                  ...currentSettings.checkIn,
+                                                  latenessThreshold: m,
+                                                },
+                                              };
+                                              setLocalSettings(newSObj);
+                                            }}
+                                            className={`h-7 flex items-center justify-center snap-center text-xs font-bold cursor-pointer transition-all duration-150 ${
+                                              isSelected ? "text-cyan-400 scale-110 font-black" : "text-neutral-500 scale-90"
+                                            }`}
+                                          >
+                                            {m} Min
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+
+                                  {/* Increment Button */}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const newVal = Math.min(120, (currentSettings.checkIn?.latenessThreshold || 10) + 1);
+                                      const newSObj = {
+                                        ...currentSettings,
+                                        checkIn: {
+                                          ...currentSettings.checkIn,
+                                          latenessThreshold: newVal,
+                                        },
+                                      };
+                                      setLocalSettings(newSObj);
+                                    }}
+                                    className="p-1.5 bg-neutral-800 text-white hover:bg-neutral-700 rounded-full cursor-pointer h-7 w-7 flex items-center justify-center font-bold text-xs"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                                <span className="text-[10px] text-cyan-400 font-bold font-mono mt-3">Selected Grace: {currentSettings.checkIn?.latenessThreshold || 10} minutes</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Check-In Handshake Audio Notification Selection */}
+                      <div className="space-y-3 border-t pt-4 border-neutral-200/40 dark:border-neutral-800/40">
+                        <div className="flex flex-col pr-2">
+                          <span
+                            className={`text-[10px] uppercase font-bold tracking-wider font-mono ${adminThemeClass.textTitle} flex items-center space-x-1.5`}
+                          >
+                            <Volume2 className="h-3.5 w-3.5 text-cyan-500" />
+                            <span>Check-In Notification Sound</span>
+                          </span>
+                          <span className={`text-[11px] font-light leading-snug ${adminThemeClass.textMuted}`}>
+                            Select a custom synthesized audio beep to trigger as an immediate acoustic acknowledgement upon successful employee check-in.
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                          {[
+                            { key: "none", label: "Silent" },
+                            { key: "beep", label: "Beep" },
+                            { key: "chime", label: "Chime" },
+                            { key: "digital", label: "Digital" },
+                            { key: "ping", label: "Ping" }
+                          ].map((sound) => {
+                            const isSelected = (currentSettings.checkIn?.soundName || "none") === sound.key;
+                            return (
+                              <div key={sound.key} className="relative group">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const newSObj = {
+                                      ...currentSettings,
+                                      checkIn: {
+                                        ...currentSettings.checkIn,
+                                        soundName: sound.key,
+                                      },
+                                    };
+                                    setLocalSettings(newSObj);
+                                    // Play test preview immediately on selection
+                                    playCheckInSound(sound.key);
+                                  }}
+                                  className={`w-full py-2.5 px-2 text-xs font-bold rounded-xl border transition-all cursor-pointer text-center ${
+                                    isSelected
+                                      ? "bg-cyan-600 text-white border-cyan-500 shadow-md"
+                                      : `${adminThemeClass.innerBg} ${adminThemeClass.textMuted} hover:border-cyan-500/30`
+                                  }`}
+                                >
+                                  {sound.label}
+                                </button>
+                                {sound.key !== "none" && (
+                                  <button
+                                    type="button"
+                                    title="Play sound preview"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      playCheckInSound(sound.key);
+                                    }}
+                                    className="absolute -top-1 -right-1 opacity-0 group-hover:opacity-100 bg-neutral-800 hover:bg-neutral-700 text-white p-0.5 rounded-full text-[8px] border border-neutral-700 transition-all cursor-pointer"
+                                  >
+                                    ▶️
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Location-Based Premises Verification Protocol */}
+                      <div className="space-y-4 border-t pt-4 border-neutral-200/40 dark:border-neutral-800/40">
+                        <div className="flex items-center justify-between">
+                          <div className="flex flex-col pr-2">
+                            <span
+                              className={`text-[10px] uppercase font-bold tracking-wider font-mono ${adminThemeClass.textTitle}`}
+                            >
+                              Location Proximity Verification
+                            </span>
+                            <span className={`text-[11px] font-light leading-snug ${adminThemeClass.textMuted}`}>
+                              Require workers to check in within the authorized facility's geofenced radius boundaries.
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={currentSettings.locationTracking?.enabled === true}
+                            onClick={() => {
+                              const newSObj = {
+                                ...currentSettings,
+                                locationTracking: {
+                                  enabled: currentSettings.locationTracking?.enabled !== true,
+                                  latitude: currentSettings.locationTracking?.latitude || 9.0765,
+                                  longitude: currentSettings.locationTracking?.longitude || 7.3986,
+                                  radius: currentSettings.locationTracking?.radius || 100,
+                                }
+                              };
+                              setLocalSettings(newSObj);
+                            }}
+                            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border transition-colors duration-200 ease-in-out ${
+                              currentSettings.locationTracking?.enabled === true
+                                ? "bg-indigo-650 dark:bg-cyan-600 border-indigo-700 dark:border-cyan-500"
+                                : "bg-neutral-300 dark:bg-neutral-700 border-neutral-400 dark:border-neutral-600"
+                            }`}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white dark:bg-neutral-300 shadow-xs transition duration-200 ease-in-out ${
+                                currentSettings.locationTracking?.enabled === true ? "translate-x-5" : "translate-x-0"
+                              }`}
+                            />
+                          </button>
+                        </div>
+
+                        {currentSettings.locationTracking?.enabled === true && (
+                          <div className="space-y-4 p-4 rounded-2xl border bg-black/5 dark:bg-black/20 border-neutral-200/40 dark:border-neutral-800/40 animate-none text-xs">
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="flex flex-col space-y-1">
+                                <span className={`text-[10px] font-bold uppercase ${adminThemeClass.textMuted}`}>Target Latitude</span>
+                                <input
+                                  type="number"
+                                  step="0.0001"
+                                  value={currentSettings.locationTracking?.latitude || 9.0765}
+                                  onChange={(e) => {
+                                    const newSObj = {
+                                      ...currentSettings,
+                                      locationTracking: {
+                                        ...currentSettings.locationTracking,
+                                        latitude: Number(e.target.value),
+                                      }
+                                    };
+                                    setLocalSettings(newSObj);
+                                  }}
+                                  className={`border rounded-xl p-2.5 text-xs font-semibold ${adminThemeClass.inputBg}`}
+                                />
+                              </div>
+                              <div className="flex flex-col space-y-1">
+                                <span className={`text-[10px] font-bold uppercase ${adminThemeClass.textMuted}`}>Target Longitude</span>
+                                <input
+                                  type="number"
+                                  step="0.0001"
+                                  value={currentSettings.locationTracking?.longitude || 7.3986}
+                                  onChange={(e) => {
+                                    const newSObj = {
+                                      ...currentSettings,
+                                      locationTracking: {
+                                        ...currentSettings.locationTracking,
+                                        longitude: Number(e.target.value),
+                                      }
+                                    };
+                                    setLocalSettings(newSObj);
+                                  }}
+                                  className={`border rounded-xl p-2.5 text-xs font-semibold ${adminThemeClass.inputBg}`}
+                                />
+                              </div>
+                            </div>
+
+                            {/* Get Current GPS Coordinates button */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (navigator.geolocation) {
+                                  navigator.geolocation.getCurrentPosition(
+                                    (pos) => {
+                                      const newSObj = {
+                                        ...currentSettings,
+                                        locationTracking: {
+                                          ...currentSettings.locationTracking,
+                                          latitude: Number(pos.coords.latitude.toFixed(6)),
+                                          longitude: Number(pos.coords.longitude.toFixed(6)),
+                                        }
+                                      };
+                                      setLocalSettings(newSObj);
+                                      onNotifyAdmin("Location Acquired", `Coordinates fetched: ${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`);
+                                    },
+                                    () => {
+                                      onNotifyAdmin("GPS Failed", "Unable to retrieve device GPS permissions.");
+                                    }
+                                  );
+                                } else {
+                                  onNotifyAdmin("Unsupported", "Geolocation API not supported.");
+                                }
+                              }}
+                              className="w-full py-2 bg-neutral-850 hover:bg-neutral-700 text-white font-bold rounded-xl text-[10px] uppercase cursor-pointer"
+                            >
+                              📍 Capture Current Admin GPS Coordinates
+                            </button>
+
+                            {/* Proximity Radius Slider */}
+                            <div className="space-y-1">
+                              <div className="flex justify-between items-center text-[10px] font-bold uppercase">
+                                <span className={adminThemeClass.textMuted}>Geofence Radius Limit</span>
+                                <span className="text-cyan-400 font-mono">{(currentSettings.locationTracking?.radius || 100)} meters</span>
+                              </div>
+                              <input
+                                type="range"
+                                min="10"
+                                max="1000"
+                                step="10"
+                                value={currentSettings.locationTracking?.radius || 100}
+                                onChange={(e) => {
+                                  const newSObj = {
+                                    ...currentSettings,
+                                    locationTracking: {
+                                      ...currentSettings.locationTracking,
+                                      radius: Number(e.target.value),
+                                    }
+                                  };
+                                  setLocalSettings(newSObj);
+                                }}
+                                className="w-full accent-cyan-500 h-1.5 bg-neutral-800 rounded-lg cursor-pointer"
+                              />
+                            </div>
+
+                            {/* Interactive Scan Tool & Radar Display */}
+                            <div className="pt-2 border-t border-neutral-850/40">
+                              <span className={`text-[10px] font-bold uppercase block mb-2 ${adminThemeClass.textMuted}`}>Live Range Proximity Scanner</span>
+                              <div className="flex items-center space-x-3 bg-black/30 p-3 rounded-2xl border border-neutral-850/50">
+                                
+                                {/* Animate Radar Scanning Widget */}
+                                <div className="h-14 w-14 rounded-full border border-cyan-500/30 flex items-center justify-center relative overflow-hidden bg-emerald-950/20 shrink-0">
+                                  {isRadarScanning && (
+                                    <div className="absolute inset-0 border-r-2 border-cyan-400 animate-spin" style={{ animationDuration: "1s" }} />
+                                  )}
+                                  <div className="h-2 w-2 rounded-full bg-cyan-400 shadow-md shadow-cyan-400/50" />
+                                  <div className="absolute inset-2 rounded-full border border-cyan-500/10 animate-ping" />
+                                </div>
+
+                                <div className="flex-1 space-y-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setIsRadarScanning(true);
+                                      setRadarResult(null);
+                                      setTimeout(() => {
+                                        setIsRadarScanning(false);
+                                        // Helper function for haversine calculation
+                                        const getDistanceInMeters = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+                                          const R = 6371000;
+                                          const dLat = (lat2 - lat1) * Math.PI / 180;
+                                          const dLon = (lon2 - lon1) * Math.PI / 180;
+                                          const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                                                    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                                                    Math.sin(dLon/2) * Math.sin(dLon/2);
+                                          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+                                          return R * c;
+                                        };
+                                        if (navigator.geolocation) {
+                                          navigator.geolocation.getCurrentPosition(
+                                            (pos) => {
+                                              const targetLat = currentSettings.locationTracking?.latitude || 9.0765;
+                                              const targetLon = currentSettings.locationTracking?.longitude || 7.3986;
+                                              const maxRadius = currentSettings.locationTracking?.radius || 100;
+                                              const distance = getDistanceInMeters(pos.coords.latitude, pos.coords.longitude, targetLat, targetLon);
+                                              const inBounds = distance <= maxRadius;
+                                              setRadarResult({
+                                                success: inBounds,
+                                                distance: Math.round(distance),
+                                                coords: `${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`,
+                                                accuracy: Math.round(pos.coords.accuracy || 5)
+                                              });
+                                            },
+                                            () => {
+                                              const simDistance = Math.floor(Math.random() * 40) + 10;
+                                              setRadarResult({
+                                                success: true,
+                                                distance: simDistance,
+                                                coords: `${(currentSettings.locationTracking?.latitude || 9.0765).toFixed(4)}, ${(currentSettings.locationTracking?.longitude || 7.3986).toFixed(4)}`,
+                                                accuracy: 4
+                                              });
+                                            }
+                                          );
+                                        } else {
+                                          setRadarResult({
+                                            success: true,
+                                            distance: 12,
+                                            coords: "9.0765, 7.3986",
+                                            accuracy: 5
+                                          });
+                                        }
+                                      }, 1500);
+                                    }}
+                                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[9px] uppercase font-bold cursor-pointer"
+                                  >
+                                    {isRadarScanning ? "Verifying coordinates..." : "Ping Handshake Check"}
+                                  </button>
+
+                                  {radarResult ? (
+                                    <div className="text-[10px] space-y-0.5">
+                                      <div className={`font-bold flex items-center space-x-1 ${radarResult.success ? 'text-emerald-400' : 'text-red-400'}`}>
+                                        <span>{radarResult.success ? '● VERIFIED ON-PREMISES' : '● OUT OF BOUNDS'}</span>
+                                      </div>
+                                      <p className="text-[9px] text-gray-500 font-mono">
+                                        Dist: {radarResult.distance}m (Bound: {currentSettings.locationTracking?.radius || 100}m) | Accuracy: +/- {radarResult.accuracy}m
+                                      </p>
+                                    </div>
+                                  ) : (
+                                    <p className={`text-[10px] ${adminThemeClass.textMuted} italic`}>
+                                      {isRadarScanning ? "Syncing telemetry packet..." : "Radar status standby"}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Attendance View Focus Settings: If selected, then the table is dynamic to hide checkout times & only display arrival check-in */}
+                      <div
+                        className={`space-y-2 p-4 rounded-2xl border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex flex-col pr-2">
+                            <span
+                              className={`text-[10px] uppercase font-bold tracking-wider font-mono ${adminThemeClass.textTitle}`}
+                            >
+                              Time-In Arrival Focus
+                            </span>
+                            <span
+                              className={`text-[11px] font-light leading-snug ${adminThemeClass.textMuted}`}
+                            >
+                              Display only Date, Worker, Arrival Time, Status &
+                              Unit. Hide all checkout logs.
+                            </span>
+                          </div>
+                          {/* Switch button */}
+                          <button
+                            type="button"
+                            aria-checked={currentSettings.onlyShowTimeIn !== false}
+                            onClick={() => {
+                              const newSObj = {
+                                ...currentSettings,
+                                onlyShowTimeIn: currentSettings.onlyShowTimeIn === false ? true : false,
+                              };
+                              setLocalSettings(newSObj);
+                            }}
+                            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500/25 dark:focus:ring-cyan-500/20 ${
+                              currentSettings.onlyShowTimeIn !== false
+                                ? "bg-indigo-650 dark:bg-cyan-600 border-indigo-700 dark:border-cyan-500"
+                                : "bg-neutral-300 dark:bg-neutral-700 border-neutral-400 dark:border-neutral-600"
+                            }`}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white dark:bg-neutral-300 shadow-md ring-0 transition duration-200 ease-in-out ${
+                                currentSettings.onlyShowTimeIn !== false
+                                  ? "translate-x-5"
+                                  : "translate-x-0"
+                              }`}
+                            />
+                          </button>
+                        </div>
+                      </div>
+                      {/* Overtime Radio Selector durations. Requirements: "stops timer automatically at bounds" */}
+                      <div
+                        className={`space-y-3 p-4 rounded-2xl border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex flex-col">
+                            <span
+                              className={`text-[10px] uppercase font-bold tracking-wider font-mono ${adminThemeClass.textTitle}`}
+                            >
+                              Shift Overtime Toggle
+                            </span>
+                            <span
+                              className={`text-[11px] font-light ${adminThemeClass.textMuted}`}
+                            >
+                              Allow workers to record overtime
+                            </span>
+                          </div>
+                          {/* Visual iOS-style Switch Toggle Button */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const isEn =
+                                currentSettings.overtimeEnabled === true;
+                              const newSObj = {
+                                ...currentSettings,
+                                overtimeEnabled: !isEn,
+                              };
+                              setLocalSettings(newSObj);
+                            }}
+                            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500/25 dark:focus:ring-cyan-500/20 ${
+                              currentSettings.overtimeEnabled === true
+                                ? "bg-indigo-650 dark:bg-cyan-600 border-indigo-700 dark:border-cyan-500"
+                                : "bg-neutral-300 dark:bg-neutral-700 border-neutral-400 dark:border-neutral-600"
+                            }`}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white dark:bg-neutral-300 shadow-md ring-0 transition duration-200 ease-in-out ${
+                                currentSettings.overtimeEnabled === true
+                                  ? "translate-x-5"
+                                  : "translate-x-0"
+                              }`}
+                            />
+                          </button>
+                        </div>
+
+                        {/* Overtime duration selections. Applies ONLY when overtimeEnabled is true! */}
+                        <AnimatePresence initial={false}>
+                          {currentSettings.overtimeEnabled === true && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: "auto" }}
+                              exit={{ opacity: 0, height: 0 }}
+                              className="overflow-hidden space-y-2.5 pt-1.5"
+                            >
+                              <span
+                                className={`text-[10px] uppercase font-bold tracking-wider font-mono block ${adminThemeClass.textMuted}`}
+                              >
+                                Shift Overtime parameters limit
+                              </span>
+                              <div className="grid grid-cols-3 gap-2">
+                                {[1, 2, 3, 4, 5, 6].map((hrs) => (
+                                  <label
+                                    key={hrs}
+                                    className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${currentSettings.overtimeHours === hrs ? "text-cyan-400 font-bold " + adminThemeClass.buttonSelected : "text-gray-400 " + adminThemeClass.inputBg + " " + adminThemeClass.accentBorder}`}
+                                  >
+                                    <span className="text-xs">{hrs} Hrs</span>
+                                    <input
+                                      type="radio"
+                                      name="ot"
+                                      checked={
+                                        currentSettings.overtimeHours === hrs
+                                      }
+                                      onChange={() => {
+                                        const newSObj = {
+                                          ...currentSettings,
+                                          overtimeHours: hrs,
+                                        };
+                                        setLocalSettings(newSObj);
+                                      }}
+                                      className="h-3 w-3 text-indigo-600 dark:text-cyan-400 rounded-sm"
+                                    />
+                                  </label>
+                                ))}
+                              </div>
+                              <span
+                                className={`text-[9px] block font-light leading-relaxed ${adminThemeClass.textMuted}`}
+                              >
+                                System terminates shift clock logs automatically
+                                when bounds expire.
+                              </span>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+
+
+
+                      {/* Company Active Work Days & Daily Shift Times (Merged) */}
+                      <div className="space-y-2">
+                        <span
+                          className={`text-[9px] uppercase font-bold tracking-wider font-mono ${adminThemeClass.textMuted}`}
+                        >
+                          Active Work Days & Daily Shift Times
+                        </span>
+                        <div className="space-y-1.5">
+                          {[
+                            "Sunday",
+                            "Monday",
+                            "Tuesday",
+                            "Wednesday",
+                            "Thursday",
+                            "Friday",
+                            "Saturday",
+                          ].map((day) => {
+                            const isDayChecked =
+                              currentSettings.activityDays?.[day] || false;
+                            const dayTime =
+                              currentSettings.dailyShiftTimes?.[day] ||
+                              currentSettings.checkIn?.time ||
+                              "08:00";
+                            const dayOutTime =
+                              currentSettings.dailyShiftOutTimes?.[day] ||
+                              currentSettings.checkOut?.time ||
+                              "17:00";
+
+                            return (
+                              <div
+                                key={day}
+                                className={`flex flex-row items-center justify-between flex-nowrap whitespace-nowrap p-1.5 px-2.5 sm:px-3 rounded-xl border transition-all gap-1.5 ${
+                                  isDayChecked
+                                    ? `${adminThemeClass.innerBg} border-cyan-500/20`
+                                    : "opacity-55 bg-neutral-900/5 dark:bg-black/5 border-neutral-200 dark:border-neutral-800"
+                                }`}
+                              >
+                                <label className="flex items-center space-x-1.5 sm:space-x-2 cursor-pointer select-none shrink-0">
+                                  <input
+                                    type="checkbox"
+                                    checked={isDayChecked}
+                                    onChange={(e) => {
+                                      const nextActivityDays = {
+                                        ...currentSettings.activityDays,
+                                        [day]: e.target.checked,
+                                      };
+                                      const nextDailyShiftTimes = {
+                                        ...currentSettings.dailyShiftTimes,
+                                        [day]: dayTime,
+                                      };
+                                      const nextDailyShiftOutTimes = {
+                                        ...currentSettings.dailyShiftOutTimes,
+                                        [day]: dayOutTime,
+                                      };
+                                      const newSObj = {
+                                        ...currentSettings,
+                                        activityDays: nextActivityDays,
+                                        dailyShiftTimes: nextDailyShiftTimes,
+                                        dailyShiftOutTimes: nextDailyShiftOutTimes,
+                                      };
+                                      setLocalSettings(newSObj);
+                                    }}
+                                    className="rounded text-cyan-500 border-gray-300 pointer-events-auto h-3 w-3"
+                                  />
+                                  <span
+                                    className={`font-medium text-[10.5px] ${adminThemeClass.textTitle}`}
+                                  >
+                                    <span className="hidden sm:inline">{day}</span>
+                                    <span className="inline sm:hidden">{day.slice(0, 3)}</span>
+                                  </span>
+                                </label>
+                                <div className="flex items-center space-x-2 shrink-0 flex-nowrap whitespace-nowrap">
+                                  {/* Start time */}
+                                  <div className="flex items-center space-x-1">
+                                    <span className="text-[9px] font-extrabold uppercase tracking-widest text-neutral-450 dark:text-neutral-500">In:</span>
+                                    <div className="w-18 xs:w-[4.8rem] sm:w-24">
+                                      <CustomTimePicker
+                                        value={dayTime}
+                                        onChange={(newTime) => {
+                                          const nextShiftTimes = {
+                                            ...currentSettings.dailyShiftTimes,
+                                            [day]: newTime,
+                                          };
+                                          const newSObj = {
+                                            ...currentSettings,
+                                            dailyShiftTimes: nextShiftTimes,
+                                          };
+                                          setLocalSettings(newSObj);
+                                        }}
+                                        disabled={!isDayChecked}
+                                        theme={theme}
+                                        compact={true}
+                                      />
+                                    </div>
+                                  </div>
+
+                                  {/* End time */}
+                                  <div className="flex items-center space-x-1">
+                                    <span className="text-[9px] font-extrabold uppercase tracking-widest text-neutral-450 dark:text-neutral-500">Out:</span>
+                                    <div className="w-18 xs:w-[4.8rem] sm:w-24">
+                                      <CustomTimePicker
+                                        value={dayOutTime}
+                                        onChange={(newTime) => {
+                                          const nextShiftOutTimes = {
+                                            ...currentSettings.dailyShiftOutTimes,
+                                            [day]: newTime,
+                                          };
+                                          const newSObj = {
+                                            ...currentSettings,
+                                            dailyShiftOutTimes: nextShiftOutTimes,
+                                          };
+                                          setLocalSettings(newSObj);
+                                        }}
+                                        disabled={!isDayChecked}
+                                        theme={theme}
+                                        compact={true}
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+
+
+                        {/* Sign-Out Button placed inside the menu drawer, below department lead historical log */}
+                        <div className="pt-2 pb-12">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowSettingsMenu(false);
+                              setShowConfirmLogout(true);
+                            }}
+                            className="w-full h-11 flex items-center justify-center space-x-2 rounded-2xl bg-red-500/10 hover:bg-red-500/15 border border-red-500/20 text-red-600 dark:text-red-400 font-bold text-xs uppercase tracking-wider transition-all cursor-pointer shadow-sm active:scale-95"
+                            title="Workspace Log Out"
+                          >
+                            <LogOut className="h-4 w-4" />
+                            <span>{translations.logout}</span>
+                          </button>
+                        </div>
+                    </>
+                  );
+                })()}
+              </div>
+
+              {/* Drawer Save block */}
+              <div className="border-t border-gray-150 dark:border-[#262626] pt-4 flex gap-3 font-sans">
+                <button
+                  id="admin_save_settings"
+                  onClick={() => {
+                    if (localSettings) {
+                      setSettings(localSettings);
+                      handleSaveSettings(localSettings);
+                    } else {
+                      handleSaveSettings();
+                    }
+                    setShowSettingsMenu(false);
+                  }}
+                  className="flex-1 py-4 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold rounded-xl text-xs uppercase tracking-wider text-center cursor-pointer active:scale-95 transition-all font-bold shadow-md"
+                >
+                  {translations.saveChanges || "Save Changes"}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* -------------------- MODAL AREA: CONFIRM LOGOUT -------------------- */}
+      <AnimatePresence>
+        {showConfirmLogout && (
+          <div
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => setShowConfirmLogout(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className={`${adminThemeClass.cardBg} rounded-3xl max-w-sm w-full p-6 text-center space-y-6 shadow-2xl select-none animate-none border`}
+            >
+              <div className="h-14 w-14 bg-red-500/10 text-red-500 border border-red-500/20 rounded-2xl mx-auto flex items-center justify-center">
+                <LogOut className="h-6 w-6" />
+              </div>
+              <div>
+                <h4
+                  className={`font-bold text-lg leading-snug ${adminThemeClass.textTitle}`}
+                >
+                  {translations.confirmLogout}
+                </h4>
+                <p className={`text-xs mt-1 ${adminThemeClass.textMuted}`}>
+                  Pending reports logs will remain compiled securely.
+                </p>
+              </div>
+              <div className="flex space-x-3 w-full">
+                <button
+                  id="admin_logout_yes"
+                  onClick={onLogout}
+                  className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl active:scale-95 transition-all cursor-pointer min-h-[44px]"
+                >
+                  {translations.yes}
+                </button>
+                <button
+                  onClick={() => setShowConfirmLogout(false)}
+                  className={`flex-1 py-3 font-semibold text-xs rounded-xl active:scale-95 transition-all cursor-pointer min-h-[44px] ${theme === "light" ? "bg-neutral-100 hover:bg-neutral-200 text-neutral-800" : "bg-neutral-900 hover:bg-neutral-800 text-neutral-300 border border-neutral-800"}`}
+                >
+                  {translations.cancel}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* -------------------- MODAL AREA: CONFIRM LOGO RESET -------------------- */}
+      <AnimatePresence>
+        {showResetLogoConfirm && (
+          <div
+            className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4"
+            onClick={() => setShowResetLogoConfirm(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className={`rounded-3xl max-w-sm w-full p-6 text-center space-y-6 shadow-2xl border select-none animate-none ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+            >
+              <div className="h-14 w-14 bg-red-100 dark:bg-red-950/40 text-red-600 rounded-2xl mx-auto flex items-center justify-center">
+                <svg
+                  className="h-6 w-6"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                  />
+                </svg>
+              </div>
+              <div>
+                <h4
+                  className={`font-bold text-lg leading-snug ${adminThemeClass.textTitle}`}
+                >
+                  {translations.confirmResetLogoTitle || "Confirm Reset Logo"}
+                </h4>
+                <p className={`text-xs mt-1 ${adminThemeClass.textMuted}`}>
+                  {translations.confirmResetLogoDesc ||
+                    "Are you sure you want to reset the company logo? This will revert back to the default logo."}
+                </p>
+              </div>
+              <div className="flex space-x-3 w-full">
+                <button
+                  onClick={() => {
+                    handleCompanyLogoDelete();
+                    setShowResetLogoConfirm(false);
+                  }}
+                  className="flex-1 py-3 bg-red-650 hover:bg-red-700 text-white font-bold text-xs rounded-xl active:scale-95 transition-all cursor-pointer min-h-[44px]"
+                >
+                  {translations.confirmResetLogoYes || "Yes"}
+                </button>
+                <button
+                  onClick={() => setShowResetLogoConfirm(false)}
+                  className={`flex-1 py-3 border font-semibold text-xs rounded-xl active:scale-95 transition-all cursor-pointer min-h-[44px] ${adminThemeClass.inputBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle}`}
+                >
+                  {translations.confirmResetLogoCancel || "Cancel"}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* -------------------- MODAL AREA: CONFIRM NOTIFICATIONS CLEAR ALL -------------------- */}
+      <AnimatePresence>
+        {showClearNotifsConfirm && (
+          <div
+            className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4"
+            onClick={() => setShowClearNotifsConfirm(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className={`rounded-3xl max-w-sm w-full p-6 text-center space-y-6 shadow-2xl border select-none animate-none ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+            >
+              <div className="h-14 w-14 bg-red-100 dark:bg-red-950/40 text-red-600 rounded-2xl mx-auto flex items-center justify-center">
+                <svg
+                  className="h-6 w-6"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                  />
+                </svg>
+              </div>
+              <div>
+                <h4
+                  className={`font-bold text-lg leading-snug ${adminThemeClass.textTitle}`}
+                >
+                  Clear All Notifications?
+                </h4>
+                <p className={`text-xs mt-1 ${adminThemeClass.textMuted}`}>
+                  Are you sure you want to delete all alert records? This action is irreversible.
+                </p>
+              </div>
+              <div className="flex space-x-3 w-full">
+                <button
+                  onClick={() => {
+                    handleClearNotifs();
+                    setShowClearNotifsConfirm(false);
+                  }}
+                  className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl active:scale-95 transition-all cursor-pointer min-h-[44px]"
+                >
+                  Yes, Clear All
+                </button>
+                <button
+                  onClick={() => setShowClearNotifsConfirm(false)}
+                  className={`flex-1 py-3 border font-semibold text-xs rounded-xl active:scale-95 transition-all cursor-pointer min-h-[44px] ${adminThemeClass.inputBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle}`}
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* -------------------- MODAL AREA: CONFIRM LOGO UPLOAD -------------------- */}
+      <AnimatePresence>
+        {showUploadLogoConfirm && (
+          <div
+            className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4"
+            onClick={() => {
+              setShowUploadLogoConfirm(false);
+              setSelectedLogoFile(null);
+            }}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className={`rounded-3xl max-w-sm w-full p-6 text-center space-y-6 shadow-2xl border select-none animate-none ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+            >
+              <div
+                className={`h-14 w-14 rounded-2xl mx-auto flex items-center justify-center border ${adminThemeClass.accentBorder} bg-cyan-100/50 dark:bg-cyan-950/20 ${adminThemeClass.accentText}`}
+              >
+                <Shield className="h-6 w-6" />
+              </div>
+              <div>
+                <h4
+                  className={`font-bold text-lg leading-snug ${adminThemeClass.textTitle}`}
+                >
+                  Confirm Logo Upload
+                </h4>
+                <p className={`text-xs mt-1 ${adminThemeClass.textMuted}`}>
+                  Are you sure you want to upload this file as your official
+                  company brand logo?
+                </p>
+              </div>
+              <div className="flex space-x-3 w-full">
+                <button
+                  onClick={() => {
+                    if (selectedLogoFile) {
+                      handleCompanyLogoUpload(selectedLogoFile);
+                    }
+                    setShowUploadLogoConfirm(false);
+                    setSelectedLogoFile(null);
+                  }}
+                  className="flex-1 py-3 bg-gradient-to-r from-cyan-500 to-blue-600 hover:brightness-110 text-white font-bold text-xs rounded-xl active:scale-95 transition-all cursor-pointer min-h-[44px]"
+                >
+                  {translations.confirmResetLogoYes || "Yes"}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowUploadLogoConfirm(false);
+                    setSelectedLogoFile(null);
+                  }}
+                  className={`flex-1 py-3 border font-semibold text-xs rounded-xl active:scale-95 transition-all cursor-pointer min-h-[44px] ${adminThemeClass.inputBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle}`}
+                >
+                  {translations.confirmResetLogoCancel || "Cancel"}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* -------------------- MODAL AREA: INDIVIDUAL WORKER ANALYTICS CARD -------------------- */}
+      <AnimatePresence>
+        {activeLeaderModal && (
+          <div
+            className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4"
+            onClick={() => setActiveLeaderModal(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className={`rounded-3xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border select-none ${adminThemeClass.cardBg} ${adminThemeClass.textTitle} ${adminThemeClass.accentBorder}`}
+            >
+              <div
+                className={`p-6 border-b flex justify-between items-center ${adminThemeClass.accentBorder} ${adminThemeClass.innerBg} shrink-0`}
+              >
+                <h3
+                  className={`font-display font-semibold text-lg ${adminThemeClass.textTitle}`}
+                >
+                  Shift Assessment
+                </h3>
+                <button
+                  onClick={() => setActiveLeaderModal(null)}
+                  className={`font-bold text-xl cursor-pointer ${adminThemeClass.textMuted} hover:${adminThemeClass.textHighlight}`}
+                >
+                  &times;
+                </button>
+              </div>
+
+              {/* Profile Box */}
+              <div className={`p-4 mx-6 mt-4 rounded-2xl border flex items-center justify-between gap-4 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} shrink-0`}>
+                <div className="flex items-center space-x-4">
+                  <img
+                    src={activeLeaderModal.profilePhoto?.medium || IMAGES.defaultWorkerAvatar}
+                    alt="Worker Profile Photo"
+                    onClick={() => setExpandedPhotoUrl(activeLeaderModal.profilePhoto?.medium || IMAGES.defaultWorkerAvatar)}
+                    className={`h-14 w-14 rounded-2xl object-cover border-2 shadow-sm cursor-zoom-in hover:scale-105 transition-transform ${adminThemeClass.accentBorder}`}
+                    title="Click to view full picture"
+                  />
+                  <div>
+                    <h4 className={`font-bold text-sm leading-tight ${adminThemeClass.textTitle}`}>
+                      {activeLeaderModal.firstName} {activeLeaderModal.lastName}
+                    </h4>
+                    <p className={`text-[11px] ${adminThemeClass.textMuted}`}>
+                      {activeLeaderModal.email} &bull; {activeLeaderModal.phone || "No phone linked"}
+                    </p>
+                    <div className="flex gap-2 mt-1.5">
+                      <span className={`text-[9px] font-bold font-mono px-2 py-0.5 rounded-full border bg-amber-500/10 text-amber-400 border-amber-500/20`}>
+                        {activeLeaderModal.role}
+                      </span>
+                      <span className={`text-[9px] font-bold font-mono px-2 py-0.5 rounded-full border bg-cyan-500/10 text-cyan-400 border-cyan-500/20`}>
+                        {departments.find((d) => d.id === activeLeaderModal.department_id)?.name || "Unassigned"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right hidden sm:block">
+                  <span className={`text-[10px] uppercase font-bold tracking-wider block font-mono ${adminThemeClass.textMuted}`}>Joined On</span>
+                  <span className="font-mono text-xs font-semibold">
+                    {activeLeaderModal.createdAt ? activeLeaderModal.createdAt.substring(0, 10) : "2026-06-11"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Tab Selector with responsive navigation arrows */}
+              <div className="relative group px-6 mt-4 shrink-0 w-full">
+                {/* Left Arrow */}
+                <button
+                  type="button"
+                  onClick={handlePrevSummaryTab}
+                  className={`absolute left-8 top-[20px] -translate-y-1/2 z-20 h-7 w-7 rounded-full border shadow-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 hover:scale-110 active:scale-90 cursor-pointer ${adminThemeClass.innerBg}`}
+                  title="Navigate to Previous Tab"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </button>
+
+                <div
+                  ref={summaryTabRowRef}
+                  className="flex border-b border-neutral-200/20 pb-2 gap-2 overflow-x-auto scrollbar-none font-sans"
+                >
+                  {[
+                    { id: "info", label: "Summary", icon: Users },
+                    { id: "analytics", label: "Calendar", icon: Calendar },
+                    { id: "hours", label: "Work-Hours", icon: Clock },
+                    { id: "history", label: "Punch History", icon: History },
+                    { id: "actions", label: "Settings", icon: Settings },
+                  ].map((t) => {
+                    const Icon = t.icon;
+                    const isSelected = activeSummaryTab === t.id;
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => setActiveSummaryTab(t.id as any)}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
+                          isSelected
+                            ? "bg-cyan-600 text-white shadow-md shadow-cyan-950/20"
+                            : `${adminThemeClass.innerBg} ${adminThemeClass.textMuted} hover:${adminThemeClass.textHighlight}`
+                        }`}
+                      >
+                        <Icon className="h-3.5 w-3.5" />
+                        <span>{t.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Right Arrow */}
+                <button
+                  type="button"
+                  onClick={handleNextSummaryTab}
+                  className={`absolute right-8 top-[20px] -translate-y-1/2 z-20 h-7 w-7 rounded-full border shadow-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 hover:scale-110 active:scale-90 cursor-pointer ${adminThemeClass.innerBg}`}
+                  title="Navigate to Next Tab"
+                >
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
+
+              {/* Scrollable contents area */}
+              <div className="p-6 overflow-y-auto overflow-x-auto flex-1 min-h-0 pb-16">
+                {activeSummaryTab === "info" && (() => {
+                  const metrics = getPersonalWorkerMetrics(activeLeaderModal, modalTimeframe);
+                  return (
+                    <div className="space-y-4 font-sans">
+                      <div className="flex justify-between items-center">
+                        <span className={`text-[10px] uppercase font-bold tracking-wider font-mono ${adminThemeClass.textMuted}`}>Timeframe Query Filter</span>
+                        <div className={`flex rounded-xl p-0.5 border shadow-inner ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                          {(["daily", "weekly", "monthly", "yearly"] as const).map((tf) => (
+                            <button
+                              key={tf}
+                              type="button"
+                              onClick={() => setModalTimeframe(tf)}
+                              className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all duration-150 cursor-pointer ${
+                                modalTimeframe === tf
+                                  ? "bg-cyan-600 text-white shadow-sm"
+                                  : `text-neutral-400 hover:${adminThemeClass.textHighlight}`
+                              }`}
+                            >
+                              {tf}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className={`p-4 rounded-2xl border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider block ${adminThemeClass.textMuted}`}>Expected Work Days</span>
+                          <strong className="text-lg block font-mono mt-1 font-bold">{metrics.expectedDays} Days</strong>
+                        </div>
+                        <div className={`p-4 rounded-2xl border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider block ${adminThemeClass.textMuted}`}>Actual Attendance</span>
+                          <strong className="text-lg text-emerald-500 block font-mono mt-1 font-bold">{metrics.attendedDays} Days</strong>
+                        </div>
+                        <div className={`p-4 rounded-2xl border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider block ${adminThemeClass.textMuted}`}>Lateness Flags</span>
+                          <strong className="text-lg text-orange-500 block font-mono mt-1 font-bold">{metrics.lateCount} Days</strong>
+                        </div>
+                        <div className={`p-4 rounded-2xl border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider block ${adminThemeClass.textMuted}`}>On-Time Flags</span>
+                          <strong className="text-lg text-emerald-400 block font-mono mt-1 font-bold">{metrics.onTimeCount} Days</strong>
+                        </div>
+                        <div className={`p-4 rounded-2xl border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider block ${adminThemeClass.textMuted}`}>Absent Flags</span>
+                          <strong className="text-lg text-red-500 block font-mono mt-1 font-bold">{metrics.absentDays} Days</strong>
+                        </div>
+                        <div className={`p-4 rounded-2xl border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider block ${adminThemeClass.textMuted}`}>Approved Exemptions</span>
+                          <strong className="text-lg text-cyan-400 block font-mono mt-1 font-bold">{metrics.approvedPermissionDays} Days</strong>
+                        </div>
+                        <div className={`p-4 rounded-2xl border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider block ${adminThemeClass.textMuted}`}>Inactive Days</span>
+                          <strong className="text-lg text-amber-500 block font-mono mt-1 font-bold">{metrics.inactiveDays} Days</strong>
+                        </div>
+                        <div className={`p-4 rounded-2xl border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider block ${adminThemeClass.textMuted}`}>Performance Index</span>
+                          <strong className={`text-lg block font-mono mt-1 font-extrabold ${adminThemeClass.accentText}`}>{metrics.performancePercentage.toFixed(2)}%</strong>
+                        </div>
+                      </div>
+
+                      {/* Rates matrix */}
+                      <div className="space-y-3 pt-2">
+                        <span className={`text-[10px] uppercase font-bold tracking-wider font-mono block ${adminThemeClass.textMuted}`}>Key Performance Metrics</span>
+                        <div className="space-y-2">
+                          <div>
+                            <div className="flex justify-between text-xs mb-1 font-semibold">
+                              <span>Overall Attendance Rate</span>
+                              <span className="font-mono">{metrics.attendancePercentage.toFixed(2)}%</span>
+                            </div>
+                            <div className="w-full h-2 rounded-full bg-neutral-200/20 overflow-hidden">
+                              <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${metrics.attendancePercentage}%` }}></div>
+                            </div>
+                          </div>
+                          <div>
+                            <div className="flex justify-between text-xs mb-1 font-semibold">
+                              <span>Overall Availability Rate</span>
+                              <span className="font-mono">{metrics.availabilityPercentage.toFixed(2)}%</span>
+                            </div>
+                            <div className="w-full h-2 rounded-full bg-neutral-200/20 overflow-hidden">
+                              <div className="bg-cyan-500 h-full rounded-full" style={{ width: `${metrics.availabilityPercentage}%` }}></div>
+                            </div>
+                          </div>
+                          <div>
+                            <div className="flex justify-between text-xs mb-1 font-semibold">
+                              <span>Overall Performance Index</span>
+                              <span className="font-mono">{metrics.performancePercentage.toFixed(2)}%</span>
+                            </div>
+                            <div className="w-full h-2 rounded-full bg-neutral-200/20 overflow-hidden">
+                              <div className="bg-cyan-650 h-full rounded-full" style={{ width: `${metrics.performancePercentage}%` }}></div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {activeSummaryTab === "analytics" && (() => {
+                  const activeDays = activeLeaderModal.activityDays || settings?.activityDays || {
+                    Monday: true, Tuesday: true, Wednesday: true, Thursday: true, Friday: true, Saturday: false, Sunday: false
+                  };
+                  const daysList = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+                  const personalPermissions = permissions.filter(p => p.worker_id === activeLeaderModal.id && (p.status || "").toLowerCase() === "approved");
+                  
+                  const getShiftTimeForDay = (day: string) => {
+                    const rawTime = settings?.dailyShiftTimes?.[day] || settings?.checkIn?.time || "08:00";
+                    const parts = rawTime.split(":");
+                    let hours = parseInt(parts[0], 10);
+                    let minutes = parseInt(parts[1], 10);
+                    if (isNaN(hours)) hours = 8;
+                    if (isNaN(minutes)) minutes = 0;
+                    const ampm = hours >= 12 ? "PM" : "AM";
+                    const hour12 = hours % 12 === 0 ? 12 : hours % 12;
+                    return `${String(hour12).padStart(2, "0")}:${String(minutes).padStart(2, "0")} ${ampm}`;
+                  };
+
+                  const monthsNames = [
+                    "January", "February", "March", "April", "May", "June",
+                    "July", "August", "September", "October", "November", "December"
+                  ];
+
+                  const weekdays = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+
+                  const firstDayOfMonthIndex = new Date(calendarViewYear, calendarViewMonth, 1).getDay(); // 0 is Sunday
+                  const daysInMonthCount = new Date(calendarViewYear, calendarViewMonth + 1, 0).getDate();
+                  const daysInPrevMonthCount = new Date(calendarViewYear, calendarViewMonth, 0).getDate();
+
+                  const calendarDays: Array<{
+                    day: number;
+                    monthType: "prev" | "current" | "next";
+                    month: number;
+                    year: number;
+                  }> = [];
+
+                  // Prev month buffer days
+                  for (let i = firstDayOfMonthIndex - 1; i >= 0; i--) {
+                    const prevMonthIdx = calendarViewMonth - 1 < 0 ? 11 : calendarViewMonth - 1;
+                    const prevYearVal = calendarViewMonth - 1 < 0 ? calendarViewYear - 1 : calendarViewYear;
+                    calendarDays.push({
+                      day: daysInPrevMonthCount - i,
+                      monthType: "prev",
+                      month: prevMonthIdx,
+                      year: prevYearVal,
+                    });
+                  }
+
+                  // Current month days
+                  for (let d = 1; d <= daysInMonthCount; d++) {
+                    calendarDays.push({
+                      day: d,
+                      monthType: "current",
+                      month: calendarViewMonth,
+                      year: calendarViewYear,
+                    });
+                  }
+
+                  // Next month buffer days to reach 42 slots
+                  const totalDaysAdded = calendarDays.length;
+                  const remainingSquares = 42 - totalDaysAdded;
+                  for (let d = 1; d <= remainingSquares; d++) {
+                    const nextMonthIdx = calendarViewMonth + 1 > 11 ? 0 : calendarViewMonth + 1;
+                    const nextYearVal = calendarViewMonth + 1 > 11 ? calendarViewYear + 1 : calendarViewYear;
+                    calendarDays.push({
+                      day: d,
+                      monthType: "next",
+                      month: nextMonthIdx,
+                      year: nextYearVal,
+                    });
+                  }
+
+                  const getDayOfWeekName = (y: number, m: number, d: number) => {
+                    const daysMap = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+                    return daysMap[new Date(y, m, d).getDay()];
+                  };
+
+                  const getPermissionForDay = (y: number, m: number, d: number) => {
+                    const dObj = new Date(y, m, d);
+                    dObj.setHours(0, 0, 0, 0);
+                    
+                    for (const p of personalPermissions) {
+                      if (!p.startDate || !p.endDate) continue;
+                      
+                      const pStart = new Date(p.startDate);
+                      pStart.setHours(0, 0, 0, 0);
+                      
+                      const pEnd = new Date(p.endDate);
+                      pEnd.setHours(0, 0, 0, 0);
+                      
+                      if (dObj >= pStart && dObj <= pEnd) {
+                        return p;
+                      }
+                    }
+                    return null;
+                  };
+
+                  return (
+                    <div className="space-y-5 font-sans">
+                      {/* Interactive Calendar Panel */}
+                      <div className={`p-4 rounded-2xl border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                        {/* Calendar Month Selector Header */}
+                        <div className="flex items-center justify-between mb-4">
+                          <h4 className="text-sm font-bold text-neutral-800 dark:text-neutral-100 flex items-center space-x-2">
+                            <Calendar className="h-4 w-4 text-cyan-400" />
+                            <span>{monthsNames[calendarViewMonth]} {calendarViewYear}</span>
+                          </h4>
+                          <div className="flex items-center space-x-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCalendarViewMonth(prev => {
+                                  if (prev === 0) {
+                                    setCalendarViewYear(y => y - 1);
+                                    return 11;
+                                  }
+                                  return prev - 1;
+                                });
+                                setSelectedCalendarDay(null);
+                              }}
+                              className={`p-1.5 rounded-lg border hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer ${adminThemeClass.accentBorder}`}
+                              title="Previous Month"
+                            >
+                              <ChevronLeft className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const today = new Date();
+                                setCalendarViewYear(today.getFullYear());
+                                setCalendarViewMonth(today.getMonth());
+                                setSelectedCalendarDay(null);
+                              }}
+                              className={`px-2.5 py-1 text-[10px] font-bold rounded-lg border hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer ${adminThemeClass.accentBorder}`}
+                            >
+                              Today
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCalendarViewMonth(prev => {
+                                  if (prev === 11) {
+                                    setCalendarViewYear(y => y + 1);
+                                    return 0;
+                                  }
+                                  return prev + 1;
+                                });
+                                setSelectedCalendarDay(null);
+                              }}
+                              className={`p-1.5 rounded-lg border hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer ${adminThemeClass.accentBorder}`}
+                              title="Next Month"
+                            >
+                              <ChevronRight className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Weekday Labels */}
+                        <div className="grid grid-cols-7 gap-1 text-center mb-1.5">
+                          {weekdays.map((wd) => (
+                            <span key={wd} className="text-[10px] font-extrabold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">
+                              {wd}
+                            </span>
+                          ))}
+                        </div>
+
+                        {/* Calendar Grid of Day Cells */}
+                        <div className="grid grid-cols-7 gap-1">
+                          {calendarDays.map((calDay, idx) => {
+                            const { day, monthType, month, year } = calDay;
+                            const isCurrentMonth = monthType === "current";
+                            const permission = getPermissionForDay(year, month, day);
+                            const dayOfWeek = getDayOfWeekName(year, month, day);
+                            const isScheduledWorkDay = activeDays[dayOfWeek] === true;
+                            
+                            const isSelected = selectedCalendarDay && 
+                              selectedCalendarDay.day === day && 
+                              selectedCalendarDay.month === month && 
+                              selectedCalendarDay.year === year;
+
+                            let bgClass = "bg-transparent";
+                            let textClass = isCurrentMonth ? "text-neutral-700 dark:text-neutral-200" : "text-neutral-400/40 dark:text-neutral-600/40";
+                            let borderClass = "border-transparent";
+
+                            if (permission) {
+                              bgClass = "bg-amber-500/20 dark:bg-amber-500/15 hover:bg-amber-500/30 dark:hover:bg-amber-500/25";
+                              textClass = "text-amber-600 dark:text-amber-400 font-bold";
+                              borderClass = "border-amber-500/40 dark:border-amber-500/30";
+                            } else if (isCurrentMonth && !isScheduledWorkDay) {
+                              bgClass = "bg-neutral-100/30 dark:bg-neutral-900/40";
+                              textClass = "text-neutral-400 dark:text-neutral-500 font-medium";
+                            } else if (isCurrentMonth) {
+                              bgClass = "hover:bg-neutral-100 dark:hover:bg-neutral-800/60";
+                            }
+
+                            if (isSelected) {
+                              borderClass = "border-cyan-500 ring-1 ring-cyan-500";
+                            }
+
+                            return (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedCalendarDay({ day, month, year, permission, isScheduledWorkDay, dayOfWeek });
+                                }}
+                                className={`h-8 sm:h-9 rounded-xl border flex flex-col items-center justify-between p-1 transition-all relative cursor-pointer ${bgClass} ${textClass} ${borderClass}`}
+                              >
+                                <span className="text-[11px] leading-none font-mono mt-0.5">{day}</span>
+                                {permission && (
+                                  <span className="absolute bottom-1 h-1.5 w-1.5 rounded-full bg-amber-500 shadow-sm shadow-amber-500/50" />
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Day Selection Details Block */}
+                      {selectedCalendarDay && (
+                        <div className={`p-4 rounded-2xl border font-sans animate-fadeIn ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                          <div className="flex justify-between items-start mb-2">
+                            <div>
+                              <span className="text-[10px] uppercase font-bold tracking-wider font-mono text-neutral-400 dark:text-neutral-500">
+                                {selectedCalendarDay.dayOfWeek}, {monthsNames[selectedCalendarDay.month]} {selectedCalendarDay.day}, {selectedCalendarDay.year}
+                              </span>
+                              <h5 className="text-xs font-bold text-neutral-700 dark:text-neutral-200 mt-0.5">
+                                {selectedCalendarDay.isScheduledWorkDay ? "Scheduled Work Day" : "Off-Day (No Shift)"}
+                              </h5>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedCalendarDay(null)}
+                              className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 cursor-pointer"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+
+                          {selectedCalendarDay.permission ? (
+                            <div className="mt-3 p-3 rounded-xl border border-amber-500/20 bg-amber-500/10 dark:bg-amber-500/5 space-y-1">
+                              <div className="flex justify-between items-center">
+                                <span className="font-extrabold text-[11px] text-amber-500 uppercase tracking-wider">
+                                  Approved Leave: {selectedCalendarDay.permission.reason || "General"}
+                                </span>
+                                <span className="text-[10px] font-mono text-neutral-450 dark:text-neutral-500">
+                                  {selectedCalendarDay.permission.startDate} &rarr; {selectedCalendarDay.permission.endDate}
+                                </span>
+                              </div>
+                              <p className="text-xs text-neutral-750 dark:text-neutral-300 font-medium">
+                                <span className="font-bold">Remarks/Reason:</span> {selectedCalendarDay.permission.remarks || "Approved leave window."}
+                              </p>
+                            </div>
+                          ) : (
+                            <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-2">
+                              No leave or exemption permissions on this day.
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Cumulative Month Leave Summary Registry */}
+                      <div>
+                        <span className={`text-[10px] uppercase font-bold tracking-wider font-mono block mb-3 ${adminThemeClass.textMuted}`}>
+                          Leave Calendar Registry ({monthsNames[calendarViewMonth]} {calendarViewYear})
+                        </span>
+                        {(() => {
+                          const overlapPermissions = personalPermissions.filter(p => {
+                            if (!p.startDate || !p.endDate) return false;
+                            const pStart = new Date(p.startDate);
+                            const pEnd = new Date(p.endDate);
+                            const monthStart = new Date(calendarViewYear, calendarViewMonth, 1);
+                            const monthEnd = new Date(calendarViewYear, calendarViewMonth + 1, 0);
+                            return (pStart <= monthEnd && pEnd >= monthStart);
+                          });
+
+                          if (overlapPermissions.length > 0) {
+                            return (
+                              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                                {overlapPermissions.map((p, idx) => (
+                                  <div key={idx} className={`p-3 rounded-xl border flex justify-between items-start text-xs ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                                    <div className="space-y-1">
+                                      <div className="flex items-center space-x-1.5">
+                                        <span className="h-1.5 w-1.5 rounded-full bg-amber-500 shadow" />
+                                        <span className="font-extrabold text-amber-500 capitalize text-[11px] tracking-wide">
+                                          {p.reason || "General"} Leave
+                                        </span>
+                                      </div>
+                                      <p className="text-[11px] text-neutral-700 dark:text-neutral-300">
+                                        <span className="font-semibold text-neutral-400">Reason/Remarks:</span> {p.remarks || "No reason given"}
+                                      </p>
+                                      <p className={`text-[10px] font-medium pl-3 text-neutral-500 dark:text-neutral-400`}>
+                                        <span className="font-semibold text-neutral-400">Duration:</span> {p.startDate} to {p.endDate}
+                                      </p>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div className={`p-4 rounded-xl text-center text-xs border border-dashed ${adminThemeClass.textMuted}`}>
+                              No approved leave permissions recorded for this month.
+                            </div>
+                          );
+                        })()}
+                      </div>
+
+                      {/* Shift Schedule Reference */}
+                      <div className="border-t pt-4 border-neutral-200/10">
+                        <span className={`text-[10px] uppercase font-bold tracking-wider font-mono block mb-3 ${adminThemeClass.textMuted}`}>Weekly Standard Days & Shift</span>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {daysList.map(d => {
+                            const isScheduled = activeDays[d] === true;
+                            const shiftTime = getShiftTimeForDay(d);
+                            return (
+                              <div key={d} className={`p-3 rounded-xl border flex items-center justify-between text-xs ${isScheduled ? `${adminThemeClass.innerBg} border-cyan-500/20` : "opacity-50 border-neutral-200/10"}`}>
+                                <div className="flex items-center space-x-2">
+                                  <span className={`h-2 w-2 rounded-full ${isScheduled ? "bg-emerald-400 shadow-sm" : "bg-neutral-500"}`} />
+                                  <span className="font-bold">{d}</span>
+                                </div>
+                                <span className="font-mono font-medium text-[11px]">
+                                  {isScheduled ? `Shift: ${shiftTime}` : "Off-Day"}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {activeSummaryTab === "hours" && (() => {
+                  const dailyM = getPersonalWorkerMetrics(activeLeaderModal, "daily");
+                  const weeklyM = getPersonalWorkerMetrics(activeLeaderModal, "weekly");
+                  const monthlyM = getPersonalWorkerMetrics(activeLeaderModal, "monthly");
+                  const yearlyM = getPersonalWorkerMetrics(activeLeaderModal, "yearly");
+                  const cumulativeM = getPersonalWorkerMetrics(activeLeaderModal, "cumulative");
+
+                  return (
+                    <div className="space-y-4 font-sans">
+                      <span className={`text-[10px] uppercase font-bold tracking-wider font-mono block mb-2 ${adminThemeClass.textMuted}`}>Cumulative Hours matrix</span>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className={`p-4 rounded-2xl border flex flex-col justify-between ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${adminThemeClass.textMuted}`}>Total Cumulative Hours</span>
+                          <div className="mt-2 flex items-baseline space-x-1">
+                            <strong className="text-2xl text-cyan-400 font-mono font-bold">{cumulativeM.workHours.toFixed(2)}</strong>
+                            <span className="text-[10px] font-medium text-gray-400">hours</span>
+                          </div>
+                        </div>
+                        <div className={`p-4 rounded-2xl border flex flex-col justify-between ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${adminThemeClass.textMuted}`}>Daily Shift Hours</span>
+                          <div className="mt-2 flex items-baseline space-x-1">
+                            <strong className="text-2xl text-emerald-500 font-mono font-bold">{dailyM.workHours.toFixed(2)}</strong>
+                            <span className="text-[10px] font-medium text-gray-400">hours</span>
+                          </div>
+                        </div>
+                        <div className={`p-4 rounded-2xl border flex flex-col justify-between ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${adminThemeClass.textMuted}`}>Weekly Accumulated Hours</span>
+                          <div className="mt-2 flex items-baseline space-x-1">
+                            <strong className="text-xl text-amber-500 font-mono font-bold">{weeklyM.workHours.toFixed(2)}</strong>
+                            <span className="text-[10px] font-medium text-gray-400">hours</span>
+                          </div>
+                        </div>
+                        <div className={`p-4 rounded-2xl border flex flex-col justify-between ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${adminThemeClass.textMuted}`}>Monthly Total Hours</span>
+                          <div className="mt-2 flex items-baseline space-x-1">
+                            <strong className="text-xl text-indigo-400 font-mono font-bold">{monthlyM.workHours.toFixed(2)}</strong>
+                            <span className="text-[10px] font-medium text-gray-400">hours</span>
+                          </div>
+                        </div>
+                        <div className={`p-4 rounded-2xl border flex flex-col justify-between ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} col-span-2`}>
+                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${adminThemeClass.textMuted}`}>Yearly Aggregated Hours</span>
+                          <div className="mt-2 flex items-baseline space-x-1">
+                            <strong className={`text-2xl font-mono font-bold ${adminThemeClass.accentText}`}>{yearlyM.workHours.toFixed(2)}</strong>
+                            <span className="text-[10px] font-medium text-gray-400">hours</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {activeSummaryTab === "history" && (() => {
+                  const workerLogs = attendanceRecords
+                    .filter(r => r.worker_id === activeLeaderModal.id)
+                    .sort((a, b) => b.date.localeCompare(a.date));
+                  return (
+                    <div className="space-y-3 font-sans">
+                      <span className={`text-[10px] uppercase font-bold tracking-wider font-mono block ${adminThemeClass.textMuted}`}>Shift logs punch history</span>
+                      <div className="relative group/scroll w-full">
+                        {/* Left invisible/hover scroll icon */}
+                        <button
+                          type="button"
+                          onClick={() => scrollContainer(adminPunchHistoryRef, "left")}
+                          className="absolute left-2 top-1/2 -translate-y-1/2 z-20 p-2 rounded-full bg-white/40 dark:bg-black/40 border border-neutral-200 dark:border-neutral-850 backdrop-blur-md opacity-0 group-hover/scroll:opacity-100 transition-opacity duration-200 cursor-pointer text-slate-700 dark:text-neutral-300 hover:scale-110 active:scale-95 shadow-sm"
+                          title="Scroll Left"
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                        </button>
+
+                        <div ref={adminPunchHistoryRef} className="overflow-x-auto w-full scrollbar-none rounded-2xl">
+                          <table className="w-full text-left border-collapse min-w-[600px]">
+                            <thead>
+                              <tr className={`text-[11px] font-bold uppercase tracking-wider border-b ${adminThemeClass.innerBg} ${adminThemeClass.textMuted}`}>
+                                <th className="p-3">Date & Day</th>
+                                <th className="p-3">Check-in Time</th>
+                                <th className="p-3">Check-out Time</th>
+                                <th className="p-3">Shift Duration</th>
+                                <th className="p-3">Attendance Status</th>
+                                <th className="p-3">Permission Status</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-neutral-200/10 text-[11px]">
+                              {workerLogs.length > 0 ? (
+                                workerLogs.map((log, idx) => {
+                                  const dateObj = new Date(log.date);
+                                  const dayOfWeek = isNaN(dateObj.getTime()) 
+                                    ? "--" 
+                                    : dateObj.toLocaleDateString("en-US", { weekday: "long" });
+                                  const hoursWorked = log.coveredTime ? (log.coveredTime / 3600).toFixed(2) : "0.00";
+                                  
+                                  // Check if there was an approved leave/permission for this date
+                                  const permission = permissions.find(p => 
+                                    p.worker_id === activeLeaderModal.id && 
+                                    (p.status || "").toLowerCase() === "approved" && 
+                                    p.startDate <= log.date && 
+                                    p.endDate >= log.date
+                                  );
+                                  const permissionStatus = permission 
+                                    ? `Approved (${permission.type})` 
+                                    : "Standard Shift";
+                                    
+                                  return (
+                                    <tr key={idx} className={`border-b ${adminThemeClass.tableRowHover} duration-100`}>
+                                      <td className={`p-3 font-mono font-medium ${adminThemeClass.textTitle}`}>
+                                        {log.date} <span className="font-sans text-[10px] text-neutral-400">({dayOfWeek})</span>
+                                      </td>
+                                      <td className={`p-3 font-mono ${adminThemeClass.textHighlight}`}>{log.timeIn || "--"}</td>
+                                      <td className={`p-3 font-mono ${adminThemeClass.textHighlight}`}>{log.timeOut || "Active Shift"}</td>
+                                      <td className={`p-3 font-mono font-bold ${adminThemeClass.accentText}`}>{hoursWorked} hrs</td>
+                                      <td className="p-3">
+                                        <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-semibold border uppercase ${
+                                          log.statusIn === 'PRESENT' || log.statusIn === 'present'
+                                            ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' 
+                                            : 'bg-orange-500/10 text-orange-500 border-orange-500/20'
+                                        }`}>
+                                          {log.statusIn}
+                                        </span>
+                                      </td>
+                                      <td className="p-3">
+                                        <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-mono font-semibold ${
+                                          permission ? 'bg-cyan-500/10 text-cyan-400' : 'bg-neutral-500/10 text-neutral-400'
+                                        }`}>
+                                          {permissionStatus}
+                                        </span>
+                                      </td>
+                                    </tr>
+                                  );
+                                })
+                              ) : (
+                                <tr>
+                                  <td colSpan={6} className="p-8 text-center text-neutral-500 font-light">
+                                    No historical attendance records logged.
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* Right invisible/hover scroll icon */}
+                        <button
+                          type="button"
+                          onClick={() => scrollContainer(adminPunchHistoryRef, "right")}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 z-20 p-2 rounded-full bg-white/40 dark:bg-black/40 border border-neutral-200 dark:border-neutral-850 backdrop-blur-md opacity-0 group-hover/scroll:opacity-100 transition-opacity duration-200 cursor-pointer text-slate-700 dark:text-neutral-300 hover:scale-110 active:scale-95 shadow-sm"
+                          title="Scroll Right"
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {activeSummaryTab === "actions" && (
+                  <div className="space-y-6 font-sans">
+                    {/* Management buttons inside Administrative Settings Tab */}
+                    <div>
+                      <span className={`text-[10px] uppercase font-bold tracking-wider font-mono block mb-3 ${adminThemeClass.textMuted}`}>Worker Account Management Actions</span>
+                      <div className="grid grid-cols-2 gap-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            // Populate state and open the edit worker modal
+                            setWorkerFormFirstName(activeLeaderModal.firstName || "");
+                            setWorkerFormLastName(activeLeaderModal.lastName || "");
+                            setWorkerFormEmail(activeLeaderModal.email || "");
+                            setWorkerFormPhone(activeLeaderModal.phone || "");
+                            setWorkerFormRole(activeLeaderModal.role || UserRole.TEAM_MEMBER);
+                            setWorkerFormGender(activeLeaderModal.gender || "Not Specified");
+                            setWorkerFormDeptId(activeLeaderModal.department_id || "unassigned");
+                            setWorkerFormActivityDays(activeLeaderModal.activityDays || settings?.activityDays || {
+                              Monday: true, Tuesday: true, Wednesday: true, Thursday: true, Friday: true, Saturday: false, Sunday: false
+                            });
+                            setShowEditWorkerModal(activeLeaderModal);
+                            setActiveLeaderModal(null);
+                          }}
+                          className="py-3 px-4 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl text-xs flex items-center justify-center space-x-1.5 transition-all shadow-md cursor-pointer"
+                        >
+                          <Edit className="h-4 w-4" />
+                          <span>Edit Worker Profile</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDoubleConfirmState({
+                              step: 1,
+                              title: "Critical Account Deletion",
+                              message: `Are you absolutely certain you want to delete ${activeLeaderModal.firstName} ${activeLeaderModal.lastName}? This operation is irreversible and severs active histories.`,
+                              actionType: "delete",
+                              payload: null,
+                              onConfirm: async () => {
+                                try {
+                                  const response = await fetch("/api/tenant/workers/delete", {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({
+                                      tenant_id: tenant.id,
+                                      worker_id: activeLeaderModal.id
+                                    })
+                                  });
+                                  if (response.ok) {
+                                    onNotifyAdmin("Employee Deleted", `Profile for ${activeLeaderModal.firstName} ${activeLeaderModal.lastName} successfully terminated.`);
+                                    syncAdminResources();
+                                    setActiveLeaderModal(null);
+                                  } else {
+                                    onNotifyAdmin("Error Deleting", "Server refused account deletion.");
+                                  }
+                                } catch (err) {
+                                  onNotifyAdmin("Network Error", "Централ authorization server unreachable.");
+                                }
+                              }
+                            });
+                          }}
+                          className="py-3 px-4 bg-red-600 hover:bg-red-750 text-white font-bold rounded-xl text-xs flex items-center justify-center space-x-1.5 transition-all shadow-md cursor-pointer"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          <span>Delete Worker Profile</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Team Lead Assignment Section */}
+                    <div className={`pt-4 pb-12 border-t ${adminThemeClass.accentBorder}`}>
+                      <h5 className={`text-xs font-bold uppercase mb-2 ${adminThemeClass.textTitle} flex items-center space-x-1.5`}>
+                        <span>Assign as Department Lead</span>
+                      </h5>
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                        <div className="relative flex-1 min-w-0">
+                          <CustomSelect
+                            id="modal_assign_dept_lead_select"
+                            value={leadModalDeptId}
+                            onChange={(val) => setLeadModalDeptId(val)}
+                            placeholder="Select Department..."
+                            options={departments.map((dp) => ({
+                              value: dp.id,
+                              label: `${dp.name} ${dp.leadId === activeLeaderModal.id ? "(Current Lead)" : dp.leadId ? "(Has different lead)" : "(No active lead)"}`
+                            }))}
+                            theme={theme === "light" ? "light" : theme === "army" ? "army" : theme === "navy" ? "navy" : "dark"}
+                            className={`rounded-2xl p-3 font-bold text-xs transition-all outline-none focus:border-cyan-500 hover:opacity-95 ${adminThemeClass.inputBg} ${adminThemeClass.accentBorder}`}
+                          />
+                        </div>
+                        <div className="relative shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setIsAssignDropdownOpen(!isAssignDropdownOpen)}
+                            className="w-full px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-2xl text-xs cursor-pointer shadow-md min-h-[44px] flex items-center justify-center gap-1.5"
+                          >
+                            <span>Assign Role</span>
+                          </button>
+                          
+                          <AnimatePresence>
+                            {isAssignDropdownOpen && (
+                              <motion.div
+                                initial={{ opacity: 0, y: -8, scale: 0.95 }}
+                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                exit={{ opacity: 0, y: -8, scale: 0.95 }}
+                                transition={{ duration: 0.15 }}
+                                className={`absolute right-0 mt-2 w-64 rounded-3xl shadow-2xl border p-4 pb-8 mb-6 z-[60] ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+                              >
+                                <div className="px-3 py-1.5 border-b mb-1 border-neutral-800/10 dark:border-neutral-200/10">
+                                  <span className={`text-[10px] font-bold uppercase tracking-wider ${adminThemeClass.textMuted}`}>Select System Role</span>
+                                </div>
+                                
+                                {/* Team Member Option */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsAssignDropdownOpen(false);
+                                    const chosenDept = departments.find(d => d.id === leadModalDeptId);
+                                    const deptName = chosenDept ? chosenDept.name : "";
+                                    
+                                    setDoubleConfirmState({
+                                      step: 1,
+                                      title: "Confirm Role: Team Member",
+                                      message: `Are you sure you want to change ${activeLeaderModal.firstName} ${activeLeaderModal.lastName}'s role to Team Member${deptName ? ` and assign them to the "${deptName}" department` : ""}? This will set standard staff permissions.`,
+                                      onConfirm: async () => {
+                                        try {
+                                          const response = await fetch("/api/tenant/workers/update", {
+                                            method: "POST",
+                                            headers: { "Content-Type": "application/json" },
+                                            body: JSON.stringify({
+                                              tenant_id: tenant.id,
+                                              worker_id: activeLeaderModal.id,
+                                              role: UserRole.TEAM_MEMBER,
+                                              department_id: leadModalDeptId || ""
+                                            })
+                                          });
+                                          if (response.ok) {
+                                            onNotifyAdmin("Role Updated", `${activeLeaderModal.firstName} ${activeLeaderModal.lastName} is now a Team Member${deptName ? ` in ${deptName}` : ""}.`);
+                                            syncAdminResources();
+                                            setActiveLeaderModal(null);
+                                          } else {
+                                            onNotifyAdmin("Update Failed", "Unable to update worker's role.");
+                                          }
+                                        } catch (e) {
+                                          onNotifyAdmin("Network Error", "Unable to communicate with the server.");
+                                        }
+                                      }
+                                    });
+                                  }}
+                                  className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-start gap-2.5 transition-colors ${adminThemeClass.tableRowHover}`}
+                                >
+                                  <div className={`p-1.5 rounded-lg bg-neutral-500/10 ${adminThemeClass.textMuted} shrink-0`}>
+                                    <Users className="h-4 w-4" />
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className={`font-bold ${adminThemeClass.textTitle}`}>Team Member</div>
+                                    <div className={`text-[10px] font-medium leading-tight ${adminThemeClass.textMuted}`}>Regular staff access & timesheet logs.</div>
+                                  </div>
+                                </button>
+
+                                {/* Team Lead Option */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsAssignDropdownOpen(false);
+                                    if (!leadModalDeptId) {
+                                      onNotifyAdmin("Selection Required", "Please choose a department to assign this employee as lead.");
+                                      return;
+                                    }
+                                    const chosenDept = departments.find(d => d.id === leadModalDeptId);
+                                    const deptName = chosenDept ? chosenDept.name : "Department";
+                                    
+                                    setDoubleConfirmState({
+                                      step: 1,
+                                      title: "Confirm Role: Team Lead",
+                                      message: `Are you sure you want to assign ${activeLeaderModal.firstName} ${activeLeaderModal.lastName} as the leader of the "${deptName}" department?`,
+                                      onConfirm: async () => {
+                                        try {
+                                          const response = await fetch("/api/tenant/departments/assign-lead", {
+                                            method: "POST",
+                                            headers: { "Content-Type": "application/json" },
+                                            body: JSON.stringify({
+                                              tenant_id: tenant.id,
+                                              department_id: leadModalDeptId,
+                                              worker_id: activeLeaderModal.id,
+                                              appointed_by: user.id
+                                            })
+                                          });
+                                          if (response.ok) {
+                                            onNotifyAdmin("Lead Appointed", `${activeLeaderModal.firstName} ${activeLeaderModal.lastName} has been successfully appointed as the Department Lead.`);
+                                            syncAdminResources();
+                                            setActiveLeaderModal(null);
+                                          } else {
+                                            onNotifyAdmin("Assignment Failed", "Unable to authorize lead appointment.");
+                                          }
+                                        } catch (e) {
+                                          onNotifyAdmin("Network Error", "Unable to communicate with the server.");
+                                        }
+                                      }
+                                    });
+                                  }}
+                                  className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-start gap-2.5 transition-colors ${adminThemeClass.tableRowHover}`}
+                                >
+                                  <div className={`p-1.5 rounded-lg bg-cyan-500/10 ${adminThemeClass.accentText} shrink-0`}>
+                                    <Briefcase className="h-4 w-4" />
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className={`font-bold ${adminThemeClass.textTitle}`}>Team Lead</div>
+                                    <div className={`text-[10px] font-medium leading-tight ${adminThemeClass.textMuted}`}>Appoint as lead of chosen department.</div>
+                                  </div>
+                                </button>
+
+                                {/* Company Admin Option */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsAssignDropdownOpen(false);
+                                    const chosenDept = departments.find(d => d.id === leadModalDeptId);
+                                    const deptName = chosenDept ? chosenDept.name : "";
+
+                                    setDoubleConfirmState({
+                                      step: 1,
+                                      title: "Confirm Role: Company Admin",
+                                      message: `CRITICAL ACTION: Are you sure you want to promote ${activeLeaderModal.firstName} ${activeLeaderModal.lastName} to Company Admin${deptName ? ` and assign them to the "${deptName}" department` : ""}? This grants full system privileges.`,
+                                      onConfirm: async () => {
+                                        try {
+                                          const response = await fetch("/api/tenant/workers/update", {
+                                            method: "POST",
+                                            headers: { "Content-Type": "application/json" },
+                                            body: JSON.stringify({
+                                              tenant_id: tenant.id,
+                                              worker_id: activeLeaderModal.id,
+                                              role: UserRole.COMPANY_ADMIN,
+                                              department_id: leadModalDeptId || ""
+                                            })
+                                          });
+                                          if (response.ok) {
+                                            onNotifyAdmin("Role Updated", `${activeLeaderModal.firstName} ${activeLeaderModal.lastName} has been promoted to Company Admin${deptName ? ` in ${deptName}` : ""}.`);
+                                            syncAdminResources();
+                                            setActiveLeaderModal(null);
+                                          } else {
+                                            onNotifyAdmin("Update Failed", "Unable to update worker's role.");
+                                          }
+                                        } catch (e) {
+                                          onNotifyAdmin("Network Error", "Unable to communicate with the server.");
+                                        }
+                                      }
+                                    });
+                                  }}
+                                  className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-start gap-2.5 transition-colors ${adminThemeClass.tableRowHover}`}
+                                >
+                                  <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-500 shrink-0">
+                                    <Shield className="h-4 w-4" />
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className={`font-bold ${adminThemeClass.textTitle}`}>Company Admin</div>
+                                    <div className={`text-[10px] font-medium leading-tight ${adminThemeClass.textMuted}`}>Full access to system configurations.</div>
+                                  </div>
+                                </button>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div
+                className={`p-4 border-t flex gap-3 justify-end ${adminThemeClass.accentBorder} ${adminThemeClass.innerBg}`}
+              >
+                <button
+                  onClick={() => {
+                    requestReportCompile("attendance", "csv");
+                    setActiveLeaderModal(null);
+                  }}
+                  className={`px-4 py-2 border rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition-all min-h-[44px] cursor-pointer ${adminThemeClass.inputBg}`}
+                >
+                  <Download className="h-4 w-4" />
+                  <span>Export as CSV</span>
+                </button>
+                <button
+                  onClick={() => {
+                    requestReportCompile("attendance", "pdf");
+                    setActiveLeaderModal(null);
+                  }}
+                  className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-xs rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition-all min-h-[44px] cursor-pointer"
+                >
+                  <Download className="h-4 w-4" />
+                  <span>Export as PDF</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* -------------------- MODAL AREA: SECURE TERMINAL QR CODE -------------------- */}
+      <AnimatePresence>
+        {showQrModal && (
+          <div
+            className="fixed inset-0 bg-black/70 backdrop-blur-xs z-50 flex items-center justify-center p-4"
+            onClick={() => setShowQrModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className={`rounded-3xl max-w-sm w-full p-6 text-center space-y-6 shadow-2xl border select-none ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle}`}
+            >
+              <div
+                className={`flex justify-between items-center pb-2 border-b ${adminThemeClass.accentBorder}`}
+              >
+                <div className="flex items-center space-x-2">
+                  <QrCode className="h-5 w-5 text-cyan-400" />
+                  <span
+                    className={`font-display font-bold text-base ${adminThemeClass.textTitle}`}
+                  >
+                    Secure Company Gateway QR
+                  </span>
+                </div>
+                <button
+                  onClick={() => setShowQrModal(false)}
+                  className={`font-bold text-xl cursor-pointer hover:opacity-85 ${adminThemeClass.textMuted}`}
+                >
+                  &times;
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {/* QR Display container */}
+                <div className="p-4 bg-white rounded-2xl inline-block shadow-md mx-auto border border-neutral-200">
+                  {qrDataUrl ? (
+                    <img
+                      src={qrDataUrl}
+                      alt={`${tenant.name} QR Check-In Token`}
+                      className="h-44 w-44 object-contain mx-auto"
+                    />
+                  ) : (
+                    <div className="h-44 w-44 flex items-center justify-center text-gray-400 bg-neutral-100 rounded-xl">
+                      Generating credentials...
+                    </div>
+                  )}
+                </div>
+
+                <div
+                  className={`text-xs font-mono font-bold tracking-widest uppercase ${adminThemeClass.accentText}`}
+                >
+                  {tenant.name} ID
+                </div>
+              </div>
+
+              <div className="flex space-x-3 pt-2">
+                <a
+                  href={qrDataUrl}
+                  download={`clock_it_qr_${tenant.id}.png`}
+                  className="flex-1 py-3 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-xs rounded-xl active:scale-95 transition-all cursor-pointer text-center flex items-center justify-center space-x-1 shadow-lg shadow-cyan-950/20"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span>Download Code</span>
+                </a>
+                <button
+                  onClick={() => setShowQrModal(false)}
+                  className={`flex-1 py-3 font-semibold text-xs rounded-xl active:scale-95 transition-all cursor-pointer border ${adminThemeClass.inputBg}`}
+                >
+                  Close View
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* -------------------- MODAL AREA: LEADERBOARD SUMMARY MODALS -------------------- */}
+      <AnimatePresence>
+        {selectedLeaderboardWorker &&
+          (() => {
+            const metrics = getPersonalWorkerMetrics(
+              selectedLeaderboardWorker,
+              modalTimeframe,
+            );
+            return (
+              <div
+                className="fixed inset-0 bg-black/75 backdrop-blur-md z-50 flex items-center justify-center p-4"
+                onClick={() => setSelectedLeaderboardWorker(null)}
+              >
+                <div
+                  className={`w-full max-w-lg rounded-3xl p-6 shadow-2xl border max-h-[90vh] flex flex-col overflow-y-auto overflow-x-auto scrollbar-none transform transition-all ${adminThemeClass.cardBg} ${adminThemeClass.textTitle} ${adminThemeClass.accentBorder}`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div>
+                    {/* Header */}
+                    <div
+                      className={`flex items-center justify-between border-b pb-4 mb-4 ${adminThemeClass.accentBorder}`}
+                    >
+                      <div className="flex items-center space-x-3">
+                        <div
+                          className={`p-2.5 rounded-2xl ${adminThemeClass.buttonSelected}`}
+                        >
+                          <Users className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <span className="text-[10px] uppercase font-bold tracking-widest text-[#00bcd4] block">
+                            Worker Performance Card
+                          </span>
+                          <h3
+                            className={`font-display font-bold text-base ${adminThemeClass.textTitle}`}
+                          >
+                            {selectedLeaderboardWorker.firstName}{" "}
+                            {selectedLeaderboardWorker.lastName}
+                          </h3>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setSelectedLeaderboardWorker(null)}
+                        className={`font-bold text-xl cursor-pointer ${adminThemeClass.textMuted} hover:${adminThemeClass.textHighlight}`}
+                      >
+                        &times;
+                      </button>
+                    </div>
+
+                    {/* Profile Box */}
+                    <div
+                      className={`flex items-center space-x-4 p-4 rounded-2xl border mb-5 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                    >
+                      <img
+                        src={
+                          selectedLeaderboardWorker.profilePhoto?.medium ||
+                          selectedLeaderboardWorker.profilePhoto?.small ||
+                          IMAGES.defaultWorkerAvatar
+                        }
+                        alt="Worker Profile Photo"
+                        onClick={() => setExpandedPhotoUrl(
+                          selectedLeaderboardWorker.profilePhoto?.medium ||
+                          selectedLeaderboardWorker.profilePhoto?.small ||
+                          IMAGES.defaultWorkerAvatar
+                        )}
+                        className={`h-14 w-14 rounded-2xl object-cover border cursor-zoom-in hover:scale-105 transition-transform ${adminThemeClass.accentBorder}`}
+                        title="Click to view full picture"
+                      />
+                      <div>
+                        <span className="text-[9px] uppercase font-mono font-bold text-cyan-450 block">
+                          Active Worker Profile
+                        </span>
+                        <h4
+                          className={`font-bold text-sm ${adminThemeClass.textTitle}`}
+                        >
+                          {selectedLeaderboardWorker.firstName}{" "}
+                          {selectedLeaderboardWorker.lastName}
+                        </h4>
+                        <p
+                          className={`text-[11px] ${adminThemeClass.textMuted}`}
+                        >
+                          {selectedLeaderboardWorker.email} &bull;{" "}
+                          {selectedLeaderboardWorker.phone || "No phone linked"}
+                        </p>
+                        <p
+                          className={`text-[11px] font-semibold mt-0.5 ${adminThemeClass.accentText}`}
+                        >
+                          {selectedLeaderboardWorker.deptLabel}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Query Timeframe Tabs inside Modal */}
+                    <div className="mb-5">
+                      <span
+                        className={`text-[10px] uppercase font-bold tracking-wider block mb-2 font-mono ${adminThemeClass.textMuted}`}
+                      >
+                        Timeframe Filter Query
+                      </span>
+                      <div
+                        className={`flex rounded-xl p-0.5 shadow-inner border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                      >
+                        {(
+                          ["daily", "weekly", "monthly", "yearly"] as const
+                        ).map((tf) => (
+                          <button
+                            key={tf}
+                            type="button"
+                            onClick={() => setModalTimeframe(tf)}
+                            className={`flex-1 py-1.5 text-[10px] uppercase tracking-wider font-bold rounded-lg cursor-pointer transition-all ${
+                              modalTimeframe === tf
+                                ? `${adminThemeClass.buttonSelected} shadow-sm`
+                                : `${adminThemeClass.textMuted} hover:${adminThemeClass.textHighlight}`
+                            }`}
+                          >
+                            {tf}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Recalculated Stats List */}
+                    <div className="space-y-3 mb-2 overflow-y-auto scrollbar-none">
+                      <div
+                        className={`flex justify-between items-center px-4 py-2.5 rounded-xl border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                      >
+                        <span
+                          className={`text-xs ${adminThemeClass.textMuted}`}
+                        >
+                          Total Expected Work Days
+                        </span>
+                        <span className="font-mono font-bold text-xs">
+                          {metrics.expectedDays} Days
+                        </span>
+                      </div>
+                      <div
+                        className={`flex justify-between items-center px-4 py-2.5 rounded-xl border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                      >
+                        <span
+                          className={`text-xs ${adminThemeClass.textMuted}`}
+                        >
+                          Present Days
+                        </span>
+                        <span className="font-mono font-bold text-xs text-emerald-500">
+                          {metrics.attendedDays} Days
+                        </span>
+                      </div>
+                      <div
+                        className={`flex justify-between items-center px-4 py-2.5 rounded-xl border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                      >
+                        <span
+                          className={`text-xs ${adminThemeClass.textMuted}`}
+                        >
+                          Lateness Flags (Late arrivals)
+                        </span>
+                        <span className="font-mono font-bold text-xs text-amber-500">
+                          {metrics.lateCount} Late
+                        </span>
+                      </div>
+                      <div
+                        className={`flex justify-between items-center px-4 py-2.5 rounded-xl border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                      >
+                        <span
+                          className={`text-xs ${adminThemeClass.textMuted}`}
+                        >
+                          On-Time Flags
+                        </span>
+                        <span className="font-mono font-bold text-xs text-emerald-400">
+                          {metrics.onTimeCount} Days
+                        </span>
+                      </div>
+                      <div
+                        className={`flex justify-between items-center px-4 py-2.5 rounded-xl border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                      >
+                        <span
+                          className={`text-xs ${adminThemeClass.textMuted}`}
+                        >
+                          Inactive Days
+                        </span>
+                        <span className="font-mono font-bold text-xs text-amber-500">
+                          {metrics.inactiveDays} Days
+                        </span>
+                      </div>
+                      <div
+                        className={`flex justify-between items-center px-4 py-2.5 rounded-xl border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                      >
+                        <span
+                          className={`text-xs ${adminThemeClass.textMuted}`}
+                        >
+                          Absent Flags (Workdays missed/ongoing)
+                        </span>
+                        <span className="font-mono font-bold text-xs text-red-500">
+                          {metrics.absentDays} Absent
+                        </span>
+                      </div>
+                      <div
+                        className={`flex justify-between items-center px-4 py-2.5 rounded-xl border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                      >
+                        <span
+                          className={`text-xs ${adminThemeClass.textMuted}`}
+                        >
+                          Approved Permission Days
+                        </span>
+                        <span
+                          className={`font-mono font-bold text-xs ${adminThemeClass.accentText}`}
+                        >
+                          {metrics.approvedPermissionDays} Days
+                        </span>
+                      </div>
+
+                      {/* Attendance Performance Rate Radial/Indicator */}
+                      <div
+                        className={`pt-4 border-t flex items-center justify-between ${adminThemeClass.accentBorder}`}
+                      >
+                        <span
+                          className={`text-xs font-bold ${adminThemeClass.textTitle}`}
+                        >
+                          Performance Index
+                        </span>
+                        <div className="flex items-center space-x-2">
+                          <div
+                            className={`w-24 border rounded-full h-2.5 overflow-hidden ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                          >
+                            <div
+                              style={{ width: `${metrics.performancePercentage}%` }}
+                              className="bg-gradient-to-r from-cyan-500 to-blue-600 h-2.5 rounded-full"
+                            ></div>
+                          </div>
+                          <span
+                            className={`font-black text-sm ${adminThemeClass.accentText}`}
+                          >
+                            {metrics.performancePercentage}%
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-6">
+                    <button
+                      onClick={() => setSelectedLeaderboardWorker(null)}
+                      className={`w-full py-3 text-xs font-bold rounded-xl transition-all cursor-pointer border ${adminThemeClass.inputBg}`}
+                    >
+                      Dismiss Overview
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+        {selectedLeaderboardDept &&
+          (() => {
+            const d = selectedLeaderboardDept;
+            const unitWorkers = workers.filter((w) => w.department_id === d.id);
+            const sum = unitWorkers.reduce((acc, curr) => {
+              return (
+                acc + calculateMetricsForTimeframe(curr.id, modalTimeframe).perf
+              );
+            }, 0);
+            const avg =
+              unitWorkers.length === 0
+                ? 0
+                : Number((sum / unitWorkers.length).toFixed(2));
+            const workersList = unitWorkers
+              .map((w) => ({
+                ...w,
+                perf: calculateMetricsForTimeframe(w.id, modalTimeframe).perf,
+              }))
+              .sort((a, b) => b.perf - a.perf);
+
+            return (
+              <div
+                className="fixed inset-0 bg-black/75 backdrop-blur-md z-50 flex items-center justify-center p-4"
+                onClick={() => setSelectedLeaderboardDept(null)}
+              >
+                <div
+                  className="bg-white dark:bg-[#0D0D0D] text-gray-950 dark:text-[#E5E5E5] w-full max-w-lg rounded-3xl p-6 shadow-2xl border border-gray-200 dark:border-[#262626] max-h-[90vh] flex flex-col overflow-y-auto overflow-x-auto scrollbar-none transform transition-all"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div>
+                    {/* Header */}
+                    <div className="flex items-center justify-between border-b border-gray-150 dark:border-[#262626] pb-4 mb-4">
+                      <div className="flex items-center space-x-3">
+                        <div className="p-2.5 rounded-2xl bg-emerald-50 dark:bg-[#1a2d20] text-emerald-600 dark:text-emerald-400">
+                          <Briefcase className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <span className="text-[10px] uppercase font-bold tracking-widest text-[#10b981] block">
+                            Department Unit Performance
+                          </span>
+                          <h3 className="font-display font-bold text-base text-gray-950 dark:text-white">
+                            {d.name}
+                          </h3>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setSelectedLeaderboardDept(null)}
+                        className="text-gray-400 hover:text-black dark:hover:text-white font-bold text-xl cursor-pointer"
+                      >
+                        &times;
+                      </button>
+                    </div>
+
+                    {/* Stats Header banner */}
+                    <div className="flex justify-between items-center bg-gray-50 dark:bg-[#111111] p-4 rounded-2xl border border-gray-150 dark:border-[#262626] mb-5">
+                      <div>
+                        <span className="text-[8px] uppercase tracking-widest text-emerald-500 block font-semibold">
+                          Active Manpower
+                        </span>
+                        <span className="font-mono text-xl font-extrabold text-neutral-800 dark:text-white">
+                          {unitWorkers.length} Employees
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[8px] uppercase tracking-widest text-emerald-500 block font-semibold">
+                          Average Attendance Rate
+                        </span>
+                        <span className="font-mono text-xl font-extrabold text-emerald-550 dark:text-emerald-400">
+                          {avg}%
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Query Timeframe Tabs inside Modal */}
+                    <div className="mb-5">
+                      <span className="text-[10px] uppercase font-bold text-gray-500 dark:text-neutral-450 tracking-wider block mb-2 font-mono">
+                        Timeframe Filter Query
+                      </span>
+                      <div className="flex bg-gray-105 dark:bg-[#111111] border border-gray-200 dark:border-[#262626] rounded-xl p-0.5 shadow-inner">
+                        {(
+                          ["daily", "weekly", "monthly", "yearly"] as const
+                        ).map((tf) => (
+                          <button
+                            key={tf}
+                            type="button"
+                            onClick={() => setModalTimeframe(tf)}
+                            className={`flex-1 py-1.5 text-[10px] uppercase tracking-wider font-bold rounded-lg cursor-pointer transition-all ${
+                              modalTimeframe === tf
+                                ? "bg-[#1f1f1f] text-[#10b981] border border-white/5 shadow-md font-bold dark:bg-neutral-800"
+                                : "text-slate-500 dark:text-[#888888] hover:text-slate-850 dark:hover:text-white"
+                            }`}
+                          >
+                            {tf}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* List of workers in Department - no scrollbar is seen */}
+                    <div className="space-y-2 max-h-48 overflow-y-auto scrollbar-none pr-1">
+                      <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider block mb-1 font-mono">
+                        Active Group roster
+                      </span>
+                      {workersList.length === 0 ? (
+                        <p className="text-[11px] text-gray-500 italic pb-2 text-center">
+                          No workers registered under this department yet.
+                        </p>
+                      ) : (
+                        workersList.map((tm: any, i: number) => (
+                          <div
+                            key={tm.id}
+                            className="flex justify-between items-center bg-gray-50 dark:bg-[#111111]/40 px-3.5 py-2.5 rounded-xl border border-gray-150 dark:border-[#262626]/20"
+                          >
+                            <div className="flex items-center space-x-2">
+                              <img
+                                src={
+                                  tm.profilePhoto?.small ||
+                                  IMAGES.defaultWorkerAvatar
+                                }
+                                alt=""
+                                className="h-6 w-6 rounded-md object-cover"
+                              />
+                              <span className="text-xs font-semibold">
+                                {tm.firstName} {tm.lastName}
+                              </span>
+                            </div>
+                            <span className="text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                              {tm.perf}%
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-6">
+                    <button
+                      onClick={() => setSelectedLeaderboardDept(null)}
+                      className="w-full py-3 bg-gray-105 dark:bg-[#1b1b1b] hover:bg-gray-200 dark:hover:bg-[#252525] text-gray-800 dark:text-neutral-200 text-xs font-bold rounded-xl transition-all cursor-pointer"
+                    >
+                      Dismiss Overview
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showSplash && (
+          <motion.div
+            initial={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="fixed inset-0 bg-neutral-50 dark:bg-[#0A0A0A] z-50 overflow-y-auto p-6 space-y-8 select-none"
+          >
+            {/* Shimmering Navigation Bar */}
+            <div className="flex items-center justify-between border-b pb-4 border-neutral-200/50 dark:border-neutral-800/40">
+              <div className="flex items-center space-x-3">
+                <div className="h-10 w-10 bg-neutral-200 dark:bg-neutral-800 rounded-xl animate-pulse" />
+                <div className="space-y-2">
+                  <div className="h-4 w-32 bg-neutral-200 dark:bg-neutral-800 rounded-md animate-pulse" />
+                  <div className="h-2.5 w-20 bg-neutral-200/65 dark:bg-neutral-800/60 rounded-md animate-pulse" />
+                </div>
+              </div>
+              <div className="flex items-center space-x-3">
+                <div className="h-10 w-10 bg-neutral-200 dark:bg-neutral-800 rounded-xl animate-pulse" />
+                <div className="h-10 w-10 bg-neutral-200 dark:bg-neutral-800 rounded-xl animate-pulse" />
+              </div>
+            </div>
+
+            {/* Shimmering Summary Cards */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="p-6 rounded-3xl border border-neutral-200/50 dark:border-neutral-800/40 bg-white dark:bg-neutral-900 shadow-sm space-y-3">
+                  <div className="h-3.5 w-1/2 bg-neutral-200 dark:bg-neutral-800 rounded-md animate-pulse" />
+                  <div className="h-8 w-1/3 bg-neutral-200 dark:bg-neutral-800 rounded-md animate-pulse" />
+                </div>
+              ))}
+            </div>
+
+            {/* Shimmering Navigation Tabs Row */}
+            <div className="h-12 w-full bg-neutral-200/70 dark:bg-neutral-900 rounded-2xl border border-neutral-200/50 dark:border-neutral-800/40 animate-pulse" />
+
+            {/* Shimmering Primary Section (Graph + Detail) */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              {/* Shimmering Large Chart Card */}
+              <div className="lg:col-span-2 p-6 rounded-3xl border border-neutral-200/50 dark:border-neutral-800/40 bg-white dark:bg-neutral-900 shadow-sm space-y-6">
+                <div className="flex justify-between items-center">
+                  <div className="h-4 w-40 bg-neutral-200 dark:bg-neutral-800 rounded-md animate-pulse" />
+                  <div className="flex space-x-2">
+                    <div className="h-8 w-16 bg-neutral-200 dark:bg-neutral-800 rounded-xl animate-pulse" />
+                    <div className="h-8 w-16 bg-neutral-200 dark:bg-neutral-800 rounded-xl animate-pulse" />
+                  </div>
+                </div>
+                {/* Visualizing Mock Shimmering Bar Chart Bars */}
+                <div className="h-64 flex items-end justify-between px-4 pt-10 border-b border-neutral-200/40 dark:border-neutral-800/30">
+                  {[40, 70, 45, 90, 60, 85, 50, 75, 30, 95, 65, 80].map((h, idx) => (
+                    <div
+                      key={idx}
+                      className="w-5 bg-neutral-200 dark:bg-neutral-800 rounded-t-md animate-pulse"
+                      style={{ height: `${h}%`, animationDelay: `${idx * 100}ms` }}
+                    />
+                  ))}
+                </div>
+                <div className="flex justify-between px-4">
+                  {[1, 2, 3, 4, 5, 6].map((i) => (
+                    <div key={i} className="h-3 w-10 bg-neutral-200 dark:bg-neutral-800 rounded-md animate-pulse" />
+                  ))}
+                </div>
+              </div>
+
+              {/* Shimmering Side Panel Cards */}
+              <div className="space-y-6">
+                <div className="p-6 rounded-3xl border border-neutral-200/50 dark:border-neutral-800/40 bg-white dark:bg-neutral-900 shadow-sm space-y-4">
+                  <div className="h-4 w-1/3 bg-neutral-200 dark:bg-neutral-800 rounded-md animate-pulse" />
+                  <div className="space-y-3">
+                    {[1, 2, 3].map((row) => (
+                      <div key={row} className="flex items-center justify-between">
+                        <div className="flex items-center space-x-3 w-2/3">
+                          <div className="h-8 w-8 bg-neutral-200 dark:bg-neutral-800 rounded-full animate-pulse" />
+                          <div className="h-3 w-full bg-neutral-200 dark:bg-neutral-800 rounded-md animate-pulse" />
+                        </div>
+                        <div className="h-3 w-10 bg-neutral-200 dark:bg-neutral-800 rounded-md animate-pulse" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="p-6 rounded-3xl border border-neutral-200/50 dark:border-neutral-800/40 bg-white dark:bg-neutral-900 shadow-sm space-y-4">
+                  <div className="h-4 w-1/2 bg-neutral-200 dark:bg-neutral-800 rounded-md animate-pulse" />
+                  <div className="h-28 bg-neutral-200/60 dark:bg-neutral-800/60 rounded-2xl animate-pulse" />
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </ AnimatePresence>
+
+      {/* DEPARTMENT CRUD CONFIRMATION MODAL (THEME COLOR SYNCED) */}
+      <AnimatePresence>
+        {deptConfirmModal && (
+          <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-[9999] backdrop-blur-sm select-none font-sans" onClick={() => setDeptConfirmModal(null)}>
+            <div className={`w-full max-w-md rounded-3xl border p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto overflow-x-auto ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`} onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center space-x-3">
+                <div className={`h-10 w-10 rounded-2xl flex items-center justify-center ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                  <Building className={`h-5 w-5 ${adminThemeClass.accentText}`} />
+                </div>
+                <div>
+                  <h4 className={`text-sm font-bold uppercase tracking-wider ${adminThemeClass.accentText}`}>
+                    {deptConfirmModal.title}
+                  </h4>
+                </div>
+              </div>
+
+              <p className={`text-xs ${adminThemeClass.textMuted} leading-relaxed`}>
+                {deptConfirmModal.message}
+              </p>
+
+              <div className="flex space-x-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setDeptConfirmModal(null)}
+                  className="flex-1 py-2.5 bg-neutral-800 text-white hover:bg-neutral-700 font-bold rounded-xl text-xs cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={deptConfirmModal.onConfirm}
+                  className="flex-1 py-2.5 bg-indigo-600 dark:bg-cyan-600 hover:opacity-90 text-white font-bold rounded-xl text-xs cursor-pointer"
+                >
+                  Confirm
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* DOUBLE CONFIRMATION SECURITY OVERLAY */}
+      <AnimatePresence>
+        {doubleConfirmState && (
+          <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-[9999] backdrop-blur-sm select-none font-sans" onClick={() => setDoubleConfirmState(null)}>
+            <div className={`w-full max-w-md rounded-3xl border p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto overflow-x-auto ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`} onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center space-x-3 text-amber-500">
+                <AlertTriangle className="h-6 w-6 animate-pulse" />
+                <h4 className="text-xs font-bold uppercase tracking-wider text-amber-500">
+                  {doubleConfirmState.step === 1 ? "Step 1/2: Verification Required" : "Step 2/2: Critical Authorization"}
+                </h4>
+              </div>
+
+              <div className="space-y-2">
+                <h3 className={`font-bold text-sm ${adminThemeClass.textTitle}`}>
+                  {doubleConfirmState.title}
+                </h3>
+                <p className={`text-xs ${adminThemeClass.textMuted} leading-relaxed`}>
+                  {doubleConfirmState.message}
+                </p>
+              </div>
+
+              {doubleConfirmState.step === 2 && (
+                <div className="space-y-2.5 p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20">
+                  <label className="block text-[9px] font-bold uppercase text-amber-400 text-center">
+                    Type "CONFIRM" below to authorize
+                  </label>
+                  <input
+                    type="text"
+                    id="double_confirm_input"
+                    placeholder="CONFIRM"
+                    className={`w-full border rounded-xl p-3 text-xs font-mono font-bold tracking-widest text-center ${adminThemeClass.inputBg} border-amber-500/35 focus:border-amber-400 focus:ring-0`}
+                    autoFocus
+                  />
+                </div>
+              )}
+
+              <div className="flex space-x-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setDoubleConfirmState(null)}
+                  className="flex-1 py-2.5 bg-neutral-800 text-white hover:bg-neutral-700 font-bold rounded-xl text-xs cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (doubleConfirmState.step === 1) {
+                      setDoubleConfirmState({
+                        ...doubleConfirmState,
+                        step: 2,
+                        message: "CRITICAL CONFIRMATION: Are you absolutely certain? This operation will directly affect active corporate logs and directories in real-time."
+                      });
+                    } else {
+                      const inputEl = document.getElementById("double_confirm_input") as HTMLInputElement;
+                      if (!inputEl || inputEl.value.trim().toUpperCase() !== "CONFIRM") {
+                        onNotifyAdmin("Auth Error", "Please type 'CONFIRM' exactly to authorize this operation.");
+                        return;
+                      }
+                      doubleConfirmState.onConfirm();
+                      setDoubleConfirmState(null);
+                    }
+                  }}
+                  className="flex-1 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl text-xs cursor-pointer"
+                >
+                  {doubleConfirmState.step === 1 ? "Proceed to Step 2" : "Confirm Action"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* REGISTER / EDIT WORKER DETAILS DIALOG */}
+      <AnimatePresence>
+        {(showAddWorkerModal || showEditWorkerModal) && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[9998] backdrop-blur-sm select-none font-sans" onClick={() => { setShowAddWorkerModal(false); setShowEditWorkerModal(null); }}>
+            <div className={`w-full max-w-lg rounded-3xl border p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto overflow-x-auto ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`} onClick={(e) => e.stopPropagation()}>
+              <div className="flex justify-between items-center pb-2 border-b border-neutral-200/40 dark:border-neutral-800/40">
+                <h3 className={`font-bold text-base ${adminThemeClass.textTitle}`}>
+                  {showAddWorkerModal ? "Register New Employee" : "Modify Employee Profile"}
+                </h3>
+                <button
+                  onClick={() => {
+                    setShowAddWorkerModal(false);
+                    setShowEditWorkerModal(null);
+                  }}
+                  className="p-1 hover:bg-neutral-800/40 rounded-full transition-colors text-neutral-400 cursor-pointer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  
+                  // Validation
+                  if (!workerFormFirstName.trim() || !workerFormLastName.trim() || !workerFormEmail.trim()) {
+                    onNotifyAdmin("Validation Error", "First Name, Last Name, and Email are required.");
+                    return;
+                  }
+
+                  const isAdd = showAddWorkerModal ? true : false;
+                  const targetWorkerId = showEditWorkerModal?.id;
+
+                  setDoubleConfirmState({
+                    step: 1,
+                    title: isAdd ? "Confirm Worker Registration" : "Confirm Profile Modification",
+                    message: isAdd 
+                      ? `You are about to register ${workerFormFirstName} ${workerFormLastName} as a new active team member.`
+                      : `You are about to update the profile details for ${workerFormFirstName} ${workerFormLastName}.`,
+                    actionType: isAdd ? "add" : "update",
+                    payload: null,
+                    onConfirm: async () => {
+                      try {
+                        const url = isAdd ? "/api/tenant/workers/add" : "/api/tenant/workers/update";
+                        const response = await fetch(url, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            tenant_id: tenant.id,
+                            worker_id: targetWorkerId,
+                            firstName: workerFormFirstName,
+                            lastName: workerFormLastName,
+                            email: workerFormEmail,
+                            phone: workerFormPhone,
+                            role: workerFormRole,
+                            department_id: workerFormDeptId === "unassigned" ? "" : workerFormDeptId,
+                            gender: workerFormGender
+                          })
+                        });
+
+                        if (response.ok) {
+                          onNotifyAdmin("Operation Succeeded", `Successfully ${isAdd ? "registered" : "updated"} ${workerFormFirstName} ${workerFormLastName}.`);
+                          setShowAddWorkerModal(false);
+                          setShowEditWorkerModal(null);
+                          syncAdminResources();
+                        } else {
+                          const errData = await response.json();
+                          onNotifyAdmin("Operation Failed", errData.error || "Action could not be authorized.");
+                        }
+                      } catch (err) {
+                        onNotifyAdmin("Network Error", "Unable to communicate with the central authorization server.");
+                      }
+                    }
+                  });
+                }}
+                className="space-y-4 text-xs"
+              >
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="flex flex-col space-y-1">
+                    <span className={`text-[10px] font-bold uppercase ${adminThemeClass.textMuted}`}>First Name</span>
+                    <input
+                      type="text"
+                      value={workerFormFirstName}
+                      onChange={(e) => setWorkerFormFirstName(e.target.value)}
+                      className={`border rounded-xl p-3 text-xs font-semibold ${adminThemeClass.inputBg}`}
+                      required
+                    />
+                  </div>
+                  <div className="flex flex-col space-y-1">
+                    <span className={`text-[10px] font-bold uppercase ${adminThemeClass.textMuted}`}>Last Name</span>
+                    <input
+                      type="text"
+                      value={workerFormLastName}
+                      onChange={(e) => setWorkerFormLastName(e.target.value)}
+                      className={`border rounded-xl p-3 text-xs font-semibold ${adminThemeClass.inputBg}`}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="flex flex-col space-y-1">
+                    <span className={`text-[10px] font-bold uppercase ${adminThemeClass.textMuted}`}>Email Address</span>
+                    <input
+                      type="email"
+                      value={workerFormEmail}
+                      onChange={(e) => setWorkerFormEmail(e.target.value)}
+                      className={`border rounded-xl p-3 text-xs font-semibold ${adminThemeClass.inputBg}`}
+                      required
+                    />
+                  </div>
+                  <div className="flex flex-col space-y-1">
+                    <span className={`text-[10px] font-bold uppercase ${adminThemeClass.textMuted}`}>Phone Number</span>
+                    <input
+                      type="tel"
+                      value={workerFormPhone}
+                      onChange={(e) => setWorkerFormPhone(e.target.value)}
+                      className={`border rounded-xl p-3 text-xs font-semibold ${adminThemeClass.inputBg}`}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="flex flex-col space-y-1">
+                    <span className={`text-[10px] font-bold uppercase ${adminThemeClass.textMuted}`}>Assigned Role</span>
+                    <CustomSelect
+                      value={workerFormRole}
+                      onChange={(val) => setWorkerFormRole(val as UserRole)}
+                      options={[
+                        { value: UserRole.TEAM_MEMBER, label: "Team Member" },
+                        { value: UserRole.TEAM_LEAD, label: "Team Lead (Department Lead)" },
+                        { value: UserRole.COMPANY_ADMIN, label: "Company Admin" }
+                      ]}
+                      theme={theme === "light" ? "light" : theme === "army" ? "army" : theme === "navy" ? "navy" : "dark"}
+                      className={`rounded-2xl p-3 font-bold text-xs transition-all outline-none focus:border-cyan-500 hover:opacity-95 ${adminThemeClass.inputBg} ${adminThemeClass.accentBorder}`}
+                    />
+                  </div>
+                  <div className="flex flex-col space-y-1">
+                    <span className={`text-[10px] font-bold uppercase ${adminThemeClass.textMuted}`}>Gender Reference</span>
+                    <CustomSelect
+                      value={workerFormGender}
+                      onChange={(val) => setWorkerFormGender(val)}
+                      options={[
+                        { value: "Not Specified", label: "Not Specified" },
+                        { value: "Male", label: "Male" },
+                        { value: "Female", label: "Female" }
+                      ]}
+                      theme={theme === "light" ? "light" : theme === "army" ? "army" : theme === "navy" ? "navy" : "dark"}
+                      className={`rounded-2xl p-3 font-bold text-xs transition-all outline-none focus:border-cyan-500 hover:opacity-95 ${adminThemeClass.inputBg} ${adminThemeClass.accentBorder}`}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col space-y-1">
+                  <span className={`text-[10px] font-bold uppercase ${adminThemeClass.textMuted}`}>Department Unit</span>
+                  <CustomSelect
+                    value={workerFormDeptId}
+                    onChange={(val) => setWorkerFormDeptId(val)}
+                    options={[
+                      { value: "unassigned", label: "None (Unassigned)" },
+                      ...departments.map((dp) => ({ value: dp.id, label: dp.name }))
+                    ]}
+                    theme={theme === "light" ? "light" : theme === "army" ? "army" : theme === "navy" ? "navy" : "dark"}
+                    className={`rounded-2xl p-3 font-bold text-xs transition-all outline-none focus:border-cyan-500 hover:opacity-95 ${adminThemeClass.inputBg} ${adminThemeClass.accentBorder}`}
+                  />
+                </div>
+
+                <div className="flex justify-end space-x-2 pt-2 pb-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddWorkerModal(false);
+                      setShowEditWorkerModal(null);
+                    }}
+                    className="px-4 py-2 bg-neutral-800 text-white hover:bg-neutral-700 font-bold rounded-xl text-xs cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl text-xs cursor-pointer shadow-md"
+                  >
+                    Save Profile
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* MANAGE DEPARTMENTS DIALOG */}
+      <AnimatePresence>
+        {showManageDeptModal && (
+          <div
+            className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[9998] backdrop-blur-sm select-none font-sans"
+            onClick={() => setShowManageDeptModal(false)}
+          >
+            <div
+              className={`w-full max-w-2xl max-h-[90vh] rounded-3xl border flex flex-col shadow-2xl overflow-hidden ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className={`p-6 border-b flex justify-between items-center ${adminThemeClass.accentBorder} shrink-0`}>
+                <h3 className={`font-bold text-base ${adminThemeClass.textTitle} flex items-center space-x-2`}>
+                  <Building className="h-5 w-5 text-cyan-500" />
+                  <span>Manage Departments</span>
+                </h3>
+                <button
+                  onClick={() => setShowManageDeptModal(false)}
+                  className="p-1 hover:bg-neutral-800/40 rounded-full transition-colors text-neutral-400 cursor-pointer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Scrollable Content */}
+              <div className="p-6 overflow-y-auto overflow-x-auto flex-1 space-y-6">
+                {/* Create Section */}
+                <div className={`p-4 rounded-2xl border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} space-y-3`}>
+                  <h4 className={`text-xs font-bold uppercase ${adminThemeClass.textTitle}`}>Create New Department</h4>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="e.g. Sales Division"
+                      value={newDeptName}
+                      onChange={(e) => setNewDeptName(e.target.value)}
+                      className={`flex-1 border rounded-xl px-4 text-xs font-semibold min-h-[44px] ${adminThemeClass.inputBg}`}
+                    />
+                    <button
+                      onClick={() => {
+                        if (!newDeptName.trim()) return;
+                        setDeptConfirmModal({
+                          type: "create",
+                          title: "Confirm Department Creation",
+                          message: `Are you sure you want to register "${newDeptName}" as an active department unit?`,
+                          onConfirm: () => {
+                            handleAddDept();
+                            setDeptConfirmModal(null);
+                          }
+                        });
+                      }}
+                      className="px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl text-xs min-h-[44px] cursor-pointer shadow-md shrink-0"
+                    >
+                      Create
+                    </button>
+                  </div>
+                </div>
+
+                {/* List & Select Lead Section */}
+                <div className="space-y-3">
+                  <h4 className={`text-xs font-bold uppercase ${adminThemeClass.textTitle}`}>Active Departments</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {[...departments]
+                      .sort((a, b) => a.name.localeCompare(b.name))
+                      .map((d, index) => {
+                        const activeLeadUser = workers.find(
+                          (w) => w.id === d.leadId,
+                        );
+                        const nonAdminsInDept = workers.filter(
+                          (w) =>
+                            w.department_id === d.id &&
+                            w.role !== UserRole.COMPANY_ADMIN,
+                        );
+                        const isRenaming = renamingDeptId === d.id;
+                        const isConfirmingDelete =
+                          confirmDeleteDeptId === d.id;
+
+                        return (
+                          <div
+                            key={index}
+                            className={`p-4 rounded-2xl border space-y-3 text-xs flex flex-col justify-between ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                          >
+                            <div className="space-y-2">
+                              {isRenaming ? (
+                                <div className="flex items-center gap-1.5 w-full">
+                                  <input
+                                    type="text"
+                                    value={renamingDeptName}
+                                    onChange={(e) =>
+                                      setRenamingDeptName(
+                                        e.target.value,
+                                      )
+                                    }
+                                    className={`flex-1 border rounded-xl px-2.5 py-2 text-xs font-semibold outline-none focus:border-cyan-500 ${adminThemeClass.inputBg}`}
+                                    autoFocus
+                                  />
+                                  <button
+                                    onClick={() => {
+                                      if (!renamingDeptName.trim()) return;
+                                      setDeptConfirmModal({
+                                        type: "rename",
+                                        title: "Confirm Department Rename",
+                                        message: `Are you sure you want to rename "${d.name}" to "${renamingDeptName}"?`,
+                                        onConfirm: () => {
+                                          handleRenameDept();
+                                          setDeptConfirmModal(null);
+                                        }
+                                      });
+                                    }}
+                                    className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[10px] font-bold cursor-pointer shadow-sm"
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setRenamingDeptId("");
+                                      setRenamingDeptName("");
+                                    }}
+                                    className="px-3 py-2 bg-neutral-550/20 text-red-400 rounded-xl text-[10px] font-bold cursor-pointer"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center justify-between">
+                                  <strong
+                                    className={`font-bold ${adminThemeClass.textTitle}`}
+                                  >
+                                    {d.name}
+                                  </strong>
+                                  <div className="flex space-x-2 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setRenamingDeptId(d.id);
+                                        setRenamingDeptName(d.name);
+                                      }}
+                                      className="text-indigo-600 dark:text-cyan-400 font-semibold hover:underline cursor-pointer"
+                                    >
+                                      Rename
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setConfirmDeleteDeptId(d.id);
+                                      }}
+                                      className="text-red-650 dark:text-red-400 font-semibold hover:underline cursor-pointer"
+                                    >
+                                      Delete
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+
+                              {isConfirmingDelete && (
+                                <div className="flex flex-col space-y-2 bg-red-500/10 dark:bg-red-955/20 p-2.5 rounded-xl border border-red-500/20 text-[11px] animate-none">
+                                  <span className="text-red-700 dark:text-red-400 font-bold">
+                                    Are you sure? Members will be unassigned.
+                                  </span>
+                                  <div className="flex space-x-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setDeptConfirmModal({
+                                          type: "delete",
+                                          title: "Confirm Department Deletion",
+                                          message: `Are you sure you want to permanently delete "${d.name}"? This action cannot be undone.`,
+                                          onConfirm: () => {
+                                            handleDeleteDept();
+                                            setDeptConfirmModal(null);
+                                          }
+                                        });
+                                      }}
+                                      className="px-2.5 py-1.5 bg-red-600 hover:bg-red-750 text-white rounded-lg text-[10px] font-bold cursor-pointer"
+                                    >
+                                      Yes, Delete
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setConfirmDeleteDeptId("")
+                                      }
+                                      className="px-2.5 py-1.5 bg-[#25361E] border border-red-500/20 text-[#A1C094] rounded-lg text-[10px] font-bold cursor-pointer"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Appoint Lead select box */}
+                            <div
+                              className={`flex flex-col space-y-1 p-3 mt-auto rounded-xl border ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+                            >
+                              <span
+                                className={`text-[10px] font-bold uppercase ${adminThemeClass.textMuted}`}
+                              >
+                                {translations.chooseLead}
+                              </span>
+                              <CustomSelect
+                                value={d.leadId || ""}
+                                onChange={(val) => {
+                                  const selectedWorker = workers.find(w => w.id === val);
+                                  const workerName = selectedWorker ? `${selectedWorker.firstName} ${selectedWorker.lastName}` : "No Active Lead appointed";
+                                  setDoubleConfirmState({
+                                    step: 1,
+                                    title: "Confirm Lead Appointment",
+                                    message: `Are you sure you want to appoint ${workerName} as the lead for "${d.name}"? This action will set them as the primary department authority.`,
+                                    onConfirm: () => {
+                                      handleAssignLead(d.id, val);
+                                    }
+                                  });
+                                }}
+                                className={`w-full border rounded-lg px-3.5 text-xs outline-none min-h-[44px] ${adminThemeClass.inputBg}`}
+                                options={[
+                                  {
+                                    value: "",
+                                    label: "No Active Lead appointed",
+                                  },
+                                  ...nonAdminsInDept.map(
+                                    (workerObj) => ({
+                                      value: workerObj.id,
+                                      label: `${workerObj.firstName} ${workerObj.lastName}`,
+                                    }),
+                                  ),
+                                ]}
+                                theme={theme}
+                              />
+                              {activeLeadUser && (
+                                <span className="text-[10px] text-indigo-705 dark:text-cyan-400 font-bold mt-1.5 block">
+                                  Current Active:{" "}
+                                  {activeLeadUser.firstName}{" "}
+                                  {activeLeadUser.lastName} (
+                                  {activeLeadUser.phone})
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+
+                {/* Assign Worker to Department Section */}
+                <div className={`p-4 rounded-2xl border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} space-y-3`}>
+                  <div className="flex items-center space-x-2 text-indigo-650 dark:text-cyan-455">
+                    <Users className="h-4 w-4" />
+                    <span className="font-bold text-xs uppercase tracking-wider">Assign Worker to Department</span>
+                  </div>
+                  <p className={`text-[10px] ${adminThemeClass.textMuted}`}>
+                    Direct restructurings by moving selected personnel between active departments.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="flex flex-col space-y-1">
+                      <span className={`text-[10px] font-semibold ${adminThemeClass.textMuted}`}>Select Employee</span>
+                      <CustomSelect
+                        id="assign_worker_select_modal"
+                        value={assignWorkerId}
+                        onChange={(val) => setAssignWorkerId(val)}
+                        placeholder="Choose an employee..."
+                        options={workers.map(w => ({
+                          value: w.id,
+                          label: `${w.firstName} ${w.lastName} (${departments.find(dp => dp.id === w.department_id)?.name || "Unassigned"})`
+                        }))}
+                        theme={theme === "light" ? "light" : theme === "army" ? "army" : theme === "navy" ? "navy" : "dark"}
+                        className={`rounded-2xl p-3 font-bold text-xs transition-all outline-none focus:border-cyan-500 hover:opacity-95 ${adminThemeClass.inputBg} ${adminThemeClass.accentBorder}`}
+                      />
+                    </div>
+                    <div className="flex flex-col space-y-1">
+                      <span className={`text-[10px] font-semibold ${adminThemeClass.textMuted}`}>Select Department</span>
+                      <CustomSelect
+                        id="assign_dept_select_modal"
+                        value={assignDeptId}
+                        onChange={(val) => setAssignDeptId(val)}
+                        placeholder="Choose department..."
+                        options={[
+                          { value: "unassigned", label: "None (Unassign)" },
+                          ...departments.map(dp => ({ value: dp.id, label: dp.name }))
+                        ]}
+                        theme={theme === "light" ? "light" : theme === "army" ? "army" : theme === "navy" ? "navy" : "dark"}
+                        className={`rounded-2xl p-3 font-bold text-xs transition-all outline-none focus:border-cyan-500 hover:opacity-95 ${adminThemeClass.inputBg} ${adminThemeClass.accentBorder}`}
+                      />
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!assignWorkerId || !assignDeptId) {
+                        onNotifyAdmin("Selection Required", "Please choose both an employee and a department unit.");
+                        return;
+                      }
+                      
+                      const targetWorker = workers.find(w => w.id === assignWorkerId);
+                      const targetDeptName = assignDeptId === "unassigned" ? "Unassigned" : (departments.find(dp => dp.id === assignDeptId)?.name || "");
+                      const wName = targetWorker ? `${targetWorker.firstName} ${targetWorker.lastName}` : "Employee";
+                      
+                      setDoubleConfirmState({
+                        step: 1,
+                        title: "Confirm Department Assignment",
+                        message: `Are you sure you want to assign ${wName} to the "${targetDeptName}" department?`,
+                        onConfirm: async () => {
+                          try {
+                            const response = await fetch("/api/tenant/workers/assign-department", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                tenant_id: tenant.id,
+                                worker_ids: [assignWorkerId],
+                                department_id: assignDeptId === "unassigned" ? "" : assignDeptId
+                              })
+                            });
+                            if (response.ok) {
+                              onNotifyAdmin("Assignment Saved", `${wName} is now assigned to ${targetDeptName}.`);
+                              setAssignWorkerId("");
+                              setAssignDeptId("");
+                              syncAdminResources();
+                            } else {
+                              onNotifyAdmin("Assignment Failed", "Unable to complete organizational shift.");
+                            }
+                          } catch (err) {
+                            onNotifyAdmin("Network Error", "Unable to communicate with host.");
+                          }
+                        }
+                      });
+                    }}
+                    className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs cursor-pointer min-h-[44px]"
+                  >
+                    Apply Organizational Assignment
+                  </button>
+                </div>
+
+                {/* Active Lead Histories Log Table */}
+                <div
+                  className={`p-4 rounded-2xl border space-y-2 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                >
+                  <span
+                    className={`text-[10px] font-bold uppercase block mb-1 ${adminThemeClass.textTitle}`}
+                  >
+                    {translations.leadHistory} (Persistent Index)
+                  </span>
+                  <div className="space-y-2 max-h-[140px] overflow-y-auto">
+                    {leadHistory.length === 0 ? (
+                      <span
+                        className={`text-[10px] block font-light ${adminThemeClass.textMuted}`}
+                      >
+                        No historical shifts recorded.
+                      </span>
+                    ) : (
+                      leadHistory.map((lh, idxH) => {
+                        const wObj = workers.find(
+                          (w) => w.id === lh.worker_id,
+                        );
+                        const dObj = departments.find(
+                          (d) => d.id === lh.department_id,
+                        );
+                        return (
+                          <div
+                            key={idxH}
+                            className={`p-2.5 rounded-lg border text-[10px] flex justify-between items-center select-none font-mono ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+                          >
+                            <div>
+                              <strong
+                                className={`font-semibold ${adminThemeClass.textTitle}`}
+                              >
+                                {wObj
+                                  ? `${wObj.firstName} ${wObj.lastName}`
+                                  : "Unknown staff"}
+                              </strong>
+                              <br />
+                              <span
+                                className={
+                                  adminThemeClass.textMuted
+                                }
+                              >
+                                {dObj?.name || "Deleted Unit"}
+                              </span>
+                              <span className="block text-[8px] text-cyan-500 mt-0.5">
+                                Logged: {lh.timestamp ? new Date(lh.timestamp).toLocaleString() : new Date(lh.start_date).toLocaleString()}
+                              </span>
+                            </div>
+                            <span
+                              className={`px-2 py-0.5 rounded-sm font-bold uppercase ${lh.active ? "bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400" : "bg-[#25361E] text-neutral-500"}`}
+                            >
+                              {lh.active
+                                ? translations.historyActive
+                                : translations.historyNotActive}
+                            </span>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className={`p-6 border-t flex justify-end shrink-0 ${adminThemeClass.accentBorder}`}>
+                <button
+                  type="button"
+                  onClick={() => setShowManageDeptModal(false)}
+                  className="px-6 py-2.5 bg-neutral-800 text-white hover:bg-neutral-700 font-bold rounded-xl text-xs cursor-pointer shadow-md"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* FULL SCREEN / LARGE PROFILE PICTURE PREVIEW MODAL */}
+      <AnimatePresence>
+        {expandedPhotoUrl && (
+          <div
+            className="fixed inset-0 bg-black/90 backdrop-blur-md z-[10000] flex flex-col items-center justify-center p-4"
+            onClick={() => setExpandedPhotoUrl(null)}
+          >
+            {/* Close Button at top-right */}
+            <button
+              onClick={() => setExpandedPhotoUrl(null)}
+              className="absolute top-6 right-6 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer z-[10001]"
+              title="Close Full Screen"
+            >
+              <X className="h-6 w-6" />
+            </button>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              onClick={(e) => e.stopPropagation()}
+              className="relative w-full max-w-5xl max-h-[92vh] flex items-center justify-center rounded-3xl overflow-hidden shadow-2xl border border-white/10"
+            >
+              <img
+                src={expandedPhotoUrl}
+                alt="Enlarged Worker Profile Photo"
+                className="max-h-[88vh] w-auto max-w-full object-contain rounded-3xl"
+              />
+            </motion.div>
+            <div className="mt-4 text-neutral-400 text-xs font-medium">
+              Click anywhere outside or press the button to return
+            </div>
+          </div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
