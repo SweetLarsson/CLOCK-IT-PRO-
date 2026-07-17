@@ -48,6 +48,7 @@ import {
 } from "lucide-react";
 import { AttendanceStatus, PermissionStatus, UserRole } from "../types.js";
 import { formatDateToCustomString } from "../utils/dateFormatter.js";
+import { formatPhoneNumber } from "../utils/phoneFormatter.js";
 import { playCheckInSound } from "../utils/soundSynth.js";
 import { Volume2 } from "lucide-react";
 import CustomSelect from "./CustomSelect";
@@ -3195,7 +3196,7 @@ export default function AdminDashboard({
                       <div
                         className={`w-full border-t mt-5 pt-4 flex justify-between text-xs font-mono ${adminThemeClass.textMuted} ${adminThemeClass.accentBorder}`}
                       >
-                        <span>{w.phone || "No Phone"}</span>
+                        <span>{w.phone ? formatPhoneNumber(w.phone) : "No Phone"}</span>
                         <span
                           className={`text-[10px] font-sans font-bold hover:underline ${adminThemeClass.accentText}`}
                         >
@@ -3270,7 +3271,7 @@ export default function AdminDashboard({
 
                           {/* Contact */}
                           <td className="p-4 font-mono font-semibold">
-                            {w.phone || "No phone linked"}
+                            {w.phone ? formatPhoneNumber(w.phone) : "No phone linked"}
                           </td>
 
                           {/* Details */}
@@ -4969,7 +4970,7 @@ export default function AdminDashboard({
                       {activeLeaderModal.firstName} {activeLeaderModal.lastName}
                     </h4>
                     <p className={`text-[11px] ${adminThemeClass.textMuted}`}>
-                      {activeLeaderModal.email} &bull; {activeLeaderModal.phone || "No phone linked"}
+                      {activeLeaderModal.email} &bull; {activeLeaderModal.phone ? formatPhoneNumber(activeLeaderModal.phone) : "No phone linked"}
                     </p>
                     <div className="flex gap-2 mt-1.5">
                       <span className={`text-[9px] font-bold font-mono px-2 py-0.5 rounded-full border bg-amber-500/10 text-amber-400 border-amber-500/20`}>
@@ -5252,13 +5253,12 @@ export default function AdminDashboard({
                             <button
                               type="button"
                               onClick={() => {
-                                setCalendarViewMonth(prev => {
-                                  if (prev === 0) {
-                                    setCalendarViewYear(y => y - 1);
-                                    return 11;
-                                  }
-                                  return prev - 1;
-                                });
+                                if (calendarViewMonth === 0) {
+                                  setCalendarViewYear(y => y - 1);
+                                  setCalendarViewMonth(11);
+                                } else {
+                                  setCalendarViewMonth(calendarViewMonth - 1);
+                                }
                                 setSelectedCalendarDay(null);
                               }}
                               className={`p-1.5 rounded-lg border hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer ${adminThemeClass.accentBorder}`}
@@ -5281,13 +5281,12 @@ export default function AdminDashboard({
                             <button
                               type="button"
                               onClick={() => {
-                                setCalendarViewMonth(prev => {
-                                  if (prev === 11) {
-                                    setCalendarViewYear(y => y + 1);
-                                    return 0;
-                                  }
-                                  return prev + 1;
-                                });
+                                if (calendarViewMonth === 11) {
+                                  setCalendarViewYear(y => y + 1);
+                                  setCalendarViewMonth(0);
+                                } else {
+                                  setCalendarViewMonth(calendarViewMonth + 1);
+                                }
                                 setSelectedCalendarDay(null);
                               }}
                               className={`p-1.5 rounded-lg border hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer ${adminThemeClass.accentBorder}`}
@@ -5548,7 +5547,7 @@ export default function AdminDashboard({
                           <table className="w-full text-left border-collapse min-w-[600px]">
                             <thead>
                               <tr className={`text-[11px] font-bold uppercase tracking-wider border-b ${adminThemeClass.innerBg} ${adminThemeClass.textMuted}`}>
-                                <th className="p-3">Date & Day</th>
+                                <th className="p-3">Date</th>
                                 <th className="p-3">Check-in Time</th>
                                 <th className="p-3">Check-out Time</th>
                                 <th className="p-3">Shift Duration</th>
@@ -5578,8 +5577,8 @@ export default function AdminDashboard({
                                     
                                   return (
                                     <tr key={idx} className={`border-b ${adminThemeClass.tableRowHover} duration-100`}>
-                                      <td className={`p-3 font-mono font-medium ${adminThemeClass.textTitle}`}>
-                                        {log.date} <span className="font-sans text-[10px] text-neutral-400">({dayOfWeek})</span>
+                                      <td className={`p-3 font-sans font-medium ${adminThemeClass.textTitle}`}>
+                                        {formatDateToCustomString(log.date)}
                                       </td>
                                       <td className={`p-3 font-mono ${adminThemeClass.textHighlight}`}>{log.timeIn || "--"}</td>
                                       <td className={`p-3 font-mono ${adminThemeClass.textHighlight}`}>{log.timeOut || "Active Shift"}</td>
@@ -6083,7 +6082,7 @@ export default function AdminDashboard({
                           className={`text-[11px] ${adminThemeClass.textMuted}`}
                         >
                           {selectedLeaderboardWorker.email} &bull;{" "}
-                          {selectedLeaderboardWorker.phone || "No phone linked"}
+                          {selectedLeaderboardWorker.phone ? formatPhoneNumber(selectedLeaderboardWorker.phone) : "No phone linked"}
                         </p>
                         <p
                           className={`text-[11px] font-semibold mt-0.5 ${adminThemeClass.accentText}`}
@@ -7031,7 +7030,7 @@ export default function AdminDashboard({
                                   Current Active:{" "}
                                   {activeLeadUser.firstName}{" "}
                                   {activeLeadUser.lastName} (
-                                  {activeLeadUser.phone})
+                                  {formatPhoneNumber(activeLeadUser.phone)})
                                 </span>
                               )}
                             </div>

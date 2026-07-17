@@ -85,13 +85,13 @@ export function useWorkerViewModel({
   const syncWorkerLogs = async () => {
     setIsRefreshingLogs(true);
     try {
-      const resLogs = await fetch(`/api/attendance/records?tenant_id=${tenant.id}`);
+      const resLogs = await fetch(`/api/attendance/records?tenant_id=${tenant.id}&worker_id=${user.id}`);
       const dataLogs = await resLogs.json();
       if (resLogs.ok) {
         setAttendanceRecords(dataLogs.records.filter((r: any) => r.worker_id === user.id));
       }
 
-      const resW = await fetch(`/api/tenant/workers?tenant_id=${tenant.id}`);
+      const resW = await fetch(`/api/tenant/workers?tenant_id=${tenant.id}&worker_id=${user.id}`);
       if (resW.ok) {
         const dataW = await resW.json();
         const matched = dataW.workers.find((w: any) => w.id === user.id);
@@ -128,7 +128,7 @@ export function useWorkerViewModel({
         setNotifications(dataNotifs.notifications);
       }
 
-      const resPerms = await fetch(`/api/permissions?tenant_id=${tenant.id}`);
+      const resPerms = await fetch(`/api/permissions?tenant_id=${tenant.id}&worker_id=${user.id}`);
       if (resPerms.ok) {
         const dataPerms = await resPerms.json();
         setPermissions(dataPerms.permissions || []);
@@ -358,27 +358,6 @@ export function useWorkerViewModel({
     }
   };
 
-  // Synchronized QR auto-check-in handler
-  useEffect(() => {
-    const pending = localStorage.getItem("pending_check_in");
-    if (pending) {
-      try {
-        const { tenantId, timestamp } = JSON.parse(pending);
-        if (tenantId === tenant.id && Date.now() - timestamp < 300000) {
-          localStorage.removeItem("pending_check_in");
-          const url = new URL(window.location.href);
-          url.searchParams.delete("action");
-          url.searchParams.delete("tenant_id");
-          window.history.replaceState({}, document.title, url.toString());
-          
-          setCameraState("simulating");
-          triggerCheckInHandshake(false);
-        }
-      } catch (e) {
-        localStorage.removeItem("pending_check_in");
-      }
-    }
-  }, [tenant.id]);
 
   const triggerCheckOutHandshake = async () => {
     try {

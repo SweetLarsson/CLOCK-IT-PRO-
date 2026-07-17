@@ -1070,12 +1070,15 @@ app.post("/api/tenant/departments/assign-lead", (req, res) => {
 
     const dept = db.departments.find(d => d.id === department_id && d.tenant_id === tenant_id);
     const deptName = dept ? dept.name : "Department";
+
+    const workerName = worker ? `${worker.firstName} ${worker.lastName}` : "Worker";
+
     db.notifications.push({
       id: "notif-" + Math.random().toString(36).substring(2, 11),
       tenant_id,
       worker_id,
-      title: "Appointed as Department Lead",
-      message: `You have been appointed as Lead for the ${deptName} department.`,
+      title: "Team Lead Appointed",
+      message: `${workerName} has been appointed as the Team Lead for ${deptName}`,
       timestamp: new Date().toISOString(),
       read: false
     });
@@ -1106,12 +1109,13 @@ app.post("/api/tenant/departments/assign-lead", (req, res) => {
     if (!isLeadElsewhere) {
       db.users = db.users.map(u => {
         if (u.id === previousLeadId) {
+          const prevWorkerName = `${u.firstName} ${u.lastName}`;
           db.notifications.push({
             id: "notif-" + Math.random().toString(36).substring(2, 11),
             tenant_id,
             worker_id: previousLeadId,
-            title: "Role Updated",
-            message: `You have been demoted/reassigned from being a departmental lead to a Team Member.`,
+            title: "Department Lead Reassigned",
+            message: `${prevWorkerName} is no longer the team lead and has been reassigned as a team member.`,
             timestamp: new Date().toISOString(),
             read: false
           });
@@ -1132,7 +1136,7 @@ app.post("/api/tenant/departments/assign-lead", (req, res) => {
 
 // SETTINGS & WORK DAYS
 app.post("/api/tenant/settings/save", (req, res) => {
-  const { tenant_id, theme, language, activityDays, checkIn, checkOut, overtimeHours, overtimeEnabled, onlyShowTimeIn, selectedIntervalDays, dailyShiftTimes, dailyShiftOutTimes } = req.body;
+  const { tenant_id, theme, language, activityDays, checkIn, checkOut, overtimeHours, overtimeEnabled, onlyShowTimeIn, selectedIntervalDays, dailyShiftTimes, dailyShiftOutTimes, companyLogoUrl } = req.body;
   if (!tenant_id) return res.status(400).json({ error: "tenant_id required" });
 
   db = loadDB();
@@ -1149,7 +1153,8 @@ app.post("/api/tenant/settings/save", (req, res) => {
     onlyShowTimeIn: onlyShowTimeIn || false,
     selectedIntervalDays: selectedIntervalDays !== undefined ? Number(selectedIntervalDays) : 20,
     dailyShiftTimes: dailyShiftTimes || {},
-    dailyShiftOutTimes: dailyShiftOutTimes || {}
+    dailyShiftOutTimes: dailyShiftOutTimes || {},
+    companyLogoUrl: companyLogoUrl || ""
   };
 
   if (idx !== -1) {
@@ -1165,14 +1170,44 @@ app.post("/api/tenant/settings/save", (req, res) => {
   return res.json({ success: true, settings: updatedSettings });
 });
 
-// WORKERS & PROFILE PHOTOS
-app.get("/api/tenant/workers", (req, res) => {
+app.get("/api/tenant/settings", (req, res) => {
   const tenant_id = req.query.tenant_id as string;
   if (!tenant_id) return res.status(400).json({ error: "tenant_id required" });
 
   db = loadDB();
-  // Filter out the primary admin user in workers list? Let's display everyone.
-  const workers = db.users.filter(u => u.tenant_id === tenant_id);
+  const settings = db.settings.find(s => s.tenant_id === tenant_id) || {
+    theme: "light",
+    language: "en"
+  };
+  return res.json({ settings });
+});
+
+// WORKERS & PROFILE PHOTOS
+app.get("/api/tenant/workers", (req, res) => {
+  const tenant_id = req.query.tenant_id as string;
+  const worker_id = req.query.worker_id as string;
+  if (!tenant_id) return res.status(400).json({ error: "tenant_id required" });
+
+  db = loadDB();
+  let workers = db.users.filter(u => u.tenant_id === tenant_id);
+
+  if (worker_id) {
+    const userObj = db.users.find(u => u.id === worker_id && u.tenant_id === tenant_id);
+    if (userObj) {
+      if (userObj.role === "team_member") {
+        // Regular worker: ONLY themselves
+        workers = workers.filter(u => u.id === worker_id);
+      } else if (userObj.role === "team_lead") {
+        // Team Lead: themselves AND workers in their department
+        const leadDeptId = userObj.department_id;
+        workers = workers.filter(u => u.id === worker_id || (leadDeptId && u.department_id === leadDeptId));
+      }
+      // Admins see everyone
+    } else {
+      workers = workers.filter(u => u.id === worker_id);
+    }
+  }
+
   return res.json({ workers });
 });
 
@@ -1430,6 +1465,7 @@ app.post("/api/profile/upload", (req, res) => {
 // ATTENDANCE LOGICAL ENGINE
 app.get("/api/attendance/records", (req, res) => {
   const tenant_id = req.query.tenant_id as string;
+  const worker_id = req.query.worker_id as string;
   if (!tenant_id) return res.status(400).json({ error: "tenant_id index required" });
 
   try {
@@ -1439,7 +1475,25 @@ app.get("/api/attendance/records", (req, res) => {
   }
 
   db = loadDB();
-  const records = db.attendance.filter(a => a.tenant_id === tenant_id);
+  let records = db.attendance.filter(a => a.tenant_id === tenant_id);
+
+  if (worker_id) {
+    const userObj = db.users.find(u => u.id === worker_id && u.tenant_id === tenant_id);
+    if (userObj) {
+      if (userObj.role === "team_member") {
+        // Regular worker: ONLY their own attendance records
+        records = records.filter(a => a.worker_id === worker_id);
+      } else if (userObj.role === "team_lead") {
+        // Team Lead: their own attendance records OR those from workers in their department
+        const leadDeptId = userObj.department_id;
+        records = records.filter(a => a.worker_id === worker_id || (leadDeptId && a.department_id === leadDeptId));
+      }
+      // Admins see everyone
+    } else {
+      records = records.filter(a => a.worker_id === worker_id);
+    }
+  }
+
   return res.json({ records });
 });
 
@@ -1630,10 +1684,33 @@ app.get("/api/tenant/subscription", (req, res) => {
 // PERMISSION EXEMPTIONS
 app.get("/api/permissions", (req, res) => {
   const tenant_id = req.query.tenant_id as string;
+  const worker_id = req.query.worker_id as string;
   if (!tenant_id) return res.status(400).json({ error: "tenant_id required" });
 
   db = loadDB();
-  const perms = db.permissions.filter(p => p.tenant_id === tenant_id);
+  let perms = db.permissions.filter(p => p.tenant_id === tenant_id);
+
+  if (worker_id) {
+    const userObj = db.users.find(u => u.id === worker_id && u.tenant_id === tenant_id);
+    if (userObj) {
+      if (userObj.role === "team_member") {
+        // Regular worker: ONLY their own permission requests
+        perms = perms.filter(p => p.worker_id === worker_id);
+      } else if (userObj.role === "team_lead") {
+        // Team Lead: their own permission requests OR those from workers in their department
+        const leadDeptId = userObj.department_id;
+        perms = perms.filter(p => {
+          if (p.worker_id === worker_id) return true;
+          const requester = db.users.find(u => u.id === p.worker_id && u.tenant_id === tenant_id);
+          return requester && requester.department_id === leadDeptId;
+        });
+      }
+      // Admins see everyone
+    } else {
+      perms = perms.filter(p => p.worker_id === worker_id);
+    }
+  }
+
   return res.json({ permissions: perms });
 });
 
@@ -1729,8 +1806,37 @@ app.get("/api/notifications", (req, res) => {
 
   db = loadDB();
   let notifs = db.notifications.filter(n => n.tenant_id === tenant_id);
+
   if (worker_id) {
-    notifs = notifs.filter(n => !n.worker_id || n.worker_id === worker_id);
+    const userObj = db.users.find(u => u.id === worker_id && u.tenant_id === tenant_id);
+    if (userObj) {
+      if (userObj.role === "team_member") {
+        // Regular team member: ONLY their own notifications
+        notifs = notifs.filter(n => n.worker_id === worker_id);
+      } else if (userObj.role === "team_lead") {
+        // Team Lead: their own notifications OR permission requests from their department
+        const leadDeptId = userObj.department_id;
+        notifs = notifs.filter(n => {
+          // If it's their own notification, let them see it
+          if (n.worker_id === worker_id) return true;
+          
+          // If it's a permission request notification
+          if (n.permission_id) {
+            const perm = db.permissions.find(p => p.id === n.permission_id && p.tenant_id === tenant_id);
+            if (perm) {
+              const requester = db.users.find(u => u.id === perm.worker_id && u.tenant_id === tenant_id);
+              if (requester && requester.department_id === leadDeptId) {
+                return true;
+              }
+            }
+          }
+          return false;
+        });
+      }
+      // Admins see all notifications
+    } else {
+      notifs = notifs.filter(n => n.worker_id === worker_id);
+    }
   }
 
   return res.json({ notifications: notifs });

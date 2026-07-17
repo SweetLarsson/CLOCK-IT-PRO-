@@ -26,6 +26,7 @@ import {
   SlidersHorizontal,
   FolderSync,
   ShieldCheck,
+  Shield,
   Menu,
   ChevronLeft,
   Users,
@@ -33,6 +34,7 @@ import {
 } from "lucide-react";
 import { AttendanceStatus, PermissionStatus } from "../types.js";
 import { formatDateToCustomString } from "../utils/dateFormatter.js";
+import { formatPhoneNumber } from "../utils/phoneFormatter.js";
 import CustomSelect from "./CustomSelect";
 import CustomDatePicker from "./CustomDatePicker";
 import { useWorkerViewModel } from "../viewmodels/useWorkerViewModel.js";
@@ -732,8 +734,20 @@ export default function WorkerDashboard({
                 {tenant.name}
               </span>
               <span className="inline-block h-1 w-1 rounded-full bg-neutral-400/40" />
-              <span className="text-[8px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded-md bg-cyan-500/10 text-cyan-400 border border-cyan-500/15">
-                {user.role === "team_lead" ? "team lead" : user.role === "company_admin" ? "company admin" : user.role === "super_admin" ? "super admin" : "team member"}
+              <span className={`text-[8px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded-md border ${
+                user.role === "team_lead"
+                  ? "bg-amber-500/10 text-amber-500 dark:text-amber-400 border-amber-500/15"
+                  : user.role === "company_admin" || user.role === "super_admin"
+                    ? "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/15"
+                    : "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/15"
+              }`}>
+                {user.role === "team_lead" 
+                  ? (translations.teamLead || "team lead") 
+                  : user.role === "company_admin" 
+                    ? "company admin" 
+                    : user.role === "super_admin" 
+                      ? "super admin" 
+                      : (translations.teamMember || "team member")}
               </span>
             </div>
           </div>
@@ -1331,6 +1345,66 @@ export default function WorkerDashboard({
         {activeTab === "history" && (
           <div className="space-y-6">
 
+            {/* Company Details Banner Container */}
+            <div className={`p-4 rounded-3xl border shadow-md flex items-center justify-between gap-4 ${themeClass.cardBg} ${themeClass.accentBorder}`}>
+              <div className="flex items-center space-x-4 w-full justify-between sm:justify-start">
+                <div className="flex items-center space-x-3 shrink-0">
+                  {/* Company Logo */}
+                  <div className="h-10 w-10 bg-gradient-to-r from-cyan-500 to-blue-600 rounded-xl flex items-center justify-center text-white overflow-hidden shadow-lg shadow-cyan-950/45 transition-all select-none shrink-0">
+                    {settings?.companyLogoUrl || localStorage.getItem(`company_logo_${tenant.id}`) ? (
+                      <img
+                        src={settings?.companyLogoUrl || localStorage.getItem(`company_logo_${tenant.id}`) || ""}
+                        alt="Company Logo"
+                        className="h-full w-full object-cover select-none pointer-events-none"
+                      />
+                    ) : (
+                      <Shield className="h-5 w-5" />
+                    )}
+                  </div>
+                  {/* Company Name & Tag */}
+                  <div>
+                    <h4 className={`font-bold text-sm tracking-tight ${themeClass.textTitle}`}>
+                      {tenant.name}
+                    </h4>
+                    <p className={`text-[10px] uppercase font-bold tracking-wider font-mono ${themeClass.textMuted}`}>
+                      {translations.companyDetails || "Company Profile"}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Company Details in a single straight line */}
+                <div className="hidden sm:flex items-center space-x-4 text-xs font-light">
+                  <span className={`h-4 w-px bg-neutral-200/10`} />
+                  <div className="flex flex-col">
+                    <span className={`text-[9px] uppercase font-bold tracking-wider block font-mono ${themeClass.textMuted}`}>
+                      {translations.companyEmail || "Company Email"}
+                    </span>
+                    <span className={themeClass.textHighlight}>{tenant.email || "N/A"}</span>
+                  </div>
+                  <span className={`h-4 w-px bg-neutral-200/10`} />
+                  <div className="flex flex-col">
+                    <span className={`text-[9px] uppercase font-bold tracking-wider block font-mono ${themeClass.textMuted}`}>
+                      {translations.companyPhone || "Company Phone"}
+                    </span>
+                    <span className={themeClass.textHighlight}>{formatPhoneNumber(tenant.phone) || "N/A"}</span>
+                  </div>
+                  <span className={`h-4 w-px bg-neutral-200/10`} />
+                  <div className="flex flex-col">
+                    <span className={`text-[9px] uppercase font-bold tracking-wider block font-mono ${themeClass.textMuted}`}>
+                      {translations.companyCode || "Company Code"}
+                    </span>
+                    <span className="font-mono text-[11px] font-semibold">{tenant.id}</span>
+                  </div>
+                </div>
+
+                {/* Mobile visible fallback */}
+                <div className="flex sm:hidden flex-col text-right">
+                  <span className={`text-[10px] ${themeClass.textHighlight}`}>{tenant.email}</span>
+                  <span className={`text-[9px] ${themeClass.textMuted}`}>{formatPhoneNumber(tenant.phone)}</span>
+                </div>
+              </div>
+            </div>
+
             {/* Shift Assessment Header & Profile Box */}
             <div className={`p-6 rounded-3xl border shadow-md space-y-4 ${themeClass.cardBg} ${themeClass.accentBorder}`}>
               <div className="flex justify-between items-center pb-2 border-b border-neutral-200/10">
@@ -1355,7 +1429,7 @@ export default function WorkerDashboard({
                       {user.firstName} {user.lastName}
                     </h4>
                     <p className={`text-[11px] ${themeClass.textMuted}`}>
-                      {user.email} &bull; {user.phone || (translations.noPhoneLinked || "No phone linked")}
+                      {user.email} &bull; {user.phone ? formatPhoneNumber(user.phone) : (translations.noPhoneLinked || "No phone linked")}
                     </p>
                     <div className="flex gap-2 mt-1.5">
                       <span className={`text-[9px] font-bold font-mono px-2 py-0.5 rounded-full border bg-amber-500/10 text-amber-400 border-amber-500/20 uppercase`}>
@@ -1934,7 +2008,7 @@ export default function WorkerDashboard({
                         <table className="w-full text-left border-collapse min-w-[600px]">
                           <thead>
                             <tr className={`text-[11px] font-bold uppercase tracking-wider border-b ${themeClass.innerBg} ${themeClass.textMuted}`}>
-                              <th className="p-3">{translations.colDate || "Date & Day"}</th>
+                              <th className="p-3">{translations.colDate || "Date"}</th>
                               <th className="p-3">{translations.colIn || "Check-in Time"}</th>
                               {!settings?.onlyShowTimeIn && <th className="p-3">{translations.colOut || "Check-out Time"}</th>}
                               <th className="p-3">{(settings?.onlyShowTimeIn !== false) ? (translations.colStatusIn || "Arrival Status") : (translations.colCovered || "Shift Duration")}</th>
@@ -1960,7 +2034,7 @@ export default function WorkerDashboard({
                                 
                                 return (
                                   <tr key={idx} className={`border-b ${themeClass.tableRowHover} duration-100`}>
-                                    <td className={`p-3 font-mono font-medium ${themeClass.textTitle}`}>
+                                    <td className={`p-3 font-sans font-medium ${themeClass.textTitle}`}>
                                       {formatPunchDate(log.date)}
                                     </td>
                                     <td className={`p-3 font-mono ${themeClass.textHighlight}`}>{log.timeIn || "--"}</td>

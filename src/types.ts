@@ -181,6 +181,7 @@ export interface TenantSettings {
   overtimeEnabled?: boolean;
   onlyShowTimeIn?: boolean;
   selectedIntervalDays?: number;
+  companyLogoUrl?: string;
 }
 
 export interface ReportJob {

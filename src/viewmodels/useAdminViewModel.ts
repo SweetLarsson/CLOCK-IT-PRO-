@@ -101,22 +101,34 @@ export function useAdminViewModel({
         localStorage.setItem(`company_logo_${tenant.id}`, compressedBase64);
         
         onNotifyAdmin("Profile Picture & Logo Synchronized", "Your custom identity and company logo are now matched.");
+
+        // Persist to server
+        await handleSaveSettings({
+          ...settings,
+          companyLogoUrl: compressedBase64
+        });
       } catch (err) {
         console.error("Image compression error:", err);
       }
     }
   };
 
-  const handleAdminDpDelete = () => {
+  const handleAdminDpDelete = async () => {
     setAdminPhotoUrl("");
     localStorage.removeItem(`admin_dp_${user.id}`);
     setCompanyLogoUrl("");
     localStorage.removeItem(`company_logo_${tenant.id}`);
     onNotifyAdmin("Profile Image & Logo Reset", "Reverted identity and shield emblem assets.");
+
+    // Persist to server
+    await handleSaveSettings({
+      ...settings,
+      companyLogoUrl: ""
+    });
   };
 
   const [companyLogoUrl, setCompanyLogoUrl] = useState(() => {
-    return localStorage.getItem(`company_logo_${tenant.id}`) || "";
+    return initialSettings?.companyLogoUrl || localStorage.getItem(`company_logo_${tenant.id}`) || "";
   });
   const companyLogoFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -127,16 +139,28 @@ export function useAdminViewModel({
         setCompanyLogoUrl(compressedBase64);
         localStorage.setItem(`company_logo_${tenant.id}`, compressedBase64);
         onNotifyAdmin("Company Logo Synchronized", "Your official corporate asset is now active.");
+
+        // Persist to server
+        await handleSaveSettings({
+          ...settings,
+          companyLogoUrl: compressedBase64
+        });
       } catch (err) {
         console.error("Logo compression error:", err);
       }
     }
   };
 
-  const handleCompanyLogoDelete = () => {
+  const handleCompanyLogoDelete = async () => {
     setCompanyLogoUrl("");
     localStorage.removeItem(`company_logo_${tenant.id}`);
     onNotifyAdmin("Company Logo Reset", "Reverted to default shield emblem visual.");
+
+    // Persist to server
+    await handleSaveSettings({
+      ...settings,
+      companyLogoUrl: ""
+    });
   };
 
   // Department CRUD states
@@ -346,6 +370,21 @@ export function useAdminViewModel({
       syncAdminResources();
     });
 
+    eventSource.addEventListener("SETTINGS_SAVED", (e: any) => {
+      try {
+        const payload = JSON.parse(e.data);
+        setSettings(payload);
+        if (onSettingsChange) {
+          onSettingsChange(payload);
+        }
+        if (payload.companyLogoUrl !== undefined) {
+          setCompanyLogoUrl(payload.companyLogoUrl);
+        }
+      } catch (err) {
+        console.warn("Error parsing SETTINGS_SAVED event on admin side:", err);
+      }
+    });
+
     return () => {
       eventSource.close();
     };
@@ -353,7 +392,10 @@ export function useAdminViewModel({
 
   // Settings persistent save
   const handleSaveSettings = async (overrideSettingsObj?: any) => {
-    const sObj = overrideSettingsObj || settings;
+    const sObj = {
+      ...(overrideSettingsObj || settings),
+      tenant_id: tenant.id
+    };
     try {
       const response = await fetch("/api/tenant/settings/save", {
         method: "POST",

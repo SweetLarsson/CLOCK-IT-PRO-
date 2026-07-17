@@ -313,6 +313,22 @@ export default function App() {
               }
             })
             .catch((err) => console.warn("Failed to sync subscription on restore:", err));
+
+          fetch(`/api/tenant/settings?tenant_id=${parsed.tenant.id}`)
+            .then((res) => {
+              if (res.ok) return res.json();
+            })
+            .then((data) => {
+              if (data && data.settings) {
+                setSession((prev) => {
+                  if (!prev) return prev;
+                  const next = { ...prev, settings: data.settings };
+                  localStorage.setItem("clock_it_session", JSON.stringify(next));
+                  return next;
+                });
+              }
+            })
+            .catch((err) => console.warn("Failed to sync settings on restore:", err));
         }
       } catch (e) {
         localStorage.removeItem("clock_it_session");
