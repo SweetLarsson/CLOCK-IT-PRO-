@@ -33,6 +33,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronDown,
+  ChevronUp,
   X,
   Building,
   AlertTriangle,
@@ -45,9 +46,13 @@ import {
   History,
   Bell,
   Info,
+  Award,
+  Check,
+  Eye,
 } from "lucide-react";
+import { AtAGlanceAttendanceOverlay } from "./AtAGlanceAttendanceOverlay.js";
 import { AttendanceStatus, PermissionStatus, UserRole } from "../types.js";
-import { formatDateToCustomString } from "../utils/dateFormatter.js";
+import { formatDateToCustomString, groupNotificationsByDate } from "../utils/dateFormatter.js";
 import { formatPhoneNumber } from "../utils/phoneFormatter.js";
 import { playCheckInSound } from "../utils/soundSynth.js";
 import { Volume2 } from "lucide-react";
@@ -208,16 +213,30 @@ export default function AdminDashboard({
   });
 
   const [showAdminNotifDrawer, setShowAdminNotifDrawer] = React.useState(false);
+  const [isAtAGlanceOpen, setIsAtAGlanceOpen] = React.useState(false);
 
   const [expandedPhotoUrl, setExpandedPhotoUrl] = React.useState<string | null>(null);
 
   const [selectedNotificationDetail, setSelectedNotificationDetail] = React.useState<any>(null);
 
+  const groupedNotifications = React.useMemo(() => {
+    return groupNotificationsByDate(notifications);
+  }, [notifications]);
+
   const [localSettings, setLocalSettings] = React.useState<any>(null);
   
   // Custom states for newly requested features
+  const [selectedAnalyticsMonth, setSelectedAnalyticsMonth] = React.useState<string>("all");
+  const [selectedAnalyticsYear, setSelectedAnalyticsYear] = React.useState<string>("all");
+
   const [profilesViewMode, setProfilesViewMode] = React.useState<"card" | "list">("card");
+  const [profilesSortField, setProfilesSortField] = React.useState<"name" | "title_role" | "department" | "phone" | "worker_status">("name");
+  const [profilesSortOrder, setProfilesSortOrder] = React.useState<"asc" | "desc">("asc");
+  const [isSortDropdownOpen, setIsSortDropdownOpen] = React.useState(false);
   const [permissionsViewMode, setPermissionsViewMode] = React.useState<"card" | "list">("card");
+  const [permissionsSortField, setPermissionsSortField] = React.useState<"name" | "reason" | "department">("name");
+  const [permissionsSortOrder, setPermissionsSortOrder] = React.useState<"asc" | "desc">("asc");
+  const [isPermissionsSortDropdownOpen, setIsPermissionsSortDropdownOpen] = React.useState(false);
   const [deptConfirmModal, setDeptConfirmModal] = React.useState<{
     type: "create" | "rename" | "delete" | "assign_worker";
     title: string;
@@ -228,6 +247,7 @@ export default function AdminDashboard({
   const [showAddWorkerModal, setShowAddWorkerModal] = React.useState(false);
   const [showEditWorkerModal, setShowEditWorkerModal] = React.useState<any | null>(null);
   const [activeSummaryTab, setActiveSummaryTab] = React.useState<"info" | "analytics" | "hours" | "history" | "actions">("info");
+  const [isAdminShiftAssessmentExpanded, setIsAdminShiftAssessmentExpanded] = React.useState<boolean>(true);
   const [calendarViewYear, setCalendarViewYear] = React.useState(new Date().getFullYear());
   const [calendarViewMonth, setCalendarViewMonth] = React.useState(new Date().getMonth());
   const [selectedCalendarDay, setSelectedCalendarDay] = React.useState<any>(null);
@@ -249,15 +269,20 @@ export default function AdminDashboard({
   const [leadModalDeptId, setLeadModalDeptId] = React.useState("");
   const [isAssignDropdownOpen, setIsAssignDropdownOpen] = React.useState(false);
 
+  const prevModalWorkerIdRef = React.useRef<string | null>(null);
+
   React.useEffect(() => {
     if (activeLeaderModal) {
-      setLeadModalDeptId(activeLeaderModal.department_id || "");
-      setActiveSummaryTab("info");
-      setModalTimeframe("daily");
-      setCalendarViewYear(new Date().getFullYear());
-      setCalendarViewMonth(new Date().getMonth());
-      setSelectedCalendarDay(null);
+      if (prevModalWorkerIdRef.current !== activeLeaderModal.id) {
+        prevModalWorkerIdRef.current = activeLeaderModal.id;
+        setLeadModalDeptId(activeLeaderModal.department_id || "");
+        setActiveSummaryTab("info");
+        setCalendarViewYear(new Date().getFullYear());
+        setCalendarViewMonth(new Date().getMonth());
+        setSelectedCalendarDay(null);
+      }
     } else {
+      prevModalWorkerIdRef.current = null;
       setLeadModalDeptId("");
     }
     setIsAssignDropdownOpen(false);
@@ -336,6 +361,24 @@ export default function AdminDashboard({
   >("worker");
   const [selectedLeaderboardWorker, setSelectedLeaderboardWorker] =
     React.useState<any | null>(null);
+
+  React.useEffect(() => {
+    if (selectedLeaderboardWorker) {
+      const fresh = workers.find((w: any) => w.id === selectedLeaderboardWorker.id);
+      if (fresh) {
+        setSelectedLeaderboardWorker(fresh);
+      }
+    }
+  }, [workers]);
+
+  React.useEffect(() => {
+    if (showEditWorkerModal) {
+      const fresh = workers.find((w: any) => w.id === showEditWorkerModal.id);
+      if (fresh) {
+        setShowEditWorkerModal(fresh);
+      }
+    }
+  }, [workers]);
   const [selectedLeaderboardDept, setSelectedLeaderboardDept] = React.useState<
     any | null
   >(null);
@@ -416,18 +459,12 @@ export default function AdminDashboard({
       startDate.setHours(0, 0, 0, 0);
       endDate.setHours(23, 59, 59, 999);
 
-      // Adjust start range to not be earlier than registration date
-      if (startDate < registrationDate) {
-        startDate = new Date(registrationDate);
-        startDate.setHours(0, 0, 0, 0);
-      }
-
       let expectedDays = 0;
+      let elapsedExpectedDays = 0;
       let attendedDays = 0;
       let lateCount = 0;
       let onTimeCount = 0;
       let approvedPermissionDays = 0;
-      let inactiveDaysCount = 0;
       let absentDays = 0;
       let totalCoveredSeconds = 0;
 
@@ -439,86 +476,77 @@ export default function AdminDashboard({
         const dayName = dayOfWeekNames[cur.getDay()];
         const isActiveWorkDay = activeDays[dayName] === true;
         const isEmployed = dateStr >= regDateStr;
+        const isFuture = dateStr > todayStr;
 
-        const hasPermission = permissions.some(p => 
-          p.worker_id === worker.id && 
-          (p.status || "").toLowerCase() === "approved" && 
-          p.startDate <= dateStr && 
-          p.endDate >= dateStr
-        );
+        if (isActiveWorkDay) {
+          const hasPermission = permissions.some(p => 
+            p.worker_id === worker.id && 
+            (p.status || "").toLowerCase() === "approved" && 
+            p.startDate <= dateStr && 
+            p.endDate >= dateStr
+          );
 
-        const atts = attendanceRecords.filter(r => r.worker_id === worker.id && r.date === dateStr);
-        const hasSuccessfulCheckin = atts.length > 0 && atts.some(r => 
-          r.statusIn === "PRESENT" || r.statusIn === "present" || 
-          r.statusIn === "LATE" || r.statusIn === "late"
-        );
-
-        if (!isEmployed) {
-          // Inactive Days represent dates before employment
-          inactiveDaysCount++;
-        } else {
-          // Worker is employed
           if (hasPermission) {
-            // Approved Exemptions reduce expected attendance
-            if (isActiveWorkDay) {
-              approvedPermissionDays++;
-            }
-          } else if (isActiveWorkDay) {
-            // Expected Work Days
-            expectedDays++;
-          }
-        }
-
-        // Attendance check
-        if (hasSuccessfulCheckin) {
-          attendedDays++;
-          if (atts.some(r => r.statusIn === "LATE" || r.statusIn === "late")) {
-            lateCount++;
-          } else if (atts.some(r => r.statusIn === "PRESENT" || r.statusIn === "present")) {
-            onTimeCount++;
-          }
-
-          // Calculate hours worked for this day from Punch History
-          const r = atts[0];
-          let hoursWorked = 0;
-          if (r.timeIn && r.timeOut) {
-            const [h1, m1, s1] = r.timeIn.split(":").map(Number);
-            const [h2, m2, s2] = r.timeOut.split(":").map(Number);
-            const sIn = h1 * 3600 + m1 * 60 + (s1 || 0);
-            const sOut = h2 * 3600 + m2 * 60 + (s2 || 0);
-            if (sOut > sIn) {
-              hoursWorked = (sOut - sIn) / 3600;
-            } else if (r.coveredTime) {
-              hoursWorked = r.coveredTime / 3600;
-            } else {
-              hoursWorked = 0;
-            }
-          } else if (r.coveredTime) {
-            hoursWorked = r.coveredTime / 3600;
+            approvedPermissionDays++;
           } else {
-            hoursWorked = 0;
-          }
-          totalCoveredSeconds += hoursWorked * 3600;
-        } else {
-          // No attendance
-          if (isEmployed && isActiveWorkDay && !hasPermission) {
-            absentDays++;
+            // Count total expected workdays scheduled for this timeframe
+            expectedDays++;
+
+            if (!isFuture && isEmployed) {
+              elapsedExpectedDays++;
+
+              const atts = attendanceRecords.filter(r => r.worker_id === worker.id && r.date === dateStr);
+              const hasSuccessfulCheckin = atts.length > 0 && atts.some(r => 
+                r.statusIn === "PRESENT" || r.statusIn === "present" || 
+                r.statusIn === "LATE" || r.statusIn === "late"
+              );
+
+              if (hasSuccessfulCheckin) {
+                attendedDays++;
+                if (atts.some(r => r.statusIn === "LATE" || r.statusIn === "late")) {
+                  lateCount++;
+                } else if (atts.some(r => r.statusIn === "PRESENT" || r.statusIn === "present")) {
+                  onTimeCount++;
+                }
+
+                // Calculate hours worked for this day from Punch History
+                const r = atts[0];
+                let hoursWorked = 0;
+                if (r.timeIn && r.timeOut) {
+                  const [h1, m1, s1] = r.timeIn.split(":").map(Number);
+                  const [h2, m2, s2] = r.timeOut.split(":").map(Number);
+                  const sIn = h1 * 3600 + m1 * 60 + (s1 || 0);
+                  const sOut = h2 * 3600 + m2 * 60 + (s2 || 0);
+                  if (sOut > sIn) {
+                    hoursWorked = (sOut - sIn) / 3600;
+                  } else if (r.coveredTime) {
+                    hoursWorked = r.coveredTime / 3600;
+                  } else {
+                    hoursWorked = 0;
+                  }
+                } else if (r.coveredTime) {
+                  hoursWorked = r.coveredTime / 3600;
+                } else {
+                  hoursWorked = 0;
+                }
+                totalCoveredSeconds += hoursWorked * 3600;
+              } else {
+                // Missed active workday from registration date up to present without permission -> Absent Flag
+                absentDays++;
+              }
+            }
           }
         }
 
         cur.setDate(cur.getDate() + 1);
       }
 
-      const performancePercentage = expectedDays > 0 
-        ? Math.min(100, Number(((attendedDays / expectedDays) * 100).toFixed(2))) 
-        : 100.00;
+      const denominator = elapsedExpectedDays > 0 ? elapsedExpectedDays : (expectedDays > 0 ? expectedDays : 1);
 
-      const attendancePercentage = expectedDays > 0 
-        ? Math.min(100, Number(((attendedDays / expectedDays) * 100).toFixed(2))) 
-        : 100.00;
-
-      const availabilityPercentage = (expectedDays + approvedPermissionDays) > 0 
-        ? Math.min(100, Number((((attendedDays + approvedPermissionDays) / (expectedDays + approvedPermissionDays)) * 100).toFixed(2))) 
+      const performancePercentage = Math.min(100, Number(((attendedDays / denominator) * 100).toFixed(2)));
+      const attendancePercentage = Math.min(100, Number(((attendedDays / denominator) * 100).toFixed(2)));
+      const availabilityPercentage = (denominator + approvedPermissionDays) > 0 
+        ? Math.min(100, Number((((attendedDays + approvedPermissionDays) / (denominator + approvedPermissionDays)) * 100).toFixed(2))) 
         : 100.00;
 
       const workHours = Number((totalCoveredSeconds / 3600).toFixed(2));
@@ -530,8 +558,8 @@ export default function AdminDashboard({
         onTimeCount,
         approvedPermissionDays,
         absentDays,
-        inactiveDays: inactiveDaysCount,
-        overdueDays: inactiveDaysCount, // keep as fallback
+        inactiveDays: 0,
+        overdueDays: 0,
         attendancePercentage,
         availabilityPercentage,
         performancePercentage,
@@ -635,25 +663,58 @@ export default function AdminDashboard({
   }, [rankedDepartmentsForTimeframe, analyticsSearchQuery]);
 
   const filteredWorkersForProfiles = React.useMemo(() => {
-    const list = workers.filter((w) => w.role !== UserRole.COMPANY_ADMIN);
-    if (!profilesSearchQuery.trim()) return list;
-    const q = profilesSearchQuery.toLowerCase();
-    return list.filter((w) => {
-      const deptLabel =
-        departments.find((d) => d.id === w.department_id)?.name || "";
-      const first = w.firstName || "";
-      const last = w.lastName || "";
-      const title = w.title || "";
-      const phone = w.phone || "";
-      return (
-        first.toLowerCase().includes(q) ||
-        last.toLowerCase().includes(q) ||
-        title.toLowerCase().includes(q) ||
-        deptLabel.toLowerCase().includes(q) ||
-        phone.toLowerCase().includes(q)
-      );
+    let list = workers.filter((w) => w.role !== UserRole.COMPANY_ADMIN);
+    if (profilesSearchQuery.trim()) {
+      const q = profilesSearchQuery.toLowerCase();
+      list = list.filter((w) => {
+        const deptLabel =
+          departments.find((d) => d.id === w.department_id)?.name || "";
+        const first = w.firstName || "";
+        const last = w.lastName || "";
+        const title = w.title || "";
+        const phone = w.phone || "";
+        return (
+          first.toLowerCase().includes(q) ||
+          last.toLowerCase().includes(q) ||
+          title.toLowerCase().includes(q) ||
+          deptLabel.toLowerCase().includes(q) ||
+          phone.toLowerCase().includes(q)
+        );
+      });
+    }
+
+    return [...list].sort((a, b) => {
+      let valA = "";
+      let valB = "";
+
+      if (profilesSortField === "name") {
+        valA = `${a.firstName || ""} ${a.lastName || ""}`.trim().toLowerCase();
+        valB = `${b.firstName || ""} ${b.lastName || ""}`.trim().toLowerCase();
+      } else if (profilesSortField === "worker_status") {
+        const isLeadA = a.role === UserRole.TEAM_LEAD || departments.some((d) => d.leadId === a.id);
+        const isLeadB = b.role === UserRole.TEAM_LEAD || departments.some((d) => d.leadId === b.id);
+        const statusA = isLeadA ? "Team Lead" : (a.role === UserRole.TEAM_MEMBER ? "Team Member" : a.role || "");
+        const statusB = isLeadB ? "Team Lead" : (b.role === UserRole.TEAM_MEMBER ? "Team Member" : b.role || "");
+        valA = statusA.trim().toLowerCase();
+        valB = statusB.trim().toLowerCase();
+      } else if (profilesSortField === "title_role") {
+        valA = `${a.title || ""} ${a.role || ""}`.trim().toLowerCase();
+        valB = `${b.title || ""} ${b.role || ""}`.trim().toLowerCase();
+      } else if (profilesSortField === "department") {
+        const deptA = departments.find((d) => d.id === a.department_id)?.name || "";
+        const deptB = departments.find((d) => d.id === b.department_id)?.name || "";
+        valA = deptA.trim().toLowerCase();
+        valB = deptB.trim().toLowerCase();
+      } else if (profilesSortField === "phone") {
+        valA = (a.phone || "").replace(/\D/g, "");
+        valB = (b.phone || "").replace(/\D/g, "");
+      }
+
+      if (valA < valB) return profilesSortOrder === "asc" ? -1 : 1;
+      if (valA > valB) return profilesSortOrder === "asc" ? 1 : -1;
+      return 0;
     });
-  }, [workers, profilesSearchQuery, departments]);
+  }, [workers, profilesSearchQuery, departments, profilesSortField, profilesSortOrder]);
 
   const groupedLogs = React.useMemo(() => {
     const groups: { [date: string]: typeof filteredLogsList } = {};
@@ -671,78 +732,97 @@ export default function AdminDashboard({
       }));
   }, [filteredLogsList]);
 
-  const dateIntervals = React.useMemo(() => {
-    // Find latest date in attendanceRecords to anchor our timeline, fallback to "2026-06-29"
-    const latestDateStr = attendanceRecords.reduce(
-      (max, r) => (r.date > max ? r.date : max),
-      "2026-06-29",
-    );
-    const latestDate = parseLocalDate(latestDateStr);
+  const availableYears = React.useMemo(() => {
+    const yearsSet = new Set<string>();
+    const currentYr = new Date().getFullYear().toString();
+    yearsSet.add(currentYr);
+    yearsSet.add("2026");
+    yearsSet.add("2025");
+    yearsSet.add("2024");
+    attendanceRecords.forEach((r) => {
+      if (r.date) {
+        const yr = r.date.split("-")[0];
+        if (yr && yr.length === 4) yearsSet.add(yr);
+      }
+    });
+    return Array.from(yearsSet).sort((a, b) => b.localeCompare(a));
+  }, [attendanceRecords]);
 
-    let intervals: { label: string; startDate: string; endDate: string; displayDate: string }[] = [];
+  const monthSelectOptions = React.useMemo(() => [
+    { value: "all", label: "All Months" },
+    { value: "01", label: "January" },
+    { value: "02", label: "February" },
+    { value: "03", label: "March" },
+    { value: "04", label: "April" },
+    { value: "05", label: "May" },
+    { value: "06", label: "June" },
+    { value: "07", label: "July" },
+    { value: "08", label: "August" },
+    { value: "09", label: "September" },
+    { value: "10", label: "October" },
+    { value: "11", label: "November" },
+    { value: "12", label: "December" },
+  ], []);
 
-    if (timeframe === "daily") {
-      // 7 days ending on latestDate
-      for (let i = 0; i < 7; i++) {
-        const d = new Date(latestDate);
-        d.setDate(d.getDate() - (6 - i));
-        const dateStr = getLocalDateString(d);
-        intervals.push({
-          label: dateStr,
-          startDate: dateStr,
-          endDate: dateStr,
-          displayDate: dateStr,
-        });
-      }
-    } else if (timeframe === "weekly") {
-      // 6 weeks ending on latestDate
-      for (let i = 0; i < 6; i++) {
-        const dEnd = new Date(latestDate);
-        dEnd.setDate(dEnd.getDate() - (5 - i) * 7);
-        const dStart = new Date(dEnd);
-        dStart.setDate(dStart.getDate() - 6);
-        
-        const endStr = getLocalDateString(dEnd);
-        const startStr = getLocalDateString(dStart);
-        intervals.push({
-          label: `Week ${i + 1}`,
-          startDate: startStr,
-          endDate: endStr,
-          displayDate: endStr,
-        });
-      }
-    } else if (timeframe === "monthly") {
-      // 6 months ending on latestDate
-      for (let i = 0; i < 6; i++) {
-        const d = new Date(latestDate.getFullYear(), latestDate.getMonth() - (5 - i), 15);
-        const startOfMonth = new Date(d.getFullYear(), d.getMonth(), 1);
-        const endOfMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0);
-        
-        intervals.push({
-          label: d.toLocaleString('en-US', { month: 'short' }),
-          startDate: getLocalDateString(startOfMonth),
-          endDate: getLocalDateString(endOfMonth),
-          displayDate: getLocalDateString(startOfMonth),
-        });
-      }
-    } else if (timeframe === "yearly") {
-      // 6 bi-months ending on latestDate
-      for (let i = 0; i < 6; i++) {
-        const d = new Date(latestDate.getFullYear(), latestDate.getMonth() - (5 - i) * 2, 15);
-        const startOfBiMonth = new Date(d.getFullYear(), d.getMonth(), 1);
-        const endOfBiMonth = new Date(d.getFullYear(), d.getMonth() + 2, 0);
-        
-        intervals.push({
-          label: d.getFullYear().toString(),
-          startDate: getLocalDateString(startOfBiMonth),
-          endDate: getLocalDateString(endOfBiMonth),
-          displayDate: getLocalDateString(startOfBiMonth),
-        });
-      }
+  const yearSelectOptions = React.useMemo(() => [
+    { value: "all", label: "All Years" },
+    ...availableYears.map((yr) => ({
+      value: yr,
+      label: yr,
+    })),
+  ], [availableYears]);
+
+  const getQueriedPeriodLabel = React.useCallback(() => {
+    const monthNames: { [key: string]: string } = {
+      "01": "January", "02": "February", "03": "March", "04": "April",
+      "05": "May", "06": "June", "07": "July", "08": "August",
+      "09": "September", "10": "October", "11": "November", "12": "December"
+    };
+    if (selectedAnalyticsMonth !== "all" && selectedAnalyticsYear !== "all") {
+      return `${monthNames[selectedAnalyticsMonth] || selectedAnalyticsMonth} ${selectedAnalyticsYear}`;
+    } else if (selectedAnalyticsMonth !== "all") {
+      return `${monthNames[selectedAnalyticsMonth] || selectedAnalyticsMonth}`;
+    } else if (selectedAnalyticsYear !== "all") {
+      return `${selectedAnalyticsYear}`;
+    }
+    return "All Records";
+  }, [selectedAnalyticsMonth, selectedAnalyticsYear]);
+
+  const handleExportQueriedCsv = React.useCallback(() => {
+    let records = attendanceRecords;
+    if (selectedAnalyticsYear !== "all") {
+      records = records.filter((r) => r.date.startsWith(selectedAnalyticsYear));
+    }
+    if (selectedAnalyticsMonth !== "all") {
+      records = records.filter((r) => {
+        const parts = r.date.split("-");
+        return parts[1] === selectedAnalyticsMonth;
+      });
     }
 
-    return intervals;
-  }, [attendanceRecords, timeframe]);
+    let csvContent = "S/N,Date,Worker,Time In,Arrival Status,Time Out,Departure Status,Covered Hours (hrs),Assigned Unit\n";
+    records.forEach((r, idx) => {
+      const worker = workers.find((w) => w.id === r.worker_id);
+      const name = worker ? `${worker.firstName} ${worker.lastName}` : "Unknown Worker";
+      const deptObj = departments.find((d) => d.id === (r.department_id || worker?.department_id));
+      const dept = deptObj?.name || "Unassigned";
+      const hr = r.coveredTime ? (r.coveredTime / 3600).toFixed(2) : "0.00";
+      csvContent += `${idx + 1},${r.date},"${name}",${r.timeIn},${r.statusIn},${r.timeOut || "-"},${r.statusOut || "-"},${hr},"${dept}"\n`;
+    });
+
+    const periodLabel = getQueriedPeriodLabel().replace(/\s+/g, "_");
+    const filename = `ClockIt_Attendance_${periodLabel}.csv`;
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    requestReportCompile("attendance", "csv");
+  }, [attendanceRecords, workers, departments, selectedAnalyticsMonth, selectedAnalyticsYear, getQueriedPeriodLabel, requestReportCompile]);
 
   const formatGraphDateLabel = React.useCallback((dateStr: string): string => {
     if (!dateStr) return "";
@@ -766,36 +846,149 @@ export default function AdminDashboard({
     }
   }, []);
 
-  const workerTrendData = React.useMemo(() => {
-    return dateIntervals.map((interval, idx) => {
-      const records = attendanceRecords.filter(
-        (r) => r.date >= interval.startDate && r.date <= interval.endDate
-      );
+  const dateIntervals = React.useMemo(() => {
+    let intervals: { label: string; startDate: string; endDate: string; displayDate: string }[] = [];
 
-      let perf = 0;
-      let totalCount = records.length;
+    // If a month or year query is active:
+    if (selectedAnalyticsMonth !== "all" || selectedAnalyticsYear !== "all") {
+      const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-      if (totalCount > 0) {
-        const onTime = records.filter(
-          (r) => r.statusIn === AttendanceStatus.PRESENT,
-        ).length;
-        perf = Math.round((onTime / totalCount) * 100);
+      if (selectedAnalyticsMonth !== "all" && selectedAnalyticsYear !== "all") {
+        // Specific Month and Year (e.g., March 2026)
+        const yearNum = parseInt(selectedAnalyticsYear, 10);
+        const monthNum = parseInt(selectedAnalyticsMonth, 10);
+        const daysInMonth = new Date(yearNum, monthNum, 0).getDate();
+        const monthName = monthNames[monthNum - 1] || "Month";
+
+        for (let day = 1; day <= daysInMonth; day++) {
+          const pDay = day < 10 ? `0${day}` : `${day}`;
+          const dateStr = `${selectedAnalyticsYear}-${selectedAnalyticsMonth}-${pDay}`;
+          intervals.push({
+            label: `${monthName} ${day}`,
+            startDate: dateStr,
+            endDate: dateStr,
+            displayDate: dateStr,
+          });
+        }
+      } else if (selectedAnalyticsMonth !== "all" && selectedAnalyticsYear === "all") {
+        // Specific Month across available years (e.g. March)
+        const targetYear = availableYears[0] || "2026";
+        const yearNum = parseInt(targetYear, 10);
+        const monthNum = parseInt(selectedAnalyticsMonth, 10);
+        const daysInMonth = new Date(yearNum, monthNum, 0).getDate();
+        const monthName = monthNames[monthNum - 1] || "Month";
+
+        for (let day = 1; day <= daysInMonth; day++) {
+          const pDay = day < 10 ? `0${day}` : `${day}`;
+          const dateStr = `${targetYear}-${selectedAnalyticsMonth}-${pDay}`;
+          intervals.push({
+            label: `${monthName} ${day}`,
+            startDate: dateStr,
+            endDate: dateStr,
+            displayDate: dateStr,
+          });
+        }
+      } else if (selectedAnalyticsMonth === "all" && selectedAnalyticsYear !== "all") {
+        // All Months in a specific year (e.g. 2026)
+        for (let m = 1; m <= 12; m++) {
+          const pM = m < 10 ? `0${m}` : `${m}`;
+          const startStr = `${selectedAnalyticsYear}-${pM}-01`;
+          const daysInM = new Date(parseInt(selectedAnalyticsYear, 10), m, 0).getDate();
+          const pDays = daysInM < 10 ? `0${daysInM}` : `${daysInM}`;
+          const endStr = `${selectedAnalyticsYear}-${pM}-${pDays}`;
+          intervals.push({
+            label: `${monthNames[m - 1]} ${selectedAnalyticsYear}`,
+            startDate: startStr,
+            endDate: endStr,
+            displayDate: startStr,
+          });
+        }
       }
+      return intervals;
+    }
 
-      return {
-        date: interval.displayDate,
-        dateLabel: formatGraphDateLabel(interval.displayDate),
-        workerCount: totalCount,
-        perf: perf,
-      };
-    });
-  }, [dateIntervals, attendanceRecords, formatGraphDateLabel]);
+    // Default timeframe intervals (daily, weekly, monthly, yearly) when no month/year filter is set
+    const todayStr = getLocalDateString(new Date());
+    const maxRecordDate = attendanceRecords.reduce(
+      (max, r) => (r.date > max ? r.date : max),
+      "2026-06-29",
+    );
+    // Ensure present-day value is always included as the calculation anchor
+    const latestDateStr = todayStr > maxRecordDate ? todayStr : maxRecordDate;
+    const latestDate = parseLocalDate(latestDateStr);
 
-  const deptTrendData = React.useMemo(() => {
-    return dateIntervals.map((interval, idx) => {
-      const records = attendanceRecords.filter(
-        (r) => r.date >= interval.startDate && r.date <= interval.endDate
-      );
+    if (timeframe === "daily") {
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(latestDate);
+        d.setDate(d.getDate() - (6 - i));
+        const dateStr = getLocalDateString(d);
+        intervals.push({
+          label: formatGraphDateLabel(dateStr),
+          startDate: dateStr,
+          endDate: dateStr,
+          displayDate: dateStr,
+        });
+      }
+    } else if (timeframe === "weekly") {
+      for (let i = 0; i < 6; i++) {
+        const dEnd = new Date(latestDate);
+        dEnd.setDate(dEnd.getDate() - (5 - i) * 7);
+        const dStart = new Date(dEnd);
+        dStart.setDate(dStart.getDate() - 6);
+        
+        const endStr = getLocalDateString(dEnd);
+        const startStr = getLocalDateString(dStart);
+        intervals.push({
+          label: `${formatGraphDateLabel(startStr)} - ${formatGraphDateLabel(endStr)}`,
+          startDate: startStr,
+          endDate: endStr,
+          displayDate: endStr,
+        });
+      }
+    } else if (timeframe === "monthly") {
+      for (let i = 0; i < 6; i++) {
+        const d = new Date(latestDate.getFullYear(), latestDate.getMonth() - (5 - i), 1);
+        const startOfMonth = new Date(d.getFullYear(), d.getMonth(), 1);
+        const endOfMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0); // Last day of month
+        const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        const monthLabel = `${monthNames[d.getMonth()]} ${d.getFullYear()}`;
+        
+        intervals.push({
+          label: monthLabel,
+          startDate: getLocalDateString(startOfMonth),
+          endDate: getLocalDateString(endOfMonth),
+          displayDate: getLocalDateString(startOfMonth),
+        });
+      }
+    } else if (timeframe === "yearly") {
+      for (let i = 0; i < 6; i++) {
+        const yr = latestDate.getFullYear() - (5 - i);
+        const startOfYear = `${yr}-01-01`;
+        const endOfYear = `${yr}-12-31`; // Last day of year
+        
+        intervals.push({
+          label: yr.toString(),
+          startDate: startOfYear,
+          endDate: endOfYear,
+          displayDate: startOfYear,
+        });
+      }
+    }
+
+    return intervals;
+  }, [attendanceRecords, timeframe, selectedAnalyticsMonth, selectedAnalyticsYear, availableYears, formatGraphDateLabel]);
+
+  const workerTrendData = React.useMemo(() => {
+    return dateIntervals.map((interval) => {
+      const records = attendanceRecords.filter((r) => {
+        if (selectedAnalyticsMonth !== "all" && selectedAnalyticsYear !== "all") {
+          return r.date === interval.startDate;
+        }
+        return r.date >= interval.startDate && r.date <= interval.endDate;
+      });
+
+      const uniqueWorkers = new Set(records.map((r) => r.worker_id));
+      const activeWorkerCount = uniqueWorkers.size;
 
       let perf = 0;
       if (records.length > 0) {
@@ -807,15 +1000,85 @@ export default function AdminDashboard({
 
       return {
         date: interval.displayDate,
-        dateLabel: formatGraphDateLabel(interval.displayDate),
-        workerCount: records.length,
+        dateLabel: interval.label || formatGraphDateLabel(interval.displayDate),
+        workerCount: activeWorkerCount,
         perf: perf,
       };
     });
-  }, [dateIntervals, attendanceRecords, formatGraphDateLabel]);
+  }, [dateIntervals, attendanceRecords, selectedAnalyticsMonth, selectedAnalyticsYear, formatGraphDateLabel]);
+
+  const deptTrendData = React.useMemo(() => {
+    return dateIntervals.map((interval) => {
+      const records = attendanceRecords.filter((r) => {
+        if (selectedAnalyticsMonth !== "all" && selectedAnalyticsYear !== "all") {
+          return r.date === interval.startDate;
+        }
+        return r.date >= interval.startDate && r.date <= interval.endDate;
+      });
+
+      const uniqueDepts = new Set(
+        records
+          .map((r) => {
+            if (r.department_id) return r.department_id;
+            const w = workers.find((w) => w.id === r.worker_id);
+            return w?.department_id;
+          })
+          .filter(Boolean)
+      );
+      const activeDeptCount = uniqueDepts.size;
+
+      let perf = 0;
+      if (records.length > 0) {
+        const onTime = records.filter(
+          (r) => r.statusIn === AttendanceStatus.PRESENT,
+        ).length;
+        perf = Math.round((onTime / records.length) * 100);
+      }
+
+      return {
+        date: interval.displayDate,
+        dateLabel: interval.label || formatGraphDateLabel(interval.displayDate),
+        workerCount: activeDeptCount,
+        perf: perf,
+      };
+    });
+  }, [dateIntervals, attendanceRecords, workers, selectedAnalyticsMonth, selectedAnalyticsYear, formatGraphDateLabel]);
+
+  const timeframeSummary = React.useMemo(() => {
+    let records = attendanceRecords;
+    if (selectedAnalyticsYear !== "all") {
+      records = records.filter((r) => r.date.startsWith(selectedAnalyticsYear));
+    }
+    if (selectedAnalyticsMonth !== "all") {
+      records = records.filter((r) => {
+        const parts = r.date.split("-");
+        return parts[1] === selectedAnalyticsMonth;
+      });
+    }
+
+    if (selectedAnalyticsMonth === "all" && selectedAnalyticsYear === "all") {
+      records = records.filter((r) =>
+        dateIntervals.some(
+          (inv) => r.date >= inv.startDate && r.date <= inv.endDate
+        )
+      );
+    }
+
+    const workerCount = new Set(records.map((r) => r.worker_id)).size;
+    const deptCount = new Set(
+      records
+        .map(
+          (r) =>
+            r.department_id ||
+            workers.find((w) => w.id === r.worker_id)?.department_id
+        )
+        .filter(Boolean)
+    ).size;
+    return { workerCount, deptCount };
+  }, [attendanceRecords, dateIntervals, workers, selectedAnalyticsMonth, selectedAnalyticsYear]);
 
   const filteredPermissions = React.useMemo(() => {
-    return permissions.filter((p) => {
+    const list = permissions.filter((p) => {
       // 1. Filter by query tab (All, Pending, Approved, Rejected)
       if (permissionsQueryTab !== "all") {
         if ((p.status || "").toLowerCase() !== permissionsQueryTab) {
@@ -827,21 +1090,56 @@ export default function AdminDashboard({
       if (!permissionsSearchQuery.trim()) return true;
       const q = permissionsSearchQuery.toLowerCase();
       const targetUser = workers.find((w) => w.id === p.worker_id);
-      if (!targetUser) return false;
-      const deptName =
-        departments.find((d) => d.id === targetUser.department_id)?.name || "";
-      const first = targetUser.firstName || "";
-      const last = targetUser.lastName || "";
+      const deptName = targetUser
+        ? departments.find((d) => d.id === targetUser.department_id)?.name || ""
+        : "";
+      const first = targetUser?.firstName || "";
+      const last = targetUser?.lastName || "";
+      const fullName = `${first} ${last}`.trim();
+      const reason = p.reason || "";
       const remarks = p.remarks || "";
-      const pDate = p.date || "";
+      const notes = (p as any).notes || "";
+      const comment = (p as any).comment || "";
+      const pType = (p as any).type || "";
+      const pDate = p.date || p.startDate || p.endDate || "";
 
       return (
         first.toLowerCase().includes(q) ||
         last.toLowerCase().includes(q) ||
+        fullName.toLowerCase().includes(q) ||
         deptName.toLowerCase().includes(q) ||
+        reason.toLowerCase().includes(q) ||
         remarks.toLowerCase().includes(q) ||
+        notes.toLowerCase().includes(q) ||
+        comment.toLowerCase().includes(q) ||
+        pType.toLowerCase().includes(q) ||
         pDate.includes(q)
       );
+    });
+
+    return [...list].sort((a, b) => {
+      const userA = workers.find((w) => w.id === a.worker_id);
+      const userB = workers.find((w) => w.id === b.worker_id);
+
+      let valA = "";
+      let valB = "";
+
+      if (permissionsSortField === "name") {
+        valA = userA ? `${userA.firstName} ${userA.lastName}`.toLowerCase() : "";
+        valB = userB ? `${userB.firstName} ${userB.lastName}`.toLowerCase() : "";
+      } else if (permissionsSortField === "reason") {
+        valA = (a.remarks || "").toLowerCase();
+        valB = (b.remarks || "").toLowerCase();
+      } else if (permissionsSortField === "department") {
+        const deptA = departments.find((d) => d.id === userA?.department_id)?.name || "";
+        const deptB = departments.find((d) => d.id === userB?.department_id)?.name || "";
+        valA = deptA.toLowerCase();
+        valB = deptB.toLowerCase();
+      }
+
+      if (valA < valB) return permissionsSortOrder === "asc" ? -1 : 1;
+      if (valA > valB) return permissionsSortOrder === "asc" ? 1 : -1;
+      return 0;
     });
   }, [
     permissions,
@@ -849,6 +1147,8 @@ export default function AdminDashboard({
     permissionsSearchQuery,
     workers,
     departments,
+    permissionsSortField,
+    permissionsSortOrder,
   ]);
 
   React.useEffect(() => {
@@ -893,9 +1193,50 @@ export default function AdminDashboard({
   const adminPunchHistoryRef = useRef<HTMLDivElement>(null);
   const attendanceTableContainerRef = useRef<HTMLDivElement>(null);
   const leaderboardTableContainerRef = useRef<HTMLDivElement>(null);
+  const permissionsTableContainerRef = useRef<HTMLDivElement>(null);
+  const profilesTableContainerRef = useRef<HTMLDivElement>(null);
   const workerGraphContainerRef = useRef<HTMLDivElement>(null);
   const deptGraphContainerRef = useRef<HTMLDivElement>(null);
   const graphContainerRef = useRef<HTMLDivElement>(null);
+
+  // Shift Register Auto-Scroll logic
+  const [isShiftRegisterAutoScroll, setIsShiftRegisterAutoScroll] = React.useState<boolean>(false);
+  const [isShiftRegisterHovered, setIsShiftRegisterHovered] = React.useState<boolean>(false);
+  const isShiftRegisterResettingRef = React.useRef<boolean>(false);
+
+  React.useEffect(() => {
+    if (!isShiftRegisterAutoScroll) return;
+
+    const container = attendanceTableContainerRef.current;
+    if (!container) return;
+
+    let animationFrameId: number;
+    let resetTimeout: NodeJS.Timeout | null = null;
+
+    const scrollStep = () => {
+      if (container && !isShiftRegisterHovered && !isShiftRegisterResettingRef.current) {
+        const isAtBottom =
+          container.scrollTop + container.clientHeight >= container.scrollHeight - 3;
+        if (isAtBottom) {
+          isShiftRegisterResettingRef.current = true;
+          container.scrollTo({ top: 0, behavior: "smooth" });
+          resetTimeout = setTimeout(() => {
+            isShiftRegisterResettingRef.current = false;
+          }, 1000);
+        } else {
+          container.scrollTop += 0.8;
+        }
+      }
+      animationFrameId = requestAnimationFrame(scrollStep);
+    };
+
+    animationFrameId = requestAnimationFrame(scrollStep);
+
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+      if (resetTimeout) clearTimeout(resetTimeout);
+    };
+  }, [isShiftRegisterAutoScroll, isShiftRegisterHovered]);
 
   const scrollContainer = (
     ref: React.RefObject<HTMLDivElement | null>,
@@ -972,6 +1313,7 @@ export default function AdminDashboard({
           bg: "bg-[#141C10] text-[#E5F3DD]",
           navBg: "bg-[#182313]/90 border-[#2C3E25]",
           cardBg: "bg-[#182413] border-[#2D3E24]",
+          leadCardBg: "bg-gradient-to-br from-[#24381C] via-[#1C2C16] to-[#142010] border-emerald-500/60 shadow-lg shadow-emerald-950/40 ring-1 ring-emerald-500/30",
           innerBg: "bg-[#25361E] border-[#374C2E]",
           textTitle: "text-[#E6F4DE]",
           textMuted: "text-[#A1C094]",
@@ -989,6 +1331,7 @@ export default function AdminDashboard({
           bg: "bg-[#0B132B] text-[#E1E8F0]",
           navBg: "bg-[#111A35]/90 border-[#1B2952]",
           cardBg: "bg-[#111A31] border-[#1C2B54]",
+          leadCardBg: "bg-gradient-to-br from-[#1A2A56] via-[#142044] to-[#0D152D] border-cyan-500/60 shadow-lg shadow-cyan-950/40 ring-1 ring-cyan-500/30",
           innerBg: "bg-[#243361] border-[#233566]",
           textTitle: "text-[#ECEFF4]",
           textMuted: "text-[#94A5C1]",
@@ -1005,6 +1348,7 @@ export default function AdminDashboard({
           bg: "bg-[#0A0A0A] text-[#E5E5E5]",
           navBg: "bg-[#0D0D0D]/90 border-[#262626]",
           cardBg: "bg-[#0D0D0D] border-[#262626]",
+          leadCardBg: "bg-gradient-to-br from-[#162536] via-[#101B28] to-[#0A111A] border-cyan-500/60 shadow-lg shadow-cyan-950/40 ring-1 ring-cyan-500/30",
           innerBg: "bg-[#1A1A1A] border-[#262626]",
           textTitle: "text-white",
           textMuted: "text-neutral-400",
@@ -1021,6 +1365,7 @@ export default function AdminDashboard({
           bg: "bg-neutral-50 text-neutral-800",
           navBg: "bg-white/90 border-neutral-200",
           cardBg: "bg-white border-neutral-200 shadow-sm",
+          leadCardBg: "bg-gradient-to-br from-cyan-50/90 via-sky-50/70 to-blue-50/40 border-cyan-400/80 shadow-md shadow-cyan-100/60 ring-1 ring-cyan-400/40",
           innerBg: "bg-neutral-50 border-neutral-200",
           textTitle: "text-slate-900",
           textMuted: "text-slate-600",
@@ -1156,52 +1501,66 @@ export default function AdminDashboard({
                   </button>
                 </div>
 
-                <div className="space-y-3 overflow-y-auto flex-1 scrollbar-none pr-1">
+                <div className="space-y-4 overflow-y-auto flex-1 scrollbar-none pr-1">
                   {notifications.length === 0 ? (
                     <div className={`py-6 text-center text-xs font-light leading-relaxed ${adminThemeClass.textMuted}`}>
                       Broadcaster queue is clear. No active alerts.
                     </div>
                   ) : (
-                    notifications.map((n: any, idx: number) => {
-                      const isSelected = selectedNotificationDetail?.id === n.id;
-                      return (
-                        <div 
-                          key={idx} 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (!n.read) {
-                              handleMarkNotifRead(n.id);
-                            }
-                            setSelectedNotificationDetail(n);
-                          }}
-                          className={`p-3 rounded-xl border flex items-start justify-between space-x-2.5 text-[11px] leading-relaxed transition-all cursor-pointer hover:bg-cyan-500/10 ${
-                            isSelected 
-                              ? `ring-2 ring-cyan-500 ${adminThemeClass.inputBg} ${adminThemeClass.accentBorder}`
-                              : n.read 
-                                ? `${adminThemeClass.inputBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted}` 
-                                : `bg-cyan-500/5 border-cyan-500/20`
-                          }`}
-                        >
-                          <div className="flex-1 min-w-0 font-normal">
-                            <strong className={`block font-semibold mb-0.5 truncate ${adminThemeClass.textTitle}`}>{n.title}</strong>
-                            <p className={n.read ? `${adminThemeClass.textMuted} line-clamp-2` : `${adminThemeClass.textHighlight} font-medium`}>{n.message}</p>
-                            <span className={`block text-[9px] tracking-wider font-mono mt-1.5 ${adminThemeClass.textMuted}`}>{new Date(n.timestamp).toLocaleTimeString()}</span>
-                          </div>
-                          {!n.read && (
-                            <button 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleMarkNotifRead(n.id);
-                                setSelectedNotificationDetail(n);
-                              }}
-                              className={`text-[9px] font-bold hover:underline shrink-0 cursor-pointer text-cyan-400 bg-cyan-500/10 hover:bg-cyan-500/20 px-2 py-0.5 rounded-md`}
-                            >
-                              Read
-                            </button>
-                          )}
+                    groupedNotifications.map((group, gIdx) => (
+                      <div key={gIdx} className="space-y-2">
+                        <div className={`sticky top-0 z-10 py-1 px-2.5 rounded-lg backdrop-blur-md text-[10px] font-bold uppercase tracking-wider text-cyan-400 bg-cyan-950/60 border border-cyan-500/20 flex items-center justify-between`}>
+                          <span>{group.label}</span>
+                          <span className={`text-[9px] font-mono font-normal ${adminThemeClass.textMuted}`}>
+                            {group.items.length} alert{group.items.length > 1 ? "s" : ""}
+                          </span>
                         </div>
-                      );
-                    })
+                        <div className="space-y-2">
+                          {group.items.map((n: any, idx: number) => {
+                            const isSelected = selectedNotificationDetail?.id === n.id;
+                            return (
+                              <div 
+                                key={n.id || idx} 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (!n.read) {
+                                    handleMarkNotifRead(n.id);
+                                  }
+                                  setSelectedNotificationDetail(n);
+                                }}
+                                className={`p-3 rounded-xl border flex items-start justify-between space-x-2.5 text-[11px] leading-relaxed transition-all cursor-pointer hover:bg-cyan-500/10 ${
+                                  isSelected 
+                                    ? `ring-2 ring-cyan-500 ${adminThemeClass.inputBg} ${adminThemeClass.accentBorder}`
+                                    : n.read 
+                                      ? `${adminThemeClass.inputBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted}` 
+                                      : `bg-cyan-500/5 border-cyan-500/20`
+                                }`}
+                              >
+                                <div className="flex-1 min-w-0 font-normal">
+                                  <strong className={`block font-semibold mb-0.5 truncate ${adminThemeClass.textTitle}`}>{n.title}</strong>
+                                  <p className={n.read ? `${adminThemeClass.textMuted} line-clamp-2` : `${adminThemeClass.textHighlight} font-medium`}>{n.message}</p>
+                                  <span className={`block text-[9px] tracking-wider font-mono mt-1.5 ${adminThemeClass.textMuted}`}>
+                                    {new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                </div>
+                                {!n.read && (
+                                  <button 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleMarkNotifRead(n.id);
+                                      setSelectedNotificationDetail(n);
+                                    }}
+                                    className={`text-[9px] font-bold hover:underline shrink-0 cursor-pointer text-cyan-400 bg-cyan-500/10 hover:bg-cyan-500/20 px-2 py-0.5 rounded-md`}
+                                  >
+                                    Read
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))
                   )}
                 </div>
 
@@ -1596,15 +1955,76 @@ export default function AdminDashboard({
             <div
               className={`rounded-3xl border overflow-hidden shadow-xl ${adminThemeClass.cardBg}`}
             >
-              <div className={`px-6 py-4 border-b ${adminThemeClass.innerBg}`}>
+              <div className={`px-6 py-4 border-b flex items-center justify-between gap-3 ${adminThemeClass.innerBg}`}>
                 <span
                   className={`font-bold text-xs uppercase tracking-wider ${adminThemeClass.textTitle}`}
                 >
                   Shift Register
                 </span>
+
+                <div className="flex items-center space-x-3">
+                  {/* Auto-Scroll Switch Button */}
+                  <div
+                    className={`flex items-center space-x-2 px-3 py-1.5 rounded-xl border select-none cursor-pointer transition-all ${
+                      isShiftRegisterAutoScroll
+                        ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-500"
+                        : "bg-neutral-500/10 border-neutral-500/20 text-neutral-400 hover:border-neutral-500/40"
+                    }`}
+                    onClick={() => setIsShiftRegisterAutoScroll((prev) => !prev)}
+                    title="Toggle Auto-Scrolling for Shift Register"
+                  >
+                    <span className="text-xs font-semibold">
+                      Auto-Scroll
+                    </span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={isShiftRegisterAutoScroll}
+                      className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        isShiftRegisterAutoScroll ? "bg-emerald-500" : "bg-neutral-600 dark:bg-neutral-700"
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                          isShiftRegisterAutoScroll ? "translate-x-3" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    id="at_a_glance_attendance_btn"
+                    onClick={() => setIsAtAGlanceOpen(!isAtAGlanceOpen)}
+                    className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold border transition-all shadow-sm ${
+                      isAtAGlanceOpen
+                        ? "bg-emerald-500 text-white border-emerald-500 shadow-emerald-500/20"
+                        : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20"
+                    }`}
+                    title="A Glance Attendance Overlay"
+                  >
+                    <Eye className="w-4 h-4 shrink-0" />
+                    <span>A Glance Attendance</span>
+                  </button>
+                </div>
               </div>
 
               <div className="relative group/scroll w-full">
+                {/* Top-center invisible down arrow button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (attendanceTableContainerRef.current) {
+                      const el = attendanceTableContainerRef.current;
+                      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+                    }
+                  }}
+                  className="absolute top-2 left-1/2 -translate-x-1/2 z-30 p-2 rounded-full bg-white/80 dark:bg-neutral-900/80 border border-neutral-200 dark:border-neutral-700 backdrop-blur-md opacity-0 hover:opacity-100 transition-opacity duration-200 cursor-pointer text-slate-700 dark:text-neutral-200 hover:scale-110 active:scale-95 shadow-md"
+                  title="Scroll to Bottom"
+                >
+                  <ChevronDown className="h-5 w-5" />
+                </button>
+
                 {/* Left invisible/hover scroll icon */}
                 <button
                   type="button"
@@ -1619,7 +2039,11 @@ export default function AdminDashboard({
 
                 <div
                   ref={attendanceTableContainerRef}
-                  className="overflow-x-auto scrollbar-none"
+                  onMouseEnter={() => setIsShiftRegisterHovered(true)}
+                  onMouseLeave={() => setIsShiftRegisterHovered(false)}
+                  onTouchStart={() => setIsShiftRegisterHovered(true)}
+                  onTouchEnd={() => setIsShiftRegisterHovered(false)}
+                  className="max-h-[600px] overflow-auto scrollbar-none"
                 >
                   <table className="w-full text-left text-xs">
                     <thead>
@@ -1654,32 +2078,58 @@ export default function AdminDashboard({
                           </td>
                         </tr>
                       ) : (
-                        groupedLogs.map((group) => (
-                          <React.Fragment key={group.date}>
-                            <tr className={`border-t border-b ${adminThemeClass.innerBg}`}>
-                              <td
-                                colSpan={settings.onlyShowTimeIn !== false ? 6 : 9}
-                                className={`px-4 py-3 font-bold font-mono text-[10px] uppercase tracking-wider ${adminThemeClass.accentText}`}
-                              >
-                                {formatDateToCustomString(group.date)}
-                              </td>
-                            </tr>
-                            {group.records.map((r, idx) => {
-                              const targetUser = workers.find(
-                                (w) => w.id === r.worker_id,
-                              );
-                              const fullName = targetUser
-                                ? `${targetUser.firstName} ${targetUser.lastName}`
-                                : "Unknown";
-                              const deptName =
-                                departments.find((d) => d.id === r.department_id)
-                                  ?.name || "Unassigned Unit";
+                        groupedLogs.map((group) => {
+                          const groupDateObj = new Date(group.date + "T00:00:00");
+                          const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+                          const groupDayName = dayNames[groupDateObj.getDay()];
+                          const activeDays = settings?.activityDays || {
+                            Monday: true, Tuesday: true, Wednesday: true, Thursday: true, Friday: true, Saturday: false, Sunday: false
+                          };
+                          const isGroupOffDay = activeDays[groupDayName] === false;
 
-                              return (
-                                <tr
-                                  key={`${r.date}-${r.worker_id}-${idx}`}
-                                  className={`transition-colors duration-100 border-b ${adminThemeClass.tableRowHover}`}
+                          return (
+                            <React.Fragment key={group.date}>
+                              <tr className={`border-t border-b ${isGroupOffDay ? "bg-neutral-200 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400" : adminThemeClass.innerBg}`}>
+                                <td
+                                  colSpan={settings.onlyShowTimeIn !== false ? 6 : 9}
+                                  className={`px-4 py-3 font-bold font-mono text-[10px] uppercase tracking-wider ${isGroupOffDay ? "text-neutral-600 dark:text-neutral-400" : adminThemeClass.accentText}`}
                                 >
+                                  {formatDateToCustomString(group.date)}{isGroupOffDay ? " (Off-Day)" : ""}
+                                </td>
+                              </tr>
+                              {group.records.map((r, idx) => {
+                                const targetUser = workers.find(
+                                  (w) => w.id === r.worker_id,
+                                );
+                                const fullName = targetUser
+                                  ? `${targetUser.firstName} ${targetUser.lastName}`
+                                  : "Unknown";
+                                const deptName =
+                                  departments.find((d) => d.id === r.department_id)
+                                    ?.name || "Unassigned Unit";
+                                const hasApprovedLeave = (permissions || []).some((p: any) => {
+                                  if (p.worker_id !== r.worker_id) return false;
+                                  if ((p.status || "").toLowerCase() !== "approved") return false;
+                                  const pStart = p.startDate || p.date;
+                                  const pEnd = p.endDate || p.date || pStart;
+                                  if (pStart && pEnd) {
+                                    return r.date >= pStart && r.date <= pEnd;
+                                  }
+                                  return pStart === r.date;
+                                });
+                                const isWorkerOffDay = isGroupOffDay || (targetUser?.activityDays ? targetUser.activityDays[groupDayName] === false : false);
+
+                                return (
+                                  <tr
+                                    key={`${r.date}-${r.worker_id}-${idx}`}
+                                    className={`transition-colors duration-100 border-b ${
+                                      hasApprovedLeave
+                                        ? "bg-amber-500/15 dark:bg-amber-950/40 border-amber-500/40 text-amber-900 dark:text-amber-200 hover:bg-amber-500/25"
+                                        : isWorkerOffDay
+                                        ? "bg-neutral-100 dark:bg-neutral-900/60 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-200/60 dark:hover:bg-neutral-800/60"
+                                        : adminThemeClass.tableRowHover
+                                    }`}
+                                  >
                                   <td className="p-4 font-mono font-medium text-neutral-550">
                                     {idx + 1}
                                   </td>
@@ -1692,11 +2142,21 @@ export default function AdminDashboard({
                                     <div className="flex items-center space-x-2.5">
                                       <img
                                         src={
+                                          targetUser?.profilePhoto?.medium ||
                                           targetUser?.profilePhoto?.small ||
                                           IMAGES.defaultWorkerAvatar
                                         }
                                         alt=""
-                                        className={`h-8 w-8 rounded-lg object-cover bg-neutral-100 border ${adminThemeClass.accentBorder}`}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setExpandedPhotoUrl(
+                                            targetUser?.profilePhoto?.medium ||
+                                            targetUser?.profilePhoto?.small ||
+                                            IMAGES.defaultWorkerAvatar
+                                          );
+                                        }}
+                                        className={`h-8 w-8 rounded-lg object-cover bg-neutral-100 border cursor-zoom-in hover:scale-110 transition-transform ${adminThemeClass.accentBorder}`}
+                                        title="Click to expand profile picture"
                                       />
                                       <strong
                                         className={`font-bold ${adminThemeClass.textTitle}`}
@@ -1711,13 +2171,20 @@ export default function AdminDashboard({
                                     {r.timeIn}
                                   </td>
                                   <td className="p-4">
-                                    <span
-                                      className={`inline-block px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase border ${r.statusIn === AttendanceStatus.PRESENT ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/30" : "bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-850/30"}`}
-                                    >
-                                      {r.statusIn === AttendanceStatus.PRESENT
-                                        ? "ON TIME"
-                                        : "LATE"}
-                                    </span>
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                      <span
+                                        className={`inline-block px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase border ${r.statusIn === AttendanceStatus.PRESENT ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/30" : "bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-850/30"}`}
+                                      >
+                                        {r.statusIn === AttendanceStatus.PRESENT
+                                          ? "ON TIME"
+                                          : "LATE"}
+                                      </span>
+                                      {hasApprovedLeave && (
+                                        <span className="inline-block px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase border bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/40">
+                                          On Leave
+                                        </span>
+                                      )}
+                                    </div>
                                   </td>
                                   {settings.onlyShowTimeIn === false && (
                                     <>
@@ -1729,7 +2196,17 @@ export default function AdminDashboard({
                                       <td
                                         className={`p-4 font-normal ${adminThemeClass.textMuted}`}
                                       >
-                                        {r.statusOut || "In Progress"}
+                                        {r.statusOut === "Overtime" ? (
+                                          <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-purple-500/15 text-purple-400 border border-purple-500/30">
+                                            Overtime
+                                          </span>
+                                        ) : r.statusOut === "Closing Time" || r.statusOut === "Auto Checkout" ? (
+                                          <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                                            {r.statusOut}
+                                          </span>
+                                        ) : (
+                                          r.statusOut || "In Progress"
+                                        )}
                                       </td>
                                       <td
                                         className={`p-4 font-mono font-bold ${adminThemeClass.accentText}`}
@@ -1750,7 +2227,8 @@ export default function AdminDashboard({
                               );
                             })}
                           </React.Fragment>
-                        ))
+                        );
+                      })
                       )}
                     </tbody>
                   </table>
@@ -1767,6 +2245,21 @@ export default function AdminDashboard({
                 >
                   <ChevronRight className="h-5 w-5" />
                 </button>
+
+                {/* Center-bottom invisible up arrow button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (attendanceTableContainerRef.current) {
+                      const el = attendanceTableContainerRef.current;
+                      el.scrollTo({ top: 0, behavior: "smooth" });
+                    }
+                  }}
+                  className="absolute bottom-2 left-1/2 -translate-x-1/2 z-30 p-2 rounded-full bg-white/80 dark:bg-neutral-900/80 border border-neutral-200 dark:border-neutral-700 backdrop-blur-md opacity-0 hover:opacity-100 transition-opacity duration-200 cursor-pointer text-slate-700 dark:text-neutral-200 hover:scale-110 active:scale-95 shadow-md"
+                  title="Scroll to Top"
+                >
+                  <ChevronUp className="h-5 w-5" />
+                </button>
               </div>
 
               <div
@@ -1782,12 +2275,12 @@ export default function AdminDashboard({
         {/* -------------------- TAB AREA: ANALYTICS DESK -------------------- */}
         {activeTab === "analytics" && (
           <div className="space-y-8 select-none">
-            {/* Exports triggers */}
+            {/* Exports triggers & Month/Year Query Desk */}
             <div
-              className={`flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border rounded-2xl gap-4 ${adminThemeClass.cardBg}`}
+              className={`flex flex-col lg:flex-row lg:items-center lg:justify-between p-4 sm:p-5 border rounded-3xl gap-4 shadow-sm ${adminThemeClass.cardBg}`}
             >
               <div className="flex items-center space-x-3">
-                <div className="p-2.5 bg-cyan-50 dark:bg-cyan-950/20 rounded-xl">
+                <div className="p-2.5 sm:p-3 bg-cyan-50 dark:bg-cyan-950/20 rounded-2xl border border-cyan-100 dark:border-cyan-900/30">
                   <BarChart3 className="h-5 w-5 text-cyan-600 dark:text-cyan-400" />
                 </div>
                 <div>
@@ -1798,19 +2291,71 @@ export default function AdminDashboard({
                   </h4>
                   <p className={`text-[11px] ${adminThemeClass.textMuted}`}>
                     {translations.precomputedMetrics ||
-                      "Precomputed workspace metrics graphs"}
+                      "Precomputed workspace metrics & query attendance graphs"}
                   </p>
                 </div>
               </div>
-              <button
-                onClick={() => requestReportCompile("attendance", "csv")}
-                className="px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:brightness-110 text-white rounded-xl text-xs font-semibold flex items-center justify-center space-x-1.5 transition-all min-h-[44px] cursor-pointer shadow-sm shrink-0"
-              >
-                <Download className="h-4 w-4" />
-                <span>
-                  {translations.downloadCsv || "Download CSV Compiles"}
-                </span>
-              </button>
+
+              {/* Month & Year Query Controls */}
+              <div className="flex flex-wrap items-center gap-3">
+                <div
+                  className={`flex flex-wrap items-center gap-2 px-3.5 py-2 border rounded-2xl shadow-xs ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                >
+                  <Calendar className="h-4 w-4 text-cyan-600 dark:text-cyan-400 shrink-0" />
+                  <span className={`text-xs font-bold whitespace-nowrap ${adminThemeClass.textTitle}`}>
+                    Query Period:
+                  </span>
+                  
+                  {/* Custom Month Dropdown Modal */}
+                  <div className="w-36">
+                    <CustomSelect
+                      value={selectedAnalyticsMonth}
+                      onChange={(val) => setSelectedAnalyticsMonth(val)}
+                      options={monthSelectOptions}
+                      theme={theme}
+                      className={`text-xs font-bold rounded-2xl px-3 py-1.5 border outline-none cursor-pointer transition-all shadow-xs min-h-[38px] ${adminThemeClass.inputBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle}`}
+                    />
+                  </div>
+
+                  {/* Custom Year Dropdown Modal */}
+                  <div className="w-28">
+                    <CustomSelect
+                      value={selectedAnalyticsYear}
+                      onChange={(val) => setSelectedAnalyticsYear(val)}
+                      options={yearSelectOptions}
+                      theme={theme}
+                      className={`text-xs font-bold rounded-2xl px-3 py-1.5 border outline-none cursor-pointer transition-all shadow-xs min-h-[38px] ${adminThemeClass.inputBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle}`}
+                    />
+                  </div>
+
+                  {(selectedAnalyticsMonth !== "all" || selectedAnalyticsYear !== "all") && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedAnalyticsMonth("all");
+                        setSelectedAnalyticsYear("all");
+                      }}
+                      className="text-[11px] font-extrabold text-cyan-600 dark:text-cyan-400 hover:underline px-1 cursor-pointer"
+                      title="Reset Query filter to All Records"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+
+                {/* Export CSV Button */}
+                <button
+                  onClick={handleExportQueriedCsv}
+                  className="px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:brightness-110 text-white rounded-2xl text-xs font-semibold flex items-center justify-center space-x-1.5 transition-all min-h-[44px] cursor-pointer shadow-md shrink-0"
+                >
+                  <Download className="h-4 w-4" />
+                  <span>
+                    {selectedAnalyticsMonth !== "all" || selectedAnalyticsYear !== "all"
+                      ? `Export CSV (${getQueriedPeriodLabel()})`
+                      : (translations.downloadCsv || "Download CSV Compiles")}
+                  </span>
+                </button>
+              </div>
             </div>
 
             {/* Custom SVG Charts of Workers Compare & Department Trends (Consolidated) */}
@@ -1820,21 +2365,30 @@ export default function AdminDashboard({
               {/* Header and Switches */}
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
                 <div>
-                  <h4
-                    className={`font-semibold text-base font-sans ${adminThemeClass.textTitle}`}
-                    style={{ fontFamily: "Montserrat, sans-serif" }}
-                  >
-                    {analyticsViewTab === "workers"
-                      ? (translations.workerPerformanceComparison || "Worker Attendance Performance Comparison")
-                      : (translations.businessUnitAverages || "Department Performance Trends")}
-                  </h4>
+                  <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                    <h4
+                      className={`font-semibold text-base font-sans ${adminThemeClass.textTitle}`}
+                      style={{ fontFamily: "Montserrat, sans-serif" }}
+                    >
+                      {analyticsViewTab === "workers"
+                        ? (translations.workerPerformanceComparison || "Worker Attendance Performance Comparison")
+                        : (translations.businessUnitAverages || "Department Performance Trends")}
+                    </h4>
+                    {(selectedAnalyticsMonth !== "all" || selectedAnalyticsYear !== "all") && (
+                      <span className="px-2.5 py-0.5 text-[11px] font-extrabold rounded-full bg-cyan-100 dark:bg-cyan-950/80 text-cyan-700 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800/40">
+                        Queried: {getQueriedPeriodLabel()}
+                      </span>
+                    )}
+                  </div>
                   <p
                     className={`text-xs font-light mt-1 font-sans ${adminThemeClass.textMuted}`}
                     style={{ fontFamily: "Montserrat, sans-serif" }}
                   >
-                    {analyticsViewTab === "workers"
-                      ? "Calculated active performance ratios based on the actual calendar days of each month."
-                      : (translations.averagesCalculated || "Averages calculated across active team member sets.")}
+                    {selectedAnalyticsMonth !== "all" || selectedAnalyticsYear !== "all"
+                      ? `Showing plotted attendance performance metrics specifically for ${getQueriedPeriodLabel()} across ${dateIntervals.length} date intervals.`
+                      : (analyticsViewTab === "workers"
+                        ? "Calculated active performance ratios based on the actual calendar days of each month."
+                        : (translations.averagesCalculated || "Averages calculated across active team member sets."))}
                   </p>
                 </div>
 
@@ -1850,10 +2404,13 @@ export default function AdminDashboard({
                         setAnalyticsViewTab("workers");
                         setHoveredIdx(null);
                       }}
-                      className={`py-1.5 px-3.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${analyticsViewTab === "workers" ? `text-cyan-600 dark:text-cyan-400 shadow-sm font-extrabold ${adminThemeClass.cardBg}` : `hover:text-cyan-600 ${adminThemeClass.textMuted}`}`}
+                      className={`py-1.5 px-3.5 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center space-x-1.5 ${analyticsViewTab === "workers" ? `text-cyan-600 dark:text-cyan-400 shadow-sm font-extrabold ${adminThemeClass.cardBg}` : `hover:text-cyan-600 ${adminThemeClass.textMuted}`}`}
                       style={{ fontFamily: "Montserrat, sans-serif" }}
                     >
-                      Workers View
+                      <span>Workers View</span>
+                      <span className="ml-1.5 px-1.5 py-0.5 text-[10px] rounded-full bg-cyan-100 dark:bg-cyan-950/70 text-cyan-700 dark:text-cyan-300 font-extrabold">
+                        {timeframeSummary.workerCount}
+                      </span>
                     </button>
                     <button
                       type="button"
@@ -1861,10 +2418,13 @@ export default function AdminDashboard({
                         setAnalyticsViewTab("departments");
                         setHoveredIdx(null);
                       }}
-                      className={`py-1.5 px-3.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${analyticsViewTab === "departments" ? `text-teal-600 dark:text-teal-400 font-bold shadow-sm font-extrabold ${adminThemeClass.cardBg}` : `hover:text-teal-600 ${adminThemeClass.textMuted}`}`}
+                      className={`py-1.5 px-3.5 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center space-x-1.5 ${analyticsViewTab === "departments" ? `text-teal-600 dark:text-teal-400 font-bold shadow-sm font-extrabold ${adminThemeClass.cardBg}` : `hover:text-teal-600 ${adminThemeClass.textMuted}`}`}
                       style={{ fontFamily: "Montserrat, sans-serif" }}
                     >
-                      Departments View
+                      <span>Departments View</span>
+                      <span className="ml-1.5 px-1.5 py-0.5 text-[10px] rounded-full bg-teal-100 dark:bg-teal-950/70 text-teal-700 dark:text-teal-300 font-extrabold">
+                        {timeframeSummary.deptCount}
+                      </span>
                     </button>
                   </div>
 
@@ -1920,40 +2480,39 @@ export default function AdminDashboard({
                     <div className="w-full flex-1 flex flex-col justify-between relative mt-2 overflow-visible">
                       <div
                         ref={chartContainerRef}
-                        className="w-full h-[320px] flex items-end justify-center relative pb-1 overflow-visible animate-fade-in"
+                        className="w-full h-[320px] flex items-end justify-start relative pb-1 overflow-hidden animate-fade-in"
                       >
                         {(() => {
                           const trendData = analyticsViewTab === "workers" ? workerTrendData : deptTrendData;
                           
-                          // Determine dimensions dynamically from state (with sensible fallback)
-                          const width = Math.max(chartDimensions.width, 300);
+                          // Fluid responsiveness: SVG width always matches 100% of the container width
+                          const containerW = Math.max(chartDimensions.width, 280);
                           const height = Math.max(chartDimensions.height || 290, 200);
 
-                          const axisLeft = 34;
-                          const axisRight = width - 8;
-                          const axisTop = 10;
-                          const axisBottom = height - 24;
-                          const plotWidth = axisRight - axisLeft;
-                          const plotHeight = axisBottom - axisTop;
+                          const width = containerW;
+                          const axisLeft = 40;
+                          const axisRightPadding = 28;
+                          const axisRight = width - axisRightPadding;
+                          const axisTop = 18;
+                          const axisBottom = height - 30;
+                          const plotWidth = Math.max(axisRight - axisLeft, 50);
+                          const plotHeight = Math.max(axisBottom - axisTop, 50);
 
                           const isLine = chartViewMode === "line";
 
-                          // For bars, keep some spacing before/after:
-                          const barWidth = Math.min(24, Math.max(8, plotWidth / (trendData.length * 2)));
+                          const barWidth = Math.min(36, Math.max(10, plotWidth / (trendData.length * 2.2)));
+                          const barStart = axisLeft + barWidth / 2 + 4;
+                          const barEnd = axisRight - barWidth / 2 - 4;
+                          const barRange = Math.max(barEnd - barStart, 10);
 
-                          // Helper to get exact X coordinate of a data point by index:
+                          // Helper to get exact X coordinate of a data point by index (evenly distributed across plotWidth):
                           const getX = (idx: number) => {
+                            if (trendData.length <= 1) return axisLeft + plotWidth / 2;
                             if (isLine) {
-                              const lineStart = axisLeft;
-                              const lineEnd = axisRight;
-                              const range = lineEnd - lineStart;
-                              const interval = trendData.length > 1 ? range / (trendData.length - 1) : range;
-                              return lineStart + idx * interval;
+                              const interval = plotWidth / (trendData.length - 1);
+                              return axisLeft + idx * interval;
                             } else {
-                              const barStart = axisLeft + barWidth / 2 + 6;
-                              const barEnd = axisRight - barWidth / 2 - 6;
-                              const range = barEnd - barStart;
-                              const interval = trendData.length > 1 ? range / (trendData.length - 1) : range;
+                              const interval = barRange / (trendData.length - 1);
                               return barStart + idx * interval;
                             }
                           };
@@ -1974,353 +2533,360 @@ export default function AdminDashboard({
                             { label: "0", y: axisBottom }
                           ];
 
-                          return (
-                            <svg
-                              className="w-full h-full overflow-visible"
-                              viewBox={`0 0 ${width} ${height}`}
-                            >
-                              <defs>
-                                <linearGradient
-                                  id="lineGrad"
-                                  x1="0"
-                                  y1="0"
-                                  x2="0"
-                                  y2="1"
-                                >
-                                  <stop
-                                    offset="0%"
-                                    stopColor={analyticsViewTab === "workers" ? "#06b6d4" : "#14b8a6"}
-                                    stopOpacity="0.4"
-                                  />
-                                  <stop
-                                    offset="100%"
-                                    stopColor={analyticsViewTab === "workers" ? "#06b6d4" : "#14b8a6"}
-                                    stopOpacity="0.0"
-                                  />
-                                </linearGradient>
-                                <linearGradient id="workerBarGrad" x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="0%" stopColor="#06b6d4" />
-                                  <stop offset="100%" stopColor="#2563eb" />
-                                </linearGradient>
-                                <linearGradient id="deptBarGrad" x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="0%" stopColor="#14b8a6" />
-                                  <stop offset="100%" stopColor="#059669" />
-                                </linearGradient>
-                              </defs>
-
-                              {/* Y-Axis Calibration Text and Tick Lines */}
-                              {ticks.map((tick, tIdx) => (
-                                <g key={tIdx} className="opacity-80">
-                                  {/* Grid line */}
-                                  <line
-                                    x1={axisLeft}
-                                    y1={tick.y}
-                                    x2={axisRight}
-                                    y2={tick.y}
-                                    stroke="#888888"
-                                    strokeOpacity="0.12"
-                                    strokeDasharray="4 3"
-                                  />
-                                  {/* Text Label */}
-                                  <text
-                                    x={axisLeft - 12}
-                                    y={tick.y + 3.5}
-                                    textAnchor="end"
-                                    className="text-[10px] font-normal fill-slate-500 dark:fill-neutral-400 font-sans"
-                                    style={{ fontFamily: 'Montserrat, sans-serif' }}
-                                  >
-                                    {tick.label}
-                                  </text>
-                                </g>
-                              ))}
-
-                              {/* Solid Axes */}
-                              <line
-                                x1={axisLeft}
-                                y1={axisTop}
-                                x2={axisLeft}
-                                y2={axisBottom}
-                                stroke="#888888"
-                                strokeOpacity="0.25"
-                                strokeWidth="1.2"
-                              />
-                              <line
-                                x1={axisLeft}
-                                y1={axisBottom}
-                                x2={axisRight}
-                                y2={axisBottom}
-                                stroke="#888888"
-                                strokeOpacity="0.25"
-                                strokeWidth="1.2"
-                              />
-
-                              {/* 1. BAR CHART PRESENTATION */}
-                              {chartViewMode === "bar" && trendData.map((d, idx) => {
-                                const x = getX(idx);
-                                const y = getY(d.workerCount);
-                                const rectHeight = axisBottom - y;
-                                return (
-                                  <rect
-                                    key={idx}
-                                    x={x - barWidth / 2}
-                                    y={y}
-                                    width={barWidth}
-                                    height={Math.max(rectHeight, 2)}
-                                    rx="4"
-                                    fill={analyticsViewTab === "workers" ? "url(#workerBarGrad)" : "url(#deptBarGrad)"}
-                                    className="transition-all duration-350 hover:brightness-110 cursor-pointer"
-                                    onMouseEnter={() => setHoveredIdx(idx)}
-                                    onMouseLeave={() => setHoveredIdx(null)}
-                                  />
-                                );
-                              })}
-
-                              {/* 2. LINE GRAPH PRESENTATION */}
-                              {chartViewMode === "line" && (() => {
-                                const pts = trendData.map((d, idx) => {
-                                  return { x: getX(idx), y: getY(d.workerCount) };
-                                });
-                                const { strokeD, fillD } = generateBezierPaths(pts, axisBottom);
-                                return (
-                                  <>
-                                    <path d={fillD} fill="url(#lineGrad)" />
-                                    <path
-                                      d={strokeD}
-                                      fill="none"
-                                      stroke={analyticsViewTab === "workers" ? "#06b6d4" : "#14b8a6"}
-                                      strokeWidth="1.8"
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                    />
-                                  </>
-                                );
-                              })()}
-
-                              {/* 3. IMAGINARY BROKEN LINES ON HOVER (CROSSHAIRS) */}
-                              {hoveredIdx !== null && (() => {
-                                const d = trendData[hoveredIdx];
-                                if (!d) return null;
-                                const x = getX(hoveredIdx);
-                                const y = getY(d.workerCount);
-                                return (
-                                  <g className="pointer-events-none">
-                                    {/* Horizontal dashed tracer */}
-                                    <line
-                                      x1={axisLeft}
-                                      y1={y}
-                                      x2={x}
-                                      y2={y}
-                                      stroke={analyticsViewTab === "workers" ? "#06b6d4" : "#14b8a6"}
-                                      strokeOpacity="0.25"
-                                      strokeDasharray="3 3"
-                                      strokeWidth="0.8"
-                                    />
-                                    {/* Vertical dashed tracer */}
-                                    <line
-                                      x1={x}
-                                      y1={axisBottom}
-                                      x2={x}
-                                      y2={y}
-                                      stroke={analyticsViewTab === "workers" ? "#06b6d4" : "#14b8a6"}
-                                      strokeOpacity="0.25"
-                                      strokeDasharray="3 3"
-                                      strokeWidth="0.8"
-                                    />
-                                  </g>
-                                );
-                              })()}
-
-                              {/* 4. HOVER INTERSECTIONS & HITBOXES */}
-                              {trendData.map((d, idx) => {
-                                const x = getX(idx);
-                                const y = getY(d.workerCount);
-                                const isHovered = hoveredIdx === idx;
-                                const size = isHovered ? 5.0 : 3.0;
-                                const strokeWidth = isHovered ? 2.5 : 1.5;
-                                const strokeColor = analyticsViewTab === "workers" ? "#06b6d4" : "#14b8a6";
-                                return (
-                                  <g
-                                    key={idx}
-                                    className="cursor-pointer"
-                                    onMouseEnter={() => setHoveredIdx(idx)}
-                                    onMouseLeave={() => setHoveredIdx(null)}
-                                  >
-                                    {/* Large invisible catch area for hover */}
-                                    <circle
-                                      cx={x}
-                                      cy={y}
-                                      r="20"
-                                      fill="transparent"
-                                      className="cursor-pointer"
-                                    />
-                                    
-                                    {/* Real visible 'x' intersection marker (Only in line chart mode) */}
-                                    {chartViewMode === "line" && (
-                                      <g className="transition-all duration-150">
-                                        {/* White border back-shadow to contrast with trend line */}
-                                        <line
-                                          x1={x - size}
-                                          y1={y - size}
-                                          x2={x + size}
-                                          y2={y + size}
-                                          stroke="#ffffff"
-                                          strokeWidth={strokeWidth + 1.5}
-                                          strokeLinecap="round"
-                                        />
-                                        <line
-                                          x1={x - size}
-                                          y1={y + size}
-                                          x2={x + size}
-                                          y2={y - size}
-                                          stroke="#ffffff"
-                                          strokeWidth={strokeWidth + 1.5}
-                                          strokeLinecap="round"
-                                        />
-                                        {/* Main colored stroke line */}
-                                        <line
-                                          x1={x - size}
-                                          y1={y - size}
-                                          x2={x + size}
-                                          y2={y + size}
-                                          stroke={strokeColor}
-                                          strokeWidth={strokeWidth}
-                                          strokeLinecap="round"
-                                        />
-                                        <line
-                                          x1={x - size}
-                                          y1={y + size}
-                                          x2={x + size}
-                                          y2={y - size}
-                                          stroke={strokeColor}
-                                          strokeWidth={strokeWidth}
-                                          strokeLinecap="round"
-                                        />
-                                      </g>
-                                    )}
-                                  </g>
-                                );
-                              })}
-
-                              {/* 5. PERFECTLY ALIGNED X-AXIS LABELS INSIDE SVG */}
-                              {trendData.map((d, idx) => {
-                                const labelX = getX(idx);
-                                const isMobile = width < 480;
-                                const showLabel = !isMobile || (trendData.length <= 6) || (idx % 2 === 0);
-                                
-                                if (!showLabel) return null;
-
-                                const labelText = d.dateLabel;
-                                const rotation = isMobile ? -30 : 0;
-                                
-                                return (
-                                  <text
-                                    key={idx}
-                                    x={labelX}
-                                    y={axisBottom + 14}
-                                    textAnchor={isMobile ? "end" : "middle"}
-                                    transform={isMobile ? `rotate(${rotation}, ${labelX}, ${axisBottom + 14})` : undefined}
-                                    className="text-[10px] font-normal fill-slate-500 dark:fill-neutral-400 font-sans"
-                                    style={{ fontFamily: 'Montserrat, sans-serif' }}
-                                  >
-                                    {labelText}
-                                  </text>
-                                );
-                              })}
-                            </svg>
-                          );
-                        })()}
-
-                        {/* 6. CORRESPONDING FLOATING HTML TOOLTIP WITH ABSOLUTE BOUNDS (NO VERTICAL CLIPPING) */}
-                        {hoveredIdx !== null && (() => {
-                          const trendData = analyticsViewTab === "workers" ? workerTrendData : deptTrendData;
-                          const d = trendData[hoveredIdx];
-                          if (!d) return null;
-
-                          const width = Math.max(chartDimensions.width, 300);
-                          const height = Math.max(chartDimensions.height || 290, 200);
-
-                          const axisLeft = 34;
-                          const axisRight = width - 8;
-                          const axisTop = 10;
-                          const axisBottom = height - 24;
-                          const plotWidth = axisRight - axisLeft;
-                          const plotHeight = axisBottom - axisTop;
-
-                          const isLine = chartViewMode === "line";
-
-                          const barWidth = Math.min(24, Math.max(8, plotWidth / (trendData.length * 2)));
-                          const barPadding = barWidth * 0.8;
-                          const barStart = axisLeft + barPadding + barWidth / 2;
-                          const barEnd = axisRight - barPadding - barWidth / 2;
-                          const barWidthRange = barEnd - barStart;
-                          const barInterval = trendData.length > 1 ? barWidthRange / (trendData.length - 1) : barWidthRange;
-
-                          const lineStart = axisLeft;
-                          const lineEnd = axisRight;
-                          const lineWidthRange = lineEnd - lineStart;
-                          const lineInterval = trendData.length > 1 ? lineWidthRange / (trendData.length - 1) : lineWidthRange;
-
-                          const getX = (idx: number) => {
-                            return isLine ? (axisLeft + idx * (trendData.length > 1 ? (axisRight - axisLeft) / (trendData.length - 1) : (axisRight - axisLeft))) : ((axisLeft + barWidth / 2 + 6) + idx * (trendData.length > 1 ? ((axisRight - barWidth / 2 - 6) - (axisLeft + barWidth / 2 + 6)) / (trendData.length - 1) : ((axisRight - barWidth / 2 - 6) - (axisLeft + barWidth / 2 + 6))));
-                          };
-
-                          const peak = Math.max(...trendData.map(d => d.workerCount), 1);
-                          const maxVal = Math.ceil((peak * 1.15) / 4) * 4 || 4;
-
-                          const getY = (count: number) => {
-                            const ratio = count / maxVal;
-                            return axisBottom - ratio * plotHeight;
-                          };
-
-                          const x = getX(hoveredIdx);
-                          const y = getY(d.workerCount);
-                          
-                          const leftPercent = (x / width) * 100;
-                          const topPercent = (y / height) * 100;
-
-                          const xTranslate = hoveredIdx === 0 ? "5%" : hoveredIdx === trendData.length - 1 ? "-105%" : "-50%";
-                          const transformStyle = `translate(${xTranslate}, -105%)`;
+                          const hoveredPoint = hoveredIdx !== null ? trendData[hoveredIdx] : null;
 
                           return (
                             <div
-                              className="absolute pointer-events-none z-50 transition-all duration-150 ease-out select-none"
-                              style={{
-                                left: `${leftPercent}%`,
-                                top: `${topPercent}%`,
-                                transform: transformStyle,
-                              }}
+                              className="w-full h-full relative overflow-visible"
                             >
-                              <div className="bg-slate-950/95 dark:bg-neutral-900/95 text-white border border-slate-700/60 dark:border-neutral-850 rounded-2xl p-3.5 shadow-2xl flex flex-col space-y-1.5 min-w-[150px] backdrop-blur-lg animate-fade-in">
-                                {/* Header/Date */}
-                                <div className="text-[11px] font-bold text-slate-200 dark:text-neutral-300 border-b border-slate-800 dark:border-neutral-850 pb-1.5 flex items-center justify-between">
-                                  <span className="font-sans" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                                    {d.dateLabel}
-                                  </span>
-                                  <span className={`text-[8px] px-1.5 py-0.5 rounded font-extrabold uppercase tracking-wider ${analyticsViewTab === "workers" ? "bg-cyan-950/40 text-cyan-400 border border-cyan-800/30" : "bg-teal-950/40 text-teal-400 border border-teal-800/30"}`}>
-                                    {analyticsViewTab === "workers" ? "Worker" : "Dept"}
-                                  </span>
-                                </div>
-                                {/* Detail Rows */}
-                                <div className="flex items-center justify-between space-x-4 text-[11px] pt-1">
-                                  <span className="text-neutral-400 font-sans" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                                    {analyticsViewTab === "workers" ? "Active Workers" : "Active Teams"}
-                                  </span>
-                                  <span className="font-bold text-white font-sans" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                                    {d.workerCount}
-                                  </span>
-                                </div>
-                                <div className="flex items-center justify-between space-x-4 text-[11px]">
-                                  <span className="text-neutral-400 font-sans" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-                                    Perf Rate
-                                  </span>
-                                  <span
-                                    className={`font-extrabold text-xs font-sans ${analyticsViewTab === "workers" ? "text-cyan-400" : "text-teal-400"}`}
-                                    style={{ fontFamily: 'Montserrat, sans-serif' }}
+                              <svg
+                                className="w-full h-full overflow-visible"
+                                viewBox={`0 0 ${width} ${height}`}
+                              >
+                                <defs>
+                                  <linearGradient
+                                    id="lineGrad"
+                                    x1="0"
+                                    y1="0"
+                                    x2="0"
+                                    y2="1"
                                   >
-                                    {d.perf}%
-                                  </span>
-                                </div>
-                              </div>
+                                    <stop
+                                      offset="0%"
+                                      stopColor={analyticsViewTab === "workers" ? "#06b6d4" : "#14b8a6"}
+                                      stopOpacity="0.4"
+                                    />
+                                    <stop
+                                      offset="100%"
+                                      stopColor={analyticsViewTab === "workers" ? "#06b6d4" : "#14b8a6"}
+                                      stopOpacity="0.0"
+                                    />
+                                  </linearGradient>
+                                  <linearGradient id="workerBarGrad" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stopColor="#06b6d4" />
+                                    <stop offset="100%" stopColor="#2563eb" />
+                                  </linearGradient>
+                                  <linearGradient id="deptBarGrad" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stopColor="#14b8a6" />
+                                    <stop offset="100%" stopColor="#059669" />
+                                  </linearGradient>
+                                </defs>
+
+                                {/* Y-Axis Calibration Text and Tick Lines */}
+                                {ticks.map((tick, tIdx) => (
+                                  <g key={tIdx} className="opacity-80">
+                                    {/* Grid line */}
+                                    <line
+                                      x1={axisLeft}
+                                      y1={tick.y}
+                                      x2={axisRight}
+                                      y2={tick.y}
+                                      stroke="#888888"
+                                      strokeOpacity="0.12"
+                                      strokeDasharray="4 3"
+                                    />
+                                    {/* Text Label */}
+                                    <text
+                                      x={axisLeft - 6}
+                                      y={tick.y + 3.5}
+                                      textAnchor="end"
+                                      className="text-[10px] font-semibold fill-slate-500 dark:fill-neutral-400 font-sans"
+                                      style={{ fontFamily: 'Montserrat, sans-serif' }}
+                                    >
+                                      {tick.label}
+                                    </text>
+                                  </g>
+                                ))}
+
+                                {/* Solid Axes */}
+                                <line
+                                  x1={axisLeft}
+                                  y1={axisTop}
+                                  x2={axisLeft}
+                                  y2={axisBottom}
+                                  stroke="#888888"
+                                  strokeOpacity="0.25"
+                                  strokeWidth="1.2"
+                                />
+                                <line
+                                  x1={axisLeft}
+                                  y1={axisBottom}
+                                  x2={axisRight}
+                                  y2={axisBottom}
+                                  stroke="#888888"
+                                  strokeOpacity="0.25"
+                                  strokeWidth="1.2"
+                                />
+
+                                {/* 1. BAR CHART PRESENTATION */}
+                                {chartViewMode === "bar" && trendData.map((d, idx) => {
+                                  const x = getX(idx);
+                                  const y = getY(d.workerCount);
+                                  const rectHeight = axisBottom - y;
+                                  return (
+                                    <rect
+                                      key={idx}
+                                      x={x - barWidth / 2}
+                                      y={y}
+                                      width={barWidth}
+                                      height={Math.max(rectHeight, 2)}
+                                      rx="5"
+                                      fill={analyticsViewTab === "workers" ? "url(#workerBarGrad)" : "url(#deptBarGrad)"}
+                                      className="transition-all duration-300 hover:brightness-110 cursor-pointer"
+                                      onMouseEnter={() => setHoveredIdx(idx)}
+                                      onMouseLeave={() => setHoveredIdx(null)}
+                                    />
+                                  );
+                                })}
+
+                                {/* 2. LINE GRAPH PRESENTATION */}
+                                {chartViewMode === "line" && (() => {
+                                  const pts = trendData.map((d, idx) => {
+                                    return { x: getX(idx), y: getY(d.workerCount) };
+                                  });
+                                  const { strokeD, fillD } = generateBezierPaths(pts, axisBottom);
+                                  return (
+                                    <>
+                                      <path d={fillD} fill="url(#lineGrad)" />
+                                      <path
+                                        d={strokeD}
+                                        fill="none"
+                                        stroke={analyticsViewTab === "workers" ? "#06b6d4" : "#14b8a6"}
+                                        strokeWidth="2.2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                      />
+                                    </>
+                                  );
+                                })()}
+
+                                {/* 3. IMAGINARY BROKEN LINES ON HOVER (CROSSHAIRS) */}
+                                {hoveredIdx !== null && hoveredPoint && (() => {
+                                  const x = getX(hoveredIdx);
+                                  const y = getY(hoveredPoint.workerCount);
+                                  return (
+                                    <g className="pointer-events-none">
+                                      {/* Horizontal dashed tracer */}
+                                      <line
+                                        x1={axisLeft}
+                                        y1={y}
+                                        x2={x}
+                                        y2={y}
+                                        stroke={analyticsViewTab === "workers" ? "#06b6d4" : "#14b8a6"}
+                                        strokeOpacity="0.3"
+                                        strokeDasharray="3 3"
+                                        strokeWidth="1"
+                                      />
+                                      {/* Vertical dashed tracer */}
+                                      <line
+                                        x1={x}
+                                        y1={axisBottom}
+                                        x2={x}
+                                        y2={y}
+                                        stroke={analyticsViewTab === "workers" ? "#06b6d4" : "#14b8a6"}
+                                        strokeOpacity="0.3"
+                                        strokeDasharray="3 3"
+                                        strokeWidth="1"
+                                      />
+                                    </g>
+                                  );
+                                })()}
+
+                                {/* 4. HOVER INTERSECTIONS & HITBOXES */}
+                                {trendData.map((d, idx) => {
+                                  const x = getX(idx);
+                                  const y = getY(d.workerCount);
+                                  const isHovered = hoveredIdx === idx;
+                                  const size = isHovered ? 5.5 : 3.5;
+                                  const strokeWidth = isHovered ? 2.8 : 1.8;
+                                  const strokeColor = analyticsViewTab === "workers" ? "#06b6d4" : "#14b8a6";
+                                  return (
+                                    <g
+                                      key={idx}
+                                      className="cursor-pointer"
+                                      onMouseEnter={() => setHoveredIdx(idx)}
+                                      onMouseLeave={() => setHoveredIdx(null)}
+                                    >
+                                      {/* Large invisible catch area for hover */}
+                                      <circle
+                                        cx={x}
+                                        cy={y}
+                                        r="22"
+                                        fill="transparent"
+                                        className="cursor-pointer"
+                                      />
+                                      
+                                      {/* Real visible 'x' intersection marker (Only in line chart mode) */}
+                                      {chartViewMode === "line" && (
+                                        <g className="transition-all duration-150">
+                                          {/* White border back-shadow to contrast with trend line */}
+                                          <line
+                                            x1={x - size}
+                                            y1={y - size}
+                                            x2={x + size}
+                                            y2={y + size}
+                                            stroke="#ffffff"
+                                            strokeWidth={strokeWidth + 1.5}
+                                            strokeLinecap="round"
+                                          />
+                                          <line
+                                            x1={x - size}
+                                            y1={y + size}
+                                            x2={x + size}
+                                            y2={y - size}
+                                            stroke="#ffffff"
+                                            strokeWidth={strokeWidth + 1.5}
+                                            strokeLinecap="round"
+                                          />
+                                          {/* Main colored stroke line */}
+                                          <line
+                                            x1={x - size}
+                                            y1={y - size}
+                                            x2={x + size}
+                                            y2={y + size}
+                                            stroke={strokeColor}
+                                            strokeWidth={strokeWidth}
+                                            strokeLinecap="round"
+                                          />
+                                          <line
+                                            x1={x - size}
+                                            y1={y + size}
+                                            x2={x + size}
+                                            y2={y - size}
+                                            stroke={strokeColor}
+                                            strokeWidth={strokeWidth}
+                                            strokeLinecap="round"
+                                          />
+                                        </g>
+                                      )}
+                                    </g>
+                                  );
+                                })}
+
+                                {/* 5. PERFECTLY ALIGNED & DYNAMICALLY SPACED X-AXIS LABELS */}
+                                {(() => {
+                                  const pointInterval = trendData.length > 1 ? plotWidth / (trendData.length - 1) : plotWidth;
+
+                                  // Helper to format/compact labels depending on density and pointInterval
+                                  const getFormattedLabel = (rawLabel: string) => {
+                                    if (!rawLabel) return "";
+                                    // Compact weekly date ranges like "Jul 1 - Jul 7" when space is limited
+                                    if (rawLabel.includes(" - ") && pointInterval < 85) {
+                                      const parts = rawLabel.split(" - ");
+                                      if (pointInterval < 55) return parts[0]; // e.g., "Jul 1"
+                                      const endDay = parts[1].split(" ")[1] || parts[1];
+                                      return `${parts[0]}-${endDay}`; // e.g., "Jul 1-7"
+                                    }
+                                    // Compact month+year labels like "Jan 2026" when space is limited
+                                    if (/\b(20\d\d)\b/.test(rawLabel) && pointInterval < 65 && !rawLabel.includes("-")) {
+                                      return rawLabel.replace(/\s+20\d\d$/, ""); // e.g., "Jan"
+                                    }
+                                    return rawLabel;
+                                  };
+
+                                  const formattedLabels = trendData.map((d) => getFormattedLabel(d.dateLabel));
+                                  const maxCharLen = Math.max(...formattedLabels.map((s) => s.length), 3);
+                                  
+                                  // Estimate pixel width required for each label (approx 6.5px per char + 16px safety padding)
+                                  const minNeededSpace = Math.max(36, maxCharLen * 6.5 + 16);
+
+                                  // Dynamically calculate step so labels NEVER collide regardless of container width
+                                  let calcStep = Math.max(1, Math.ceil(minNeededSpace / Math.max(pointInterval, 1)));
+
+                                  // Round step to clean intervals (1, 2, 3, 5, 7, 10, 15...)
+                                  if (calcStep > 3 && calcStep <= 5) calcStep = 5;
+                                  else if (calcStep > 5 && calcStep <= 7) calcStep = 7;
+                                  else if (calcStep > 7 && calcStep <= 10) calcStep = 10;
+                                  else if (calcStep > 10) calcStep = Math.ceil(calcStep / 5) * 5;
+
+                                  return trendData.map((d, idx) => {
+                                    const labelX = getX(idx);
+                                    const isLast = idx === trendData.length - 1;
+                                    const isFirst = idx === 0;
+
+                                    const matchesStep = idx % calcStep === 0;
+                                    const distToLastPx = (trendData.length - 1 - idx) * pointInterval;
+                                    
+                                    // Hide intermediate label if it's too close to the last label to prevent collision at the right edge
+                                    const isTooCloseToLast = !isLast && distToLastPx < minNeededSpace * 0.9;
+
+                                    const showLabel = isFirst || isLast || (matchesStep && !isTooCloseToLast);
+
+                                    if (!showLabel) return null;
+
+                                    const labelText = formattedLabels[idx];
+                                    const textAnchor = isLast ? "end" : isFirst ? "start" : "middle";
+
+                                    return (
+                                      <text
+                                        key={idx}
+                                        x={labelX}
+                                        y={axisBottom + 16}
+                                        textAnchor={textAnchor}
+                                        className="text-[10px] font-medium fill-slate-500 dark:fill-neutral-400 font-sans select-none"
+                                        style={{ fontFamily: 'Montserrat, sans-serif' }}
+                                      >
+                                        {labelText}
+                                      </text>
+                                    );
+                                  });
+                                })()}
+                              </svg>
+
+                              {/* 6. FLOATING TOOLTIP ACCURATELY POSITIONED WITHIN EXACT COORDINATE SYSTEM */}
+                              {hoveredIdx !== null && hoveredPoint && (() => {
+                                const x = getX(hoveredIdx);
+                                const y = getY(hoveredPoint.workerCount);
+                                
+                                const leftPercent = (x / width) * 100;
+                                const topPercent = (y / height) * 100;
+
+                                const xTranslate = hoveredIdx === 0 ? "0%" : hoveredIdx === trendData.length - 1 ? "-100%" : "-50%";
+                                const transformStyle = `translate(${xTranslate}, -105%)`;
+
+                                return (
+                                  <div
+                                    className="absolute pointer-events-none z-50 transition-all duration-150 ease-out select-none"
+                                    style={{
+                                      left: `${leftPercent}%`,
+                                      top: `${topPercent}%`,
+                                      transform: transformStyle,
+                                    }}
+                                  >
+                                    <div className="bg-slate-950/95 dark:bg-neutral-900/95 text-white border border-slate-700/60 dark:border-neutral-850 rounded-2xl p-3.5 shadow-2xl flex flex-col space-y-1.5 min-w-[150px] backdrop-blur-lg animate-fade-in">
+                                      {/* Header/Date */}
+                                      <div className="text-[11px] font-bold text-slate-200 dark:text-neutral-300 border-b border-slate-800 dark:border-neutral-850 pb-1.5 flex items-center justify-between">
+                                        <span className="font-sans" style={{ fontFamily: 'Montserrat, sans-serif' }}>
+                                          {hoveredPoint.dateLabel}
+                                        </span>
+                                        <span className={`text-[8px] px-1.5 py-0.5 rounded font-extrabold uppercase tracking-wider ${analyticsViewTab === "workers" ? "bg-cyan-950/40 text-cyan-400 border border-cyan-800/30" : "bg-teal-950/40 text-teal-400 border border-teal-800/30"}`}>
+                                          {analyticsViewTab === "workers" ? "Worker" : "Dept"}
+                                        </span>
+                                      </div>
+                                      {/* Detail Rows */}
+                                      <div className="flex items-center justify-between space-x-4 text-[11px] pt-1">
+                                        <span className="text-neutral-400 font-sans" style={{ fontFamily: 'Montserrat, sans-serif' }}>
+                                          {analyticsViewTab === "workers" ? "Active Workers" : "Active Teams"}
+                                        </span>
+                                        <span className="font-bold text-white font-sans" style={{ fontFamily: 'Montserrat, sans-serif' }}>
+                                          {hoveredPoint.workerCount}
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center justify-between space-x-4 text-[11px]">
+                                        <span className="text-neutral-400 font-sans" style={{ fontFamily: 'Montserrat, sans-serif' }}>
+                                          Perf Rate
+                                        </span>
+                                        <span
+                                          className={`font-extrabold text-xs font-sans ${analyticsViewTab === "workers" ? "text-cyan-400" : "text-teal-400"}`}
+                                          style={{ fontFamily: 'Montserrat, sans-serif' }}
+                                        >
+                                          {hoveredPoint.perf}%
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
                             </div>
                           );
                         })()}
@@ -2461,6 +3027,21 @@ export default function AdminDashboard({
               </div>
 
               <div className="relative group/scroll w-full">
+                {/* Top-center invisible down arrow button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (leaderboardTableContainerRef.current) {
+                      const el = leaderboardTableContainerRef.current;
+                      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+                    }
+                  }}
+                  className="absolute top-2 left-1/2 -translate-x-1/2 z-30 p-2 rounded-full bg-white/80 dark:bg-neutral-900/80 border border-neutral-200 dark:border-neutral-700 backdrop-blur-md opacity-0 hover:opacity-100 group-hover/scroll:opacity-100 transition-opacity duration-200 cursor-pointer text-slate-700 dark:text-neutral-200 hover:scale-110 active:scale-95 shadow-md"
+                  title="Scroll to Bottom"
+                >
+                  <ChevronDown className="h-5 w-5" />
+                </button>
+
                 {/* Left invisible/hover scroll icon */}
                 <button
                   type="button"
@@ -2475,7 +3056,7 @@ export default function AdminDashboard({
 
                 <div
                   ref={leaderboardTableContainerRef}
-                  className="overflow-x-auto scrollbar-none"
+                  className="max-h-[600px] overflow-auto scrollbar-none"
                 >
                   {leaderboardView === "worker" ? (
                     <table className="w-full text-left text-xs">
@@ -2541,11 +3122,21 @@ export default function AdminDashboard({
                                 <div className="flex items-center space-x-2">
                                   <img
                                     src={
+                                      w.profilePhoto?.medium ||
                                       w.profilePhoto?.small ||
                                       IMAGES.defaultWorkerAvatar
                                     }
                                     alt=""
-                                    className={`h-8 w-8 rounded-lg object-cover bg-neutral-100 border ${adminThemeClass.accentBorder}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setExpandedPhotoUrl(
+                                        w.profilePhoto?.medium ||
+                                        w.profilePhoto?.small ||
+                                        IMAGES.defaultWorkerAvatar
+                                      );
+                                    }}
+                                    className={`h-8 w-8 rounded-lg object-cover bg-neutral-100 border cursor-zoom-in hover:scale-110 transition-transform ${adminThemeClass.accentBorder}`}
+                                    title="Click to expand profile picture"
                                   />
                                   <span>
                                     {w.firstName} {w.lastName}
@@ -2667,6 +3258,21 @@ export default function AdminDashboard({
                 >
                   <ChevronRight className="h-5 w-5" />
                 </button>
+
+                {/* Center-bottom invisible up arrow button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (leaderboardTableContainerRef.current) {
+                      const el = leaderboardTableContainerRef.current;
+                      el.scrollTo({ top: 0, behavior: "smooth" });
+                    }
+                  }}
+                  className="absolute bottom-2 left-1/2 -translate-x-1/2 z-30 p-2 rounded-full bg-white/80 dark:bg-neutral-900/80 border border-neutral-200 dark:border-neutral-700 backdrop-blur-md opacity-0 hover:opacity-100 group-hover/scroll:opacity-100 transition-opacity duration-200 cursor-pointer text-slate-700 dark:text-neutral-200 hover:scale-110 active:scale-95 shadow-md"
+                  title="Scroll to Top"
+                >
+                  <ChevronUp className="h-5 w-5" />
+                </button>
               </div>
             </div>
           </div>
@@ -2675,18 +3281,113 @@ export default function AdminDashboard({
         {activeTab === "permissions" && (
           <div className="space-y-6 select-none font-sans">
             <div
-              className={`p-6 rounded-3xl border shadow-xl ${adminThemeClass.cardBg}`}
+              className={`p-6 rounded-3xl border shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4 ${adminThemeClass.cardBg}`}
             >
-              <h3
-                className={`font-semibold text-lg mb-1 ${adminThemeClass.textTitle}`}
-              >
-                {translations.verifyPermissionsTitle ||
-                  "Verify Active Permission Exemption Requests"}
-              </h3>
-              <p className={`text-xs font-light ${adminThemeClass.textMuted}`}>
-                {translations.verifyPermissionsDesc ||
-                  "Confirming approved permission flags automatically deducts standard workday ratios without penalty calculations."}
-              </p>
+              <div>
+                <h3
+                  className={`font-semibold text-lg mb-1 ${adminThemeClass.textTitle}`}
+                >
+                  {translations.verifyPermissionsTitle ||
+                    "Verify Active Permission Exemption Requests"}
+                </h3>
+                <p className={`text-xs font-light ${adminThemeClass.textMuted}`}>
+                  {translations.verifyPermissionsDesc ||
+                    "Confirming approved permission flags automatically deducts standard workday ratios without penalty calculations."}
+                </p>
+              </div>
+
+              {/* Sorting Button at the end of container */}
+              <div className="relative flex items-center space-x-1.5 shrink-0 z-20">
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setIsPermissionsSortDropdownOpen((prev) => !prev)}
+                    className={`px-3.5 py-2 rounded-xl border flex items-center space-x-2 cursor-pointer transition-all shadow-sm ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle} hover:border-cyan-500 min-h-[38px]`}
+                  >
+                    <ArrowUpDown className="h-3.5 w-3.5 text-cyan-500 shrink-0" />
+                    <span className="text-[11px] font-semibold text-neutral-400 hidden sm:inline whitespace-nowrap">
+                      Sort:
+                    </span>
+                    <span className="text-xs font-bold whitespace-nowrap">
+                      {permissionsSortField === "name" && "Name (Alphabetical)"}
+                      {permissionsSortField === "reason" && "Reason / Remarks"}
+                      {permissionsSortField === "department" && "Department / Unit"}
+                    </span>
+                    <ChevronDown className={`h-3.5 w-3.5 text-neutral-400 transition-transform duration-200 ${isPermissionsSortDropdownOpen ? "rotate-180" : ""}`} />
+                  </button>
+
+                  {/* Dropdown List Modal */}
+                  <AnimatePresence>
+                    {isPermissionsSortDropdownOpen && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-30"
+                          onClick={() => setIsPermissionsSortDropdownOpen(false)}
+                        />
+
+                        <motion.div
+                          initial={{ opacity: 0, y: -8, scale: 0.96 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: -8, scale: 0.96 }}
+                          transition={{ duration: 0.15, ease: "easeOut" }}
+                          className={`absolute right-0 top-full mt-2 w-64 rounded-2xl border p-2 shadow-2xl z-40 backdrop-blur-xl ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+                        >
+                          <div className="px-3 py-1.5 border-b border-white/5 mb-1 flex items-center justify-between">
+                            <span className={`text-[10px] font-bold uppercase tracking-wider ${adminThemeClass.textMuted}`}>
+                              Sort Permissions By
+                            </span>
+                            <span className="text-[10px] font-mono text-cyan-400">
+                              {permissionsSortOrder === "asc" ? "A → Z" : "Z → A"}
+                            </span>
+                          </div>
+
+                          <div className="space-y-1">
+                            {[
+                              { id: "name", label: "Name (Alphabetical)", desc: "Sort workers by first & last name" },
+                              { id: "reason", label: "Reason / Remarks", desc: "Sort permissions by reason or remarks" },
+                              { id: "department", label: "Department / Unit", desc: "Group requests by department" },
+                            ].map((opt) => {
+                              const isSelected = permissionsSortField === opt.id;
+                              return (
+                                <button
+                                  key={opt.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setPermissionsSortField(opt.id as any);
+                                    setIsPermissionsSortDropdownOpen(false);
+                                  }}
+                                  className={`w-full text-left px-3 py-2 rounded-xl transition-all flex items-center justify-between cursor-pointer ${
+                                    isSelected
+                                      ? "bg-cyan-500/15 border border-cyan-500/40 text-cyan-300 font-bold"
+                                      : `${adminThemeClass.textTitle} hover:bg-white/5 hover:translate-x-0.5`
+                                  }`}
+                                >
+                                  <div>
+                                    <div className="text-xs font-semibold">{opt.label}</div>
+                                    <div className={`text-[10px] ${adminThemeClass.textMuted}`}>{opt.desc}</div>
+                                  </div>
+                                  {isSelected && <Check className="h-4 w-4 text-cyan-400 shrink-0 ml-2" />}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </motion.div>
+                      </>
+                    )}
+                  </AnimatePresence>
+                </div>
+
+                {/* Order Toggle */}
+                <button
+                  type="button"
+                  onClick={() => setPermissionsSortOrder((prev) => (prev === "asc" ? "desc" : "asc"))}
+                  title={permissionsSortOrder === "asc" ? "Sort Ascending (A → Z)" : "Sort Descending (Z → A)"}
+                  className={`px-3 py-2 rounded-xl border flex items-center justify-center space-x-1 cursor-pointer transition-all ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle} hover:border-cyan-500 min-h-[38px] shadow-sm`}
+                >
+                  <span className="text-[11px] font-bold tracking-wider">{permissionsSortOrder === "asc" ? "A-Z" : "Z-A"}</span>
+                  <span className="text-cyan-400 font-bold text-xs">{permissionsSortOrder === "asc" ? "↑" : "↓"}</span>
+                </button>
+              </div>
             </div>
 
             {/* Filter controls row */}
@@ -2789,7 +3490,27 @@ export default function AdminDashboard({
               </div>
             </div>
 
-            {permissionsViewMode === "card" ? (
+            <div className="relative group/scroll w-full">
+              {/* Top-center invisible down arrow button */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (permissionsTableContainerRef.current) {
+                    const el = permissionsTableContainerRef.current;
+                    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+                  }
+                }}
+                className="absolute top-2 left-1/2 -translate-x-1/2 z-30 p-2 rounded-full bg-white/80 dark:bg-neutral-900/80 border border-neutral-200 dark:border-neutral-700 backdrop-blur-md opacity-0 hover:opacity-100 group-hover/scroll:opacity-100 transition-opacity duration-200 cursor-pointer text-slate-700 dark:text-neutral-200 hover:scale-110 active:scale-95 shadow-md"
+                title="Scroll to Bottom"
+              >
+                <ChevronDown className="h-5 w-5" />
+              </button>
+
+              <div
+                ref={permissionsTableContainerRef}
+                className="max-h-[600px] overflow-auto scrollbar-none"
+              >
+                {permissionsViewMode === "card" ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {filteredPermissions.length === 0 ? (
                   <div
@@ -2818,10 +3539,20 @@ export default function AdminDashboard({
                             <img
                               src={
                                 targetUser.profilePhoto?.medium ||
+                                targetUser.profilePhoto?.small ||
                                 IMAGES.defaultWorkerAvatar
                               }
                               alt=""
-                              className={`h-10 w-10 rounded-xl object-cover border bg-neutral-100 ${adminThemeClass.accentBorder}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setExpandedPhotoUrl(
+                                  targetUser.profilePhoto?.medium ||
+                                  targetUser.profilePhoto?.small ||
+                                  IMAGES.defaultWorkerAvatar
+                                );
+                              }}
+                              className={`h-10 w-10 rounded-xl object-cover border bg-neutral-100 cursor-zoom-in hover:scale-110 transition-transform ${adminThemeClass.accentBorder}`}
+                              title="Click to expand profile picture"
                             />
                             <div>
                               <strong
@@ -2956,9 +3687,14 @@ export default function AdminDashboard({
                             <td className="p-4">
                               <div className="flex items-center space-x-3">
                                 <img
-                                  src={targetUser.profilePhoto?.small || IMAGES.defaultWorkerAvatar}
+                                  src={targetUser.profilePhoto?.medium || targetUser.profilePhoto?.small || IMAGES.defaultWorkerAvatar}
                                   alt=""
-                                  className={`h-9 w-9 rounded-xl object-cover border bg-neutral-100 ${adminThemeClass.accentBorder}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setExpandedPhotoUrl(targetUser.profilePhoto?.medium || targetUser.profilePhoto?.small || IMAGES.defaultWorkerAvatar);
+                                  }}
+                                  className={`h-9 w-9 rounded-xl object-cover border bg-neutral-100 cursor-zoom-in hover:scale-110 transition-transform ${adminThemeClass.accentBorder}`}
+                                  title="Click to expand profile picture"
                                 />
                                 <div>
                                   <strong className={`font-bold block ${adminThemeClass.textTitle}`}>{targetUser.firstName} {targetUser.lastName}</strong>
@@ -3022,7 +3758,24 @@ export default function AdminDashboard({
                 </table>
               </div>
             )}
+            </div>
+
+            {/* Center-bottom invisible up arrow button */}
+            <button
+              type="button"
+              onClick={() => {
+                if (permissionsTableContainerRef.current) {
+                  const el = permissionsTableContainerRef.current;
+                  el.scrollTo({ top: 0, behavior: "smooth" });
+                }
+              }}
+              className="absolute bottom-2 left-1/2 -translate-x-1/2 z-30 p-2 rounded-full bg-white/80 dark:bg-neutral-900/80 border border-neutral-200 dark:border-neutral-700 backdrop-blur-md opacity-0 hover:opacity-100 group-hover/scroll:opacity-100 transition-opacity duration-200 cursor-pointer text-slate-700 dark:text-neutral-200 hover:scale-110 active:scale-95 shadow-md"
+              title="Scroll to Top"
+            >
+              <ChevronUp className="h-5 w-5" />
+            </button>
           </div>
+        </div>
         )}
         {/* -------------------- TAB AREA: WORKER PROFILES -------------------- */}
         {/* -------------------- TAB AREA: WORKER PROFILES -------------------- */}
@@ -3097,6 +3850,104 @@ export default function AdminDashboard({
                   </button>
                 </div>
 
+                {/* Sorting Options Custom Themed Dropdown Modal & Order Toggle */}
+                <div className="relative flex items-center space-x-1.5 z-20">
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setIsSortDropdownOpen((prev) => !prev)}
+                      className={`px-3 py-2 rounded-xl border flex items-center space-x-2 cursor-pointer transition-all shadow-sm ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle} hover:border-cyan-500 min-h-[38px]`}
+                    >
+                      <ArrowUpDown className="h-3.5 w-3.5 text-cyan-500 shrink-0" />
+                      <span className="text-[11px] font-semibold text-neutral-400 hidden sm:inline whitespace-nowrap">
+                        Sort:
+                      </span>
+                      <span className="text-xs font-bold whitespace-nowrap">
+                        {profilesSortField === "name" && "Name"}
+                        {profilesSortField === "worker_status" && "Workers' Status"}
+                        {profilesSortField === "title_role" && "Role"}
+                        {profilesSortField === "department" && "Department"}
+                        {profilesSortField === "phone" && "Number"}
+                      </span>
+                      <ChevronDown className={`h-3.5 w-3.5 text-neutral-400 transition-transform duration-200 ${isSortDropdownOpen ? "rotate-180" : ""}`} />
+                    </button>
+
+                    {/* Dropdown List Modal */}
+                    <AnimatePresence>
+                      {isSortDropdownOpen && (
+                        <>
+                          {/* Backdrop overlay to close on click outside */}
+                          <div
+                            className="fixed inset-0 z-30"
+                            onClick={() => setIsSortDropdownOpen(false)}
+                          />
+
+                          <motion.div
+                            initial={{ opacity: 0, y: -8, scale: 0.96 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: -8, scale: 0.96 }}
+                            transition={{ duration: 0.15, ease: "easeOut" }}
+                            className={`absolute right-0 sm:left-0 top-full mt-2 w-64 rounded-2xl border p-2 shadow-2xl z-40 backdrop-blur-xl ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+                          >
+                            <div className="px-3 py-1.5 border-b border-white/5 mb-1 flex items-center justify-between">
+                              <span className={`text-[10px] font-bold uppercase tracking-wider ${adminThemeClass.textMuted}`}>
+                                Sort Profiles By
+                              </span>
+                              <span className="text-[10px] font-mono text-cyan-400">
+                                {profilesSortOrder === "asc" ? "A → Z" : "Z → A"}
+                              </span>
+                            </div>
+
+                            <div className="space-y-1">
+                              {[
+                                { id: "name", label: "Name", desc: "Sort workers by first & last name" },
+                                { id: "worker_status", label: "Workers' Status", desc: "Sort by Team Lead and Team Member status" },
+                                { id: "title_role", label: "Role", desc: "Sort workers by designation" },
+                                { id: "department", label: "Department", desc: "Group workers by department" },
+                                { id: "phone", label: "Number", desc: "Sort workers by contact number" },
+                              ].map((opt) => {
+                                const isSelected = profilesSortField === opt.id;
+                                return (
+                                  <button
+                                    key={opt.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setProfilesSortField(opt.id as any);
+                                      setIsSortDropdownOpen(false);
+                                    }}
+                                    className={`w-full text-left px-3 py-2 rounded-xl transition-all flex items-center justify-between cursor-pointer ${
+                                      isSelected
+                                        ? "bg-cyan-500/15 border border-cyan-500/40 text-cyan-300 font-bold"
+                                        : `${adminThemeClass.textTitle} hover:bg-white/5 hover:translate-x-0.5`
+                                    }`}
+                                  >
+                                    <div>
+                                      <div className="text-xs font-semibold">{opt.label}</div>
+                                      <div className={`text-[10px] ${adminThemeClass.textMuted}`}>{opt.desc}</div>
+                                    </div>
+                                    {isSelected && <Check className="h-4 w-4 text-cyan-400 shrink-0 ml-2" />}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </motion.div>
+                        </>
+                      )}
+                    </AnimatePresence>
+                  </div>
+
+                  {/* Order Toggle (Ascending / Descending) */}
+                  <button
+                    type="button"
+                    onClick={() => setProfilesSortOrder((prev) => (prev === "asc" ? "desc" : "asc"))}
+                    title={profilesSortOrder === "asc" ? "Sort Ascending (A → Z / 0 → 9)" : "Sort Descending (Z → A / 9 → 0)"}
+                    className={`px-3 py-2 rounded-xl border flex items-center justify-center space-x-1 cursor-pointer transition-all ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle} hover:border-cyan-500 min-h-[38px] shadow-sm`}
+                  >
+                    <span className="text-[11px] font-bold tracking-wider">{profilesSortOrder === "asc" ? "A-Z" : "Z-A"}</span>
+                    <span className="text-cyan-400 font-bold text-xs">{profilesSortOrder === "asc" ? "↑" : "↓"}</span>
+                  </button>
+                </div>
+
                 {/* Manage Department Button */}
                 <button
                   type="button"
@@ -3141,10 +3992,32 @@ export default function AdminDashboard({
             </div>
 
             {/* Render Grid / List layouts */}
-            {profilesViewMode === "card" ? (
+            <div className="relative group/scroll w-full">
+              {/* Top-center invisible down arrow button */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (profilesTableContainerRef.current) {
+                    const el = profilesTableContainerRef.current;
+                    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+                  }
+                }}
+                className="absolute top-2 left-1/2 -translate-x-1/2 z-30 p-2 rounded-full bg-white/80 dark:bg-neutral-900/80 border border-neutral-200 dark:border-neutral-700 backdrop-blur-md opacity-0 hover:opacity-100 group-hover/scroll:opacity-100 transition-opacity duration-200 cursor-pointer text-slate-700 dark:text-neutral-200 hover:scale-110 active:scale-95 shadow-md"
+                title="Scroll to Bottom"
+              >
+                <ChevronDown className="h-5 w-5" />
+              </button>
+
+              <div
+                ref={profilesTableContainerRef}
+                className="max-h-[600px] overflow-auto scrollbar-none"
+              >
+                {profilesViewMode === "card" ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 {filteredWorkersForProfiles.map((w, idx) => {
-                  const isDeptLead = w.role === UserRole.TEAM_LEAD;
+                  const isDeptLead =
+                    w.role === UserRole.TEAM_LEAD ||
+                    departments.some((d) => d.leadId === w.id);
                   const deptLabel =
                     departments.find((d) => d.id === w.department_id)?.name ||
                     translations.unassignedUnit ||
@@ -3157,20 +4030,30 @@ export default function AdminDashboard({
                         const m = calculateMetricsForTimeframe(w.id, timeframe);
                         setActiveLeaderModal({ ...w, m });
                       }}
-                      className={`p-6 rounded-3xl border flex flex-col justify-between items-center text-center relative overflow-hidden shadow-xl duration-200 hover:scale-[1.02] cursor-pointer hover:shadow-2xl hover:border-cyan-500/50 ${isDeptLead ? `bg-gradient-to-br from-cyan-500/5 via-neutral-100/10 to-neutral-200/5 ${adminThemeClass.accentBorder}` : `${adminThemeClass.cardBg}`}`}
+                      className={`p-6 rounded-3xl border flex flex-col justify-between items-center text-center relative overflow-hidden shadow-xl duration-200 hover:scale-[1.02] cursor-pointer hover:shadow-2xl hover:border-cyan-500/50 ${
+                        isDeptLead
+                          ? adminThemeClass.leadCardBg
+                          : adminThemeClass.cardBg
+                      }`}
                     >
                       {isDeptLead && (
                         <span
-                          className={`absolute top-3 right-3 text-[9px] font-bold ${adminThemeClass.accentText} ${adminThemeClass.innerBg} border ${adminThemeClass.accentBorder} px-2.5 py-0.5 rounded-full uppercase`}
+                          className={`absolute top-3 right-3 text-[9px] font-extrabold tracking-wider ${adminThemeClass.accentText} bg-cyan-950/80 border border-cyan-400/40 px-2.5 py-0.5 rounded-full uppercase shadow-sm flex items-center space-x-1`}
                         >
-                          {translations.deptLeadBadge || "Department Lead"}
+                          <Award className="h-3 w-3 inline text-amber-400 mr-0.5" />
+                          <span>{translations.deptLeadBadge || "Department Lead"}</span>
                         </span>
                       )}
 
                       <img
                         src={w.profilePhoto?.medium || IMAGES.defaultWorkerAvatar}
                         alt=""
-                        className={`h-20 w-20 rounded-2xl object-cover bg-neutral-100/5 border shadow-sm mb-4 ${adminThemeClass.accentBorder}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setExpandedPhotoUrl(w.profilePhoto?.medium || IMAGES.defaultWorkerAvatar);
+                        }}
+                        className={`h-20 w-20 rounded-2xl object-cover bg-neutral-100/5 border shadow-sm mb-4 cursor-zoom-in hover:scale-105 transition-transform ${adminThemeClass.accentBorder}`}
+                        title="Click to expand profile picture"
                       />
 
                       <div className="space-y-1">
@@ -3223,7 +4106,9 @@ export default function AdminDashboard({
                   </thead>
                   <tbody>
                     {filteredWorkersForProfiles.map((w, idx) => {
-                      const isDeptLead = w.role === UserRole.TEAM_LEAD;
+                      const isDeptLead =
+                        w.role === UserRole.TEAM_LEAD ||
+                        departments.some((d) => d.leadId === w.id);
                       const deptLabel =
                         departments.find((d) => d.id === w.department_id)?.name ||
                         translations.unassignedUnit ||
@@ -3236,7 +4121,11 @@ export default function AdminDashboard({
                             const m = calculateMetricsForTimeframe(w.id, timeframe);
                             setActiveLeaderModal({ ...w, m });
                           }}
-                          className={`border-b last:border-none transition-all cursor-pointer hover:bg-black/10 ${adminThemeClass.accentBorder}`}
+                          className={`border-b last:border-none transition-all cursor-pointer ${
+                            isDeptLead
+                              ? `${adminThemeClass.leadCardBg} font-medium`
+                              : `hover:bg-black/10 ${adminThemeClass.accentBorder}`
+                          }`}
                         >
                           {/* S/N */}
                           <td className={`p-4 font-mono text-[11px] font-bold ${adminThemeClass.textTitle}`}>
@@ -3246,9 +4135,14 @@ export default function AdminDashboard({
                           {/* Name Card */}
                           <td className="p-4 flex items-center space-x-3">
                             <img
-                              src={w.profilePhoto?.small || IMAGES.defaultWorkerAvatar}
+                              src={w.profilePhoto?.medium || w.profilePhoto?.small || IMAGES.defaultWorkerAvatar}
                               alt=""
-                              className={`h-9 w-9 rounded-xl object-cover bg-neutral-100/5 border ${adminThemeClass.accentBorder}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setExpandedPhotoUrl(w.profilePhoto?.medium || w.profilePhoto?.small || IMAGES.defaultWorkerAvatar);
+                              }}
+                              className={`h-9 w-9 rounded-xl object-cover bg-neutral-100/5 border cursor-zoom-in hover:scale-110 transition-transform ${adminThemeClass.accentBorder}`}
+                              title="Click to expand profile picture"
                             />
                             <div>
                               <strong className={`font-bold block ${adminThemeClass.textTitle}`}>{w.firstName} {w.lastName}</strong>
@@ -3287,7 +4181,24 @@ export default function AdminDashboard({
                 </table>
               </div>
             )}
+            </div>
+
+            {/* Center-bottom invisible up arrow button */}
+            <button
+              type="button"
+              onClick={() => {
+                if (profilesTableContainerRef.current) {
+                  const el = profilesTableContainerRef.current;
+                  el.scrollTo({ top: 0, behavior: "smooth" });
+                }
+              }}
+              className="absolute bottom-2 left-1/2 -translate-x-1/2 z-30 p-2 rounded-full bg-white/80 dark:bg-neutral-900/80 border border-neutral-200 dark:border-neutral-700 backdrop-blur-md opacity-0 hover:opacity-100 group-hover/scroll:opacity-100 transition-opacity duration-200 cursor-pointer text-slate-700 dark:text-neutral-200 hover:scale-110 active:scale-95 shadow-md"
+              title="Scroll to Top"
+            >
+              <ChevronUp className="h-5 w-5" />
+            </button>
           </div>
+        </div>
         )}
 
         {/* -------------------- TAB AREA: BILLING & SUBSCRIPTION -------------------- */}
@@ -4426,102 +5337,6 @@ export default function AdminDashboard({
                           </button>
                         </div>
                       </div>
-                      {/* Overtime Radio Selector durations. Requirements: "stops timer automatically at bounds" */}
-                      <div
-                        className={`space-y-3 p-4 rounded-2xl border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex flex-col">
-                            <span
-                              className={`text-[10px] uppercase font-bold tracking-wider font-mono ${adminThemeClass.textTitle}`}
-                            >
-                              Shift Overtime Toggle
-                            </span>
-                            <span
-                              className={`text-[11px] font-light ${adminThemeClass.textMuted}`}
-                            >
-                              Allow workers to record overtime
-                            </span>
-                          </div>
-                          {/* Visual iOS-style Switch Toggle Button */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const isEn =
-                                currentSettings.overtimeEnabled === true;
-                              const newSObj = {
-                                ...currentSettings,
-                                overtimeEnabled: !isEn,
-                              };
-                              setLocalSettings(newSObj);
-                            }}
-                            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500/25 dark:focus:ring-cyan-500/20 ${
-                              currentSettings.overtimeEnabled === true
-                                ? "bg-indigo-650 dark:bg-cyan-600 border-indigo-700 dark:border-cyan-500"
-                                : "bg-neutral-300 dark:bg-neutral-700 border-neutral-400 dark:border-neutral-600"
-                            }`}
-                          >
-                            <span
-                              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white dark:bg-neutral-300 shadow-md ring-0 transition duration-200 ease-in-out ${
-                                currentSettings.overtimeEnabled === true
-                                  ? "translate-x-5"
-                                  : "translate-x-0"
-                              }`}
-                            />
-                          </button>
-                        </div>
-
-                        {/* Overtime duration selections. Applies ONLY when overtimeEnabled is true! */}
-                        <AnimatePresence initial={false}>
-                          {currentSettings.overtimeEnabled === true && (
-                            <motion.div
-                              initial={{ opacity: 0, height: 0 }}
-                              animate={{ opacity: 1, height: "auto" }}
-                              exit={{ opacity: 0, height: 0 }}
-                              className="overflow-hidden space-y-2.5 pt-1.5"
-                            >
-                              <span
-                                className={`text-[10px] uppercase font-bold tracking-wider font-mono block ${adminThemeClass.textMuted}`}
-                              >
-                                Shift Overtime parameters limit
-                              </span>
-                              <div className="grid grid-cols-3 gap-2">
-                                {[1, 2, 3, 4, 5, 6].map((hrs) => (
-                                  <label
-                                    key={hrs}
-                                    className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${currentSettings.overtimeHours === hrs ? "text-cyan-400 font-bold " + adminThemeClass.buttonSelected : "text-gray-400 " + adminThemeClass.inputBg + " " + adminThemeClass.accentBorder}`}
-                                  >
-                                    <span className="text-xs">{hrs} Hrs</span>
-                                    <input
-                                      type="radio"
-                                      name="ot"
-                                      checked={
-                                        currentSettings.overtimeHours === hrs
-                                      }
-                                      onChange={() => {
-                                        const newSObj = {
-                                          ...currentSettings,
-                                          overtimeHours: hrs,
-                                        };
-                                        setLocalSettings(newSObj);
-                                      }}
-                                      className="h-3 w-3 text-indigo-600 dark:text-cyan-400 rounded-sm"
-                                    />
-                                  </label>
-                                ))}
-                              </div>
-                              <span
-                                className={`text-[9px] block font-light leading-relaxed ${adminThemeClass.textMuted}`}
-                              >
-                                System terminates shift clock logs automatically
-                                when bounds expire.
-                              </span>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </div>
-
-
 
                       {/* Company Active Work Days & Daily Shift Times (Merged) */}
                       <div className="space-y-2">
@@ -4619,34 +5434,131 @@ export default function AdminDashboard({
                                     </div>
                                   </div>
 
-                                  {/* End time */}
-                                  <div className="flex items-center space-x-1">
-                                    <span className="text-[9px] font-extrabold uppercase tracking-widest text-neutral-450 dark:text-neutral-500">Out:</span>
-                                    <div className="w-18 xs:w-[4.8rem] sm:w-24">
-                                      <CustomTimePicker
-                                        value={dayOutTime}
-                                        onChange={(newTime) => {
-                                          const nextShiftOutTimes = {
-                                            ...currentSettings.dailyShiftOutTimes,
-                                            [day]: newTime,
-                                          };
-                                          const newSObj = {
-                                            ...currentSettings,
-                                            dailyShiftOutTimes: nextShiftOutTimes,
-                                          };
-                                          setLocalSettings(newSObj);
-                                        }}
-                                        disabled={!isDayChecked}
-                                        theme={theme}
-                                        compact={true}
-                                      />
+                                  {/* End time - visible ONLY when Time-In Arrival Focus is disabled (onlyShowTimeIn === false) */}
+                                  {currentSettings.onlyShowTimeIn === false && (
+                                    <div className="flex items-center space-x-1">
+                                      <span className="text-[9px] font-extrabold uppercase tracking-widest text-neutral-450 dark:text-neutral-500">Out:</span>
+                                      <div className="w-18 xs:w-[4.8rem] sm:w-24">
+                                        <CustomTimePicker
+                                          value={dayOutTime}
+                                          onChange={(newTime) => {
+                                            const nextShiftOutTimes = {
+                                              ...currentSettings.dailyShiftOutTimes,
+                                              [day]: newTime,
+                                            };
+                                            const newSObj = {
+                                              ...currentSettings,
+                                              dailyShiftOutTimes: nextShiftOutTimes,
+                                            };
+                                            setLocalSettings(newSObj);
+                                          }}
+                                          disabled={!isDayChecked}
+                                          theme={theme}
+                                          compact={true}
+                                        />
+                                      </div>
                                     </div>
-                                  </div>
+                                  )}
                                 </div>
                               </div>
                             );
                           })}
                         </div>
+                      </div>
+
+                      {/* Overtime Radio Selector durations. Requirements: "stops timer automatically at bounds" */}
+                      <div
+                        className={`space-y-3 p-4 rounded-2xl border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex flex-col">
+                            <span
+                              className={`text-[10px] uppercase font-bold tracking-wider font-mono ${adminThemeClass.textTitle}`}
+                            >
+                              Shift Overtime Toggle
+                            </span>
+                            <span
+                              className={`text-[11px] font-light ${adminThemeClass.textMuted}`}
+                            >
+                              Allow workers to record overtime
+                            </span>
+                          </div>
+                          {/* Visual iOS-style Switch Toggle Button */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const isEn =
+                                currentSettings.overtimeEnabled === true;
+                              const newSObj = {
+                                ...currentSettings,
+                                overtimeEnabled: !isEn,
+                              };
+                              setLocalSettings(newSObj);
+                            }}
+                            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500/25 dark:focus:ring-cyan-500/20 ${
+                              currentSettings.overtimeEnabled === true
+                                ? "bg-indigo-650 dark:bg-cyan-600 border-indigo-700 dark:border-cyan-500"
+                                : "bg-neutral-300 dark:bg-neutral-700 border-neutral-400 dark:border-neutral-600"
+                            }`}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white dark:bg-neutral-300 shadow-md ring-0 transition duration-200 ease-in-out ${
+                                currentSettings.overtimeEnabled === true
+                                  ? "translate-x-5"
+                                  : "translate-x-0"
+                              }`}
+                            />
+                          </button>
+                        </div>
+
+                        {/* Overtime duration selections. Applies ONLY when overtimeEnabled is true! */}
+                        <AnimatePresence initial={false}>
+                          {currentSettings.overtimeEnabled === true && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: "auto" }}
+                              exit={{ opacity: 0, height: 0 }}
+                              className="overflow-hidden space-y-2.5 pt-1.5"
+                            >
+                              <span
+                                className={`text-[10px] uppercase font-bold tracking-wider font-mono block ${adminThemeClass.textMuted}`}
+                              >
+                                Shift Overtime parameters limit
+                              </span>
+                              <div className="grid grid-cols-3 gap-2">
+                                {[1, 2, 3, 4, 5, 6].map((hrs) => (
+                                  <label
+                                    key={hrs}
+                                    className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${currentSettings.overtimeHours === hrs ? "text-cyan-400 font-bold " + adminThemeClass.buttonSelected : "text-gray-400 " + adminThemeClass.inputBg + " " + adminThemeClass.accentBorder}`}
+                                  >
+                                    <span className="text-xs">{hrs} Hrs</span>
+                                    <input
+                                      type="radio"
+                                      name="ot"
+                                      checked={
+                                        currentSettings.overtimeHours === hrs
+                                      }
+                                      onChange={() => {
+                                        const newSObj = {
+                                          ...currentSettings,
+                                          overtimeHours: hrs,
+                                        };
+                                        setLocalSettings(newSObj);
+                                      }}
+                                      className="h-3 w-3 text-indigo-600 dark:text-cyan-400 rounded-sm"
+                                    />
+                                  </label>
+                                ))}
+                              </div>
+                              <span
+                                className={`text-[9px] block font-light leading-relaxed ${adminThemeClass.textMuted}`}
+                              >
+                                System terminates shift clock logs automatically
+                                when bounds expire.
+                              </span>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </div>
 
 
@@ -4945,7 +5857,7 @@ export default function AdminDashboard({
                 <h3
                   className={`font-display font-semibold text-lg ${adminThemeClass.textTitle}`}
                 >
-                  Shift Assessment
+                  Worker Profile
                 </h3>
                 <button
                   onClick={() => setActiveLeaderModal(null)}
@@ -4955,40 +5867,77 @@ export default function AdminDashboard({
                 </button>
               </div>
 
-              {/* Profile Box */}
-              <div className={`p-4 mx-6 mt-4 rounded-2xl border flex items-center justify-between gap-4 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} shrink-0`}>
-                <div className="flex items-center space-x-4">
-                  <img
-                    src={activeLeaderModal.profilePhoto?.medium || IMAGES.defaultWorkerAvatar}
-                    alt="Worker Profile Photo"
-                    onClick={() => setExpandedPhotoUrl(activeLeaderModal.profilePhoto?.medium || IMAGES.defaultWorkerAvatar)}
-                    className={`h-14 w-14 rounded-2xl object-cover border-2 shadow-sm cursor-zoom-in hover:scale-105 transition-transform ${adminThemeClass.accentBorder}`}
-                    title="Click to view full picture"
-                  />
-                  <div>
-                    <h4 className={`font-bold text-sm leading-tight ${adminThemeClass.textTitle}`}>
-                      {activeLeaderModal.firstName} {activeLeaderModal.lastName}
-                    </h4>
-                    <p className={`text-[11px] ${adminThemeClass.textMuted}`}>
-                      {activeLeaderModal.email} &bull; {activeLeaderModal.phone ? formatPhoneNumber(activeLeaderModal.phone) : "No phone linked"}
-                    </p>
-                    <div className="flex gap-2 mt-1.5">
-                      <span className={`text-[9px] font-bold font-mono px-2 py-0.5 rounded-full border bg-amber-500/10 text-amber-400 border-amber-500/20`}>
-                        {activeLeaderModal.role}
-                      </span>
-                      <span className={`text-[9px] font-bold font-mono px-2 py-0.5 rounded-full border bg-cyan-500/10 text-cyan-400 border-cyan-500/20`}>
-                        {departments.find((d) => d.id === activeLeaderModal.department_id)?.name || "Unassigned"}
-                      </span>
-                    </div>
+              {/* Collapsible Profile Box / List Stripe */}
+              <div
+                onClick={() => setIsAdminShiftAssessmentExpanded((prev) => !prev)}
+                className={`mx-6 mt-4 p-3.5 rounded-2xl border flex items-center justify-between gap-3 cursor-pointer select-none transition-colors hover:bg-neutral-500/5 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} shrink-0`}
+                title={isAdminShiftAssessmentExpanded ? "Click to collapse profile details" : "Click to expand profile details"}
+              >
+                <div className="flex items-center space-x-3 min-w-0">
+                  <div className={`p-1.5 rounded-xl border flex items-center justify-center shrink-0 ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}>
+                    {isAdminShiftAssessmentExpanded ? (
+                      <ChevronUp className="h-4 w-4 text-cyan-500" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4 text-neutral-400" />
+                    )}
                   </div>
+                  <h3 className={`font-display font-semibold text-sm sm:text-base ${adminThemeClass.textTitle}`}>
+                    Worker Profile
+                  </h3>
                 </div>
-                <div className="text-right hidden sm:block">
-                  <span className={`text-[10px] uppercase font-bold tracking-wider block font-mono ${adminThemeClass.textMuted}`}>Joined On</span>
-                  <span className="font-mono text-xs font-semibold">
-                    {activeLeaderModal.createdAt ? activeLeaderModal.createdAt.substring(0, 10) : "2026-06-11"}
+                <div className="flex items-center space-x-2 shrink-0">
+                  <span className={`text-[10px] font-mono font-bold uppercase tracking-wider hidden sm:inline-block ${adminThemeClass.textMuted}`}>
+                    {isAdminShiftAssessmentExpanded ? "Collapse Profile" : "Expand Profile"}
                   </span>
                 </div>
               </div>
+
+              {/* Detailed Profile Content */}
+              <AnimatePresence initial={false}>
+                {isAdminShiftAssessmentExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2, ease: "easeInOut" }}
+                    className="overflow-hidden shrink-0"
+                  >
+                    <div className={`p-4 mx-6 mt-2 rounded-2xl border flex items-center justify-between gap-4 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                      <div className="flex items-center space-x-4">
+                        <img
+                          src={activeLeaderModal.profilePhoto?.medium || IMAGES.defaultWorkerAvatar}
+                          alt="Worker Profile Photo"
+                          onClick={() => setExpandedPhotoUrl(activeLeaderModal.profilePhoto?.medium || IMAGES.defaultWorkerAvatar)}
+                          className={`h-14 w-14 rounded-2xl object-cover border-2 shadow-sm cursor-zoom-in hover:scale-105 transition-transform ${adminThemeClass.accentBorder}`}
+                          title="Click to view full picture"
+                        />
+                        <div>
+                          <h4 className={`font-bold text-sm leading-tight ${adminThemeClass.textTitle}`}>
+                            {activeLeaderModal.firstName} {activeLeaderModal.lastName}
+                          </h4>
+                          <p className={`text-[11px] ${adminThemeClass.textMuted}`}>
+                            {activeLeaderModal.email} &bull; {activeLeaderModal.phone ? formatPhoneNumber(activeLeaderModal.phone) : "No phone linked"}
+                          </p>
+                          <div className="flex gap-2 mt-1.5">
+                            <span className={`text-[9px] font-bold font-mono px-2 py-0.5 rounded-full border bg-amber-500/10 text-amber-400 border-amber-500/20`}>
+                              {activeLeaderModal.role}
+                            </span>
+                            <span className={`text-[9px] font-bold font-mono px-2 py-0.5 rounded-full border bg-cyan-500/10 text-cyan-400 border-cyan-500/20`}>
+                              {departments.find((d) => d.id === activeLeaderModal.department_id)?.name || "Unassigned"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-right hidden sm:block">
+                        <span className={`text-[10px] uppercase font-bold tracking-wider block font-mono ${adminThemeClass.textMuted}`}>Joined On</span>
+                        <span className="font-mono text-xs font-semibold">
+                          {activeLeaderModal.createdAt ? activeLeaderModal.createdAt.substring(0, 10) : "2026-06-11"}
+                        </span>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               {/* Tab Selector with responsive navigation arrows */}
               <div className="relative group px-6 mt-4 shrink-0 w-full">
@@ -5094,13 +6043,9 @@ export default function AdminDashboard({
                           <span className={`text-[9px] uppercase font-bold font-mono tracking-wider block ${adminThemeClass.textMuted}`}>Approved Exemptions</span>
                           <strong className="text-lg text-cyan-400 block font-mono mt-1 font-bold">{metrics.approvedPermissionDays} Days</strong>
                         </div>
-                        <div className={`p-4 rounded-2xl border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
-                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider block ${adminThemeClass.textMuted}`}>Inactive Days</span>
-                          <strong className="text-lg text-amber-500 block font-mono mt-1 font-bold">{metrics.inactiveDays} Days</strong>
-                        </div>
-                        <div className={`p-4 rounded-2xl border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                        <div className={`p-4 rounded-2xl border col-span-2 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
                           <span className={`text-[9px] uppercase font-bold font-mono tracking-wider block ${adminThemeClass.textMuted}`}>Performance Index</span>
-                          <strong className={`text-lg block font-mono mt-1 font-extrabold ${adminThemeClass.accentText}`}>{metrics.performancePercentage.toFixed(2)}%</strong>
+                          <strong className={`text-xl block font-mono mt-1 font-extrabold ${adminThemeClass.accentText}`}>{metrics.performancePercentage.toFixed(2)}%</strong>
                         </div>
                       </div>
 
@@ -5585,11 +6530,13 @@ export default function AdminDashboard({
                                       <td className={`p-3 font-mono font-bold ${adminThemeClass.accentText}`}>{hoursWorked} hrs</td>
                                       <td className="p-3">
                                         <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-semibold border uppercase ${
-                                          log.statusIn === 'PRESENT' || log.statusIn === 'present'
+                                          (log.statusIn || "").toString().toUpperCase() === 'PRESENT' || (log.statusIn || "").toString().toUpperCase() === 'ON TIME' || (log.statusIn || "").toString().toUpperCase() === 'ON_TIME'
                                             ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' 
+                                            : (log.statusIn || "").toString().toUpperCase() === 'LATE'
+                                            ? 'bg-amber-500/10 text-amber-500 border-amber-500/20'
                                             : 'bg-orange-500/10 text-orange-500 border-orange-500/20'
                                         }`}>
-                                          {log.statusIn}
+                                          {(log.statusIn || "").toString().toUpperCase() === 'PRESENT' ? 'ON TIME' : ((log.statusIn || "").toString().toUpperCase() || 'ON TIME')}
                                         </span>
                                       </td>
                                       <td className="p-3">
@@ -6177,18 +7124,6 @@ export default function AdminDashboard({
                         <span
                           className={`text-xs ${adminThemeClass.textMuted}`}
                         >
-                          Inactive Days
-                        </span>
-                        <span className="font-mono font-bold text-xs text-amber-500">
-                          {metrics.inactiveDays} Days
-                        </span>
-                      </div>
-                      <div
-                        className={`flex justify-between items-center px-4 py-2.5 rounded-xl border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
-                      >
-                        <span
-                          className={`text-xs ${adminThemeClass.textMuted}`}
-                        >
                           Absent Flags (Workdays missed/ongoing)
                         </span>
                         <span className="font-mono font-bold text-xs text-red-500">
@@ -6367,11 +7302,21 @@ export default function AdminDashboard({
                             <div className="flex items-center space-x-2">
                               <img
                                 src={
+                                  tm.profilePhoto?.medium ||
                                   tm.profilePhoto?.small ||
                                   IMAGES.defaultWorkerAvatar
                                 }
                                 alt=""
-                                className="h-6 w-6 rounded-md object-cover"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setExpandedPhotoUrl(
+                                    tm.profilePhoto?.medium ||
+                                    tm.profilePhoto?.small ||
+                                    IMAGES.defaultWorkerAvatar
+                                  );
+                                }}
+                                className="h-6 w-6 rounded-md object-cover cursor-zoom-in hover:scale-125 transition-transform"
+                                title="Click to expand profile picture"
                               />
                               <span className="text-xs font-semibold">
                                 {tm.firstName} {tm.lastName}
@@ -7211,36 +8156,48 @@ export default function AdminDashboard({
       <AnimatePresence>
         {expandedPhotoUrl && (
           <div
-            className="fixed inset-0 bg-black/90 backdrop-blur-md z-[10000] flex flex-col items-center justify-center p-4"
+            className="fixed inset-0 bg-black/85 backdrop-blur-md z-[10000] flex flex-col items-center justify-center p-4 cursor-pointer select-none"
             onClick={() => setExpandedPhotoUrl(null)}
           >
             {/* Close Button at top-right */}
             <button
               onClick={() => setExpandedPhotoUrl(null)}
-              className="absolute top-6 right-6 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer z-[10001]"
+              className="absolute top-6 right-6 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition-all cursor-pointer z-[10001] shadow-lg"
               title="Close Full Screen"
             >
               <X className="h-6 w-6" />
             </button>
             <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
+              initial={{ opacity: 0, scale: 0.1 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
+              exit={{ opacity: 0, scale: 0.1 }}
+              transition={{ type: "spring", stiffness: 320, damping: 26 }}
               onClick={(e) => e.stopPropagation()}
-              className="relative w-full max-w-5xl max-h-[92vh] flex items-center justify-center rounded-3xl overflow-hidden shadow-2xl border border-white/10"
+              className="relative max-w-3xl max-h-[88vh] p-2 bg-neutral-900/90 rounded-[2.5rem] shadow-2xl border border-white/20 flex flex-col items-center justify-center overflow-hidden"
             >
               <img
                 src={expandedPhotoUrl}
-                alt="Enlarged Worker Profile Photo"
-                className="max-h-[88vh] w-auto max-w-full object-contain rounded-3xl"
+                alt=""
+                className="max-h-[82vh] w-auto max-w-full object-contain rounded-[2rem] border border-white/10 shadow-2xl"
               />
             </motion.div>
-            <div className="mt-4 text-neutral-400 text-xs font-medium">
-              Click anywhere outside or press the button to return
-            </div>
           </div>
         )}
       </AnimatePresence>
+
+      {/* At-a-Glance Attendance Overlay (Persistent Floating Panel) */}
+      <AtAGlanceAttendanceOverlay
+        isOpen={isAtAGlanceOpen}
+        onClose={() => setIsAtAGlanceOpen(false)}
+        workers={workers}
+        departments={departments}
+        attendanceRecords={attendanceRecords}
+        permissions={permissions}
+        settings={settings}
+        translations={translations}
+        adminThemeClass={adminThemeClass}
+        isDarkMode={isDark}
+      />
     </div>
   );
 }

@@ -122,6 +122,14 @@ export function useWorkerViewModel({
         }
       }
 
+      const resSettings = await fetch(`/api/tenant/settings?tenant_id=${tenant.id}`);
+      if (resSettings.ok) {
+        const dataSettings = await resSettings.json();
+        if (dataSettings.settings && onSettingsChange) {
+          onSettingsChange(dataSettings.settings);
+        }
+      }
+
       const resNotifs = await fetch(`/api/notifications?tenant_id=${tenant.id}&worker_id=${user.id}`);
       const dataNotifs = await resNotifs.json();
       if (resNotifs.ok) {
@@ -152,6 +160,7 @@ export function useWorkerViewModel({
         if (onSettingsChange) {
           onSettingsChange(payload);
         }
+        syncWorkerLogs();
       } catch (err) {
         console.warn("Error parsing SETTINGS_SAVED event on worker side:", err);
       }
@@ -469,15 +478,19 @@ export function useWorkerViewModel({
     const registrationDate = new Date(regDateStr);
 
     // 2. Worker active work days
-    const activeDays = user.activityDays || settings?.activityDays || {
-      Monday: true,
-      Tuesday: true,
-      Wednesday: true,
-      Thursday: true,
-      Friday: true,
-      Saturday: false,
-      Sunday: false
-    };
+    const activeDays = (user?.activityDays && Object.keys(user.activityDays).length > 0)
+      ? user.activityDays
+      : ((settings?.activityDays && Object.keys(settings.activityDays).length > 0)
+        ? settings.activityDays
+        : {
+            Monday: true,
+            Tuesday: true,
+            Wednesday: true,
+            Thursday: true,
+            Friday: true,
+            Saturday: false,
+            Sunday: false
+          });
 
     const dayOfWeekNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -534,12 +547,20 @@ export function useWorkerViewModel({
       return Math.max(0, (outH * 60 + outM) - (inH * 60 + inM)) / 60 || 8;
     })();
 
+    // Evaluate all calendar days within the timeframe range for worker
+    const userRecords = attendanceRecords.filter(r => 
+      r.worker_id === user.id && 
+      r.date >= getLocalDateString(actualStart) && 
+      r.date <= getLocalDateString(actualEnd)
+    );
+
     const cur = new Date(actualStart);
     while (cur <= actualEnd) {
       const dateStr = getLocalDateString(cur);
       const dayName = dayOfWeekNames[cur.getDay()];
+      const isActiveWorkDay = activeDays[dayName] === true;
 
-      if (activeDays[dayName] === true) {
+      if (isActiveWorkDay) {
         const hasPermission = permissions.some(p => 
           p.worker_id === user.id && 
           (p.status || "").toLowerCase() === "approved" && 
@@ -555,7 +576,7 @@ export function useWorkerViewModel({
       }
 
       // Attendance check
-      const atts = attendanceRecords.filter(r => r.worker_id === user.id && r.date === dateStr);
+      const atts = userRecords.filter(r => r.date === dateStr);
       if (atts.length > 0) {
         const hasSuccessfulCheckin = atts.some(r => 
           r.statusIn === "PRESENT" || r.statusIn === "present" || 
@@ -596,14 +617,14 @@ export function useWorkerViewModel({
 
     const absentDays = Math.max(0, expectedDays - attendedDays);
 
-    const attendancePercentage = expectedDays > 0 ? Number(((attendedDays / expectedDays) * 100).toFixed(2)) : 100.00;
-    const availabilityPercentage = (expectedDays + approvedPermissionDays) > 0 
+    const attendancePercentage = (expectedDays > 0 && attendedDays > 0) ? Number(((attendedDays / expectedDays) * 100).toFixed(2)) : 0;
+    const availabilityPercentage = (expectedDays + approvedPermissionDays > 0 && attendedDays > 0) 
       ? Number((((attendedDays + approvedPermissionDays) / (expectedDays + approvedPermissionDays)) * 100).toFixed(2)) 
-      : 100.00;
+      : 0;
 
-    const perfScore = expectedDays > 0 
+    const perfScore = (expectedDays > 0 && attendedDays > 0) 
       ? Math.max(0, Math.min(100, Number((((attendedDays - (lateCount * 0.1)) / expectedDays) * 100).toFixed(2)))) 
-      : 100.00;
+      : 0;
 
     const workHours = Number((totalCoveredSeconds / 3600).toFixed(2));
 

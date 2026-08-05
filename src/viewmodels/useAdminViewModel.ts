@@ -298,9 +298,26 @@ export function useAdminViewModel({
   useEffect(() => {
     syncAdminResources();
 
+    // 3-second interval polling fallback for instant data synchronization across tabs
+    const pollInterval = setInterval(() => {
+      syncAdminResources();
+    }, 3000);
+
     // SSE connection for immediate real-time dashboard refresh
     const eventSource = new EventSource(`/api/events/subscribe?tenant_id=${tenant.id}`);
     
+    eventSource.addEventListener("USER_SIGNED_IN", (e: any) => {
+      try {
+        const payload = JSON.parse(e.data);
+        if (payload.user?.role !== UserRole.COMPANY_ADMIN) {
+          onNotifyAdmin("User Signed In", `${payload.user.firstName} ${payload.user.lastName} signed in to the portal.`);
+        }
+      } catch (err) {
+        console.warn("Error parsing USER_SIGNED_IN event:", err);
+      }
+      syncAdminResources();
+    });
+
     eventSource.addEventListener("ATTENDANCE_CREATED", (e: any) => {
       const payload = JSON.parse(e.data);
       onNotifyAdmin(payload.notification.title, payload.notification.message);
@@ -332,12 +349,27 @@ export function useAdminViewModel({
     eventSource.addEventListener("PROFILE_SYNCED", (e: any) => {
       try {
         const payload = JSON.parse(e.data);
-        setWorkers((prev) =>
-          prev.map((w) =>
+        let workerName = "A team member";
+        setWorkers((prev) => {
+          const match = prev.find((w) => w.id === payload.worker_id);
+          if (match) {
+            workerName = `${match.firstName} ${match.lastName}`;
+          }
+          return prev.map((w) =>
             w.id === payload.worker_id
               ? { ...w, profilePhoto: payload.profilePhotos }
               : w
-          )
+          );
+        });
+
+        if (user.id === payload.worker_id) {
+          setAdminPhotoUrl(payload.profilePhotos?.medium || "");
+          localStorage.setItem(`admin_dp_${user.id}`, payload.profilePhotos?.medium || "");
+        }
+
+        onNotifyAdmin(
+          "Profile Picture Updated",
+          `${workerName} updated their profile picture.`
         );
         syncAdminResources();
       } catch (err) {
@@ -367,6 +399,18 @@ export function useAdminViewModel({
     });
 
     eventSource.addEventListener("WORKERS_UPDATED", (e: any) => {
+      try {
+        const payload = JSON.parse(e.data);
+        if (payload.action === "update" && payload.worker) {
+          setWorkers((prev) =>
+            prev.map((w) => (w.id === payload.worker.id ? payload.worker : w))
+          );
+        } else if (payload.action === "add" && payload.worker) {
+          setWorkers((prev) => [...prev.filter((w) => w.id !== payload.worker.id), payload.worker]);
+        }
+      } catch (err) {
+        console.warn("Error parsing WORKERS_UPDATED event in admin:", err);
+      }
       syncAdminResources();
     });
 
@@ -386,6 +430,7 @@ export function useAdminViewModel({
     });
 
     return () => {
+      clearInterval(pollInterval);
       eventSource.close();
     };
   }, [tenant.id]);

@@ -29,11 +29,13 @@ import {
   Shield,
   Menu,
   ChevronLeft,
+  ChevronDown,
+  ChevronUp,
   Users,
   Settings
 } from "lucide-react";
 import { AttendanceStatus, PermissionStatus } from "../types.js";
-import { formatDateToCustomString } from "../utils/dateFormatter.js";
+import { formatDateToCustomString, groupNotificationsByDate } from "../utils/dateFormatter.js";
 import { formatPhoneNumber } from "../utils/phoneFormatter.js";
 import CustomSelect from "./CustomSelect";
 import CustomDatePicker from "./CustomDatePicker";
@@ -168,6 +170,8 @@ export default function WorkerDashboard({
   });
 
   const [workerActiveSummaryTab, setWorkerActiveSummaryTab] = React.useState<"info" | "analytics" | "hours" | "history" | "actions">("info");
+  const [isShiftAssessmentExpanded, setIsShiftAssessmentExpanded] = React.useState<boolean>(false);
+  const [isAssessmentHistoryExpanded, setIsAssessmentHistoryExpanded] = React.useState<boolean>(false);
   const workerSummaryTabRowRef = React.useRef<HTMLDivElement>(null);
   const workerPunchHistoryRef = React.useRef<HTMLDivElement>(null);
 
@@ -312,6 +316,10 @@ export default function WorkerDashboard({
   }, [theme]);
 
   const [showSettingsModal, setShowSettingsModal] = React.useState(false);
+  const [showConfirmLogout, setShowConfirmLogout] = React.useState(false);
+  const groupedNotifications = React.useMemo(() => {
+    return groupNotificationsByDate(notifications);
+  }, [notifications]);
   const [showClearNotifsConfirm, setShowClearNotifsConfirm] = React.useState(false);
   const [tempTheme, setTempTheme] = React.useState<any>(theme);
   const [tempLang, setTempLang] = React.useState<"en" | "fr" | "es">((settings?.language as any) || "en");
@@ -378,6 +386,55 @@ export default function WorkerDashboard({
     }, 1000);
     return () => clearInterval(timer);
   }, []);
+
+  // Auto checkout monitor: triggers checkout when closing time or overtime cutoff is reached (without logging out)
+  const isAutoCheckedOutRef = React.useRef(false);
+
+  React.useEffect(() => {
+    if (!todayRecord || todayRecord.timeOut || isAutoCheckedOutRef.current) return;
+
+    const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const dayName = daysOfWeek[currentTime.getDay()];
+
+    const closingTime = settings?.dailyShiftOutTimes?.[dayName] || settings?.checkOut?.time || "17:00";
+    const [cH, cM] = closingTime.split(":").map(Number);
+    const closingDate = new Date(currentTime.getFullYear(), currentTime.getMonth(), currentTime.getDate(), cH || 17, cM || 0, 0);
+
+    const overtimeEnabled = settings ? (settings.overtimeEnabled === true) : false;
+    const overtimeHours = (overtimeEnabled && settings?.overtimeHours) ? Number(settings.overtimeHours) : 0;
+
+    // Shift overtime sustains count until selected overtime time frame is reached
+    const cutoffDate = (overtimeEnabled && overtimeHours > 0)
+      ? new Date(closingDate.getTime() + overtimeHours * 3600 * 1000)
+      : closingDate;
+
+    if (currentTime.getTime() >= cutoffDate.getTime()) {
+      isAutoCheckedOutRef.current = true;
+      triggerCheckOutHandshake().then(() => {
+        const isOvertime = overtimeEnabled && overtimeHours > 0;
+        const alertMsg = isOvertime
+          ? `Shift Overtime Reached: Your extended shift overtime limit (${closingTime} + ${overtimeHours}h) has been reached. You have been automatically checked out for today. You can continue using the application for other activities.`
+          : `Company Closing Time Reached: The company closing time (${closingTime}) has been reached. You have been automatically checked out for today. You can continue using the application for other activities.`;
+        
+        alert(alertMsg);
+      }).catch((err) => {
+        console.error("Auto checkout error:", err);
+      });
+    }
+  }, [currentTime, todayRecord, settings]);
+
+  // Handle server-triggered background auto checkouts (notify without logging out)
+  React.useEffect(() => {
+    if (todayRecord && todayRecord.timeOut && !isAutoCheckedOutRef.current) {
+      if (todayRecord.statusOut === "Overtime" || todayRecord.statusOut === "Closing Time" || todayRecord.statusOut === "Auto Checkout") {
+        isAutoCheckedOutRef.current = true;
+        const alertMsg = todayRecord.statusOut === "Overtime"
+          ? "Shift Overtime Ended: You have been automatically checked out at the end of your shift overtime. Departure status recorded as 'Overtime'."
+          : "Company Closing Time Reached: You have been automatically checked out at company closing time. Hours recorded.";
+        alert(alertMsg);
+      }
+    }
+  }, [todayRecord]);
 
   const initRealCamera = async () => {
     setIsCameraLoading(true);
@@ -618,15 +675,19 @@ export default function WorkerDashboard({
   }, []);
 
   const workerTrendData = React.useMemo(() => {
-    const activeDays = user?.activityDays || settings?.activityDays || {
-      Monday: true,
-      Tuesday: true,
-      Wednesday: true,
-      Thursday: true,
-      Friday: true,
-      Saturday: false,
-      Sunday: false
-    };
+    const activeDays = (user?.activityDays && Object.keys(user.activityDays).length > 0)
+      ? user.activityDays
+      : ((settings?.activityDays && Object.keys(settings.activityDays).length > 0)
+        ? settings.activityDays
+        : {
+            Monday: true,
+            Tuesday: true,
+            Wednesday: true,
+            Thursday: true,
+            Friday: true,
+            Saturday: false,
+            Sunday: false
+          });
     const dayOfWeekNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     const safePermissions = permissions || [];
 
@@ -642,48 +703,51 @@ export default function WorkerDashboard({
       let attendedDays = 0;
       let lateCount = 0;
 
-      const startD = parseLocalDate(interval.startDate);
-      const endD = parseLocalDate(interval.endDate);
+      // Only days that appear within the punch history tab are valid to be evaluated
+      const punchDates: string[] = Array.from(new Set(records.map((r: any) => r.date as string)));
 
-      let cur = new Date(startD);
-      while (cur <= endD) {
-        const dStr = getLocalDateString(cur);
-        const dayName = dayOfWeekNames[cur.getDay()];
+      if (punchDates.length > 0) {
+        for (const dStr of punchDates) {
+          const cur = parseLocalDate(dStr);
+          const dayName = dayOfWeekNames[cur.getDay()];
 
-        if (activeDays[dayName] === true) {
-          const hasPermission = safePermissions.some((p: any) => 
-            p.worker_id === user?.id && 
-            (p.status || "").toLowerCase() === "approved" && 
-            p.startDate <= dStr && 
-            p.endDate >= dStr
-          );
+          if (activeDays[dayName] === true) {
+            const hasPermission = safePermissions.some((p: any) => 
+              p.worker_id === user?.id && 
+              (p.status || "").toLowerCase() === "approved" && 
+              p.startDate <= dStr && 
+              p.endDate >= dStr
+            );
 
-          if (!hasPermission) {
+            if (!hasPermission) {
+              expectedDays++;
+            }
+          } else {
             expectedDays++;
           }
-        }
 
-        const dayRecords = records.filter((r: any) => r.date === dStr);
-        if (dayRecords.length > 0) {
-          const hasCheckin = dayRecords.some((r: any) => 
-            r.statusIn === "PRESENT" || r.statusIn === "present" || 
-            r.statusIn === "LATE" || r.statusIn === "late"
-          );
-          if (hasCheckin) {
-            attendedDays++;
-            if (dayRecords.some((r: any) => r.statusIn === "LATE" || r.statusIn === "late")) {
-              lateCount++;
+          const dayRecords = records.filter((r: any) => r.date === dStr);
+          if (dayRecords.length > 0) {
+            const hasCheckin = dayRecords.some((r: any) => 
+              r.statusIn === "PRESENT" || r.statusIn === "present" || 
+              r.statusIn === "LATE" || r.statusIn === "late"
+            );
+            if (hasCheckin) {
+              attendedDays++;
+              if (dayRecords.some((r: any) => r.statusIn === "LATE" || r.statusIn === "late")) {
+                lateCount++;
+              }
             }
           }
         }
 
-        cur.setDate(cur.getDate() + 1);
-      }
-
-      if (expectedDays > 0) {
-        perf = Math.max(0, Math.min(100, Math.round(((attendedDays - (lateCount * 0.1)) / expectedDays) * 100)));
+        if (expectedDays > 0 && attendedDays > 0) {
+          perf = Math.max(0, Math.min(100, Math.round(((attendedDays - (lateCount * 0.1)) / expectedDays) * 100)));
+        } else {
+          perf = 0;
+        }
       } else {
-        perf = attendedDays > 0 ? 100 : 100; // standard default performance is 100% for days off
+        perf = 0;
       }
 
       return {
@@ -795,99 +859,113 @@ export default function WorkerDashboard({
                         <button onClick={() => setShowNotifDrawer(false)} className={`font-light text-xs cursor-pointer ${themeClass.textMuted} hover:${themeClass.textHighlight}`}>&times;</button>
                       </div>
 
-                      <div className="space-y-3 overflow-y-auto max-h-72 scrollbar-none pr-1">
+                      <div className="space-y-4 overflow-y-auto max-h-72 scrollbar-none pr-1">
                         {notifications.length === 0 ? (
                           <div className={`py-6 text-center text-xs font-light leading-relaxed ${themeClass.textMuted}`}>
                             Broadcaster queue is clear. All workspace channels verified.
                           </div>
                         ) : (
-                          notifications.map((n, idx) => (
-                            <div key={idx} className={`p-3 rounded-xl border flex items-start justify-between space-x-2.5 text-[11px] leading-relaxed transition-all ${
-                              n.read 
-                                ? `${themeClass.innerBg} ${themeClass.accentBorder} ${themeClass.textMuted}` 
-                                : `${themeClass.accentBg} border-cyan-500/30`
-                            }`}>
-                              <div className="flex-1 min-w-0">
-                                <strong className={`block font-semibold mb-0.5 truncate ${themeClass.textTitle}`}>{n.title}</strong>
-                                <p className={n.read ? `${themeClass.textMuted} line-clamp-2` : `${themeClass.textHighlight} font-medium`}>{n.message}</p>
-                                <span className={`block text-[9px] tracking-wider font-mono mt-1.5 ${themeClass.textMuted}`}>{new Date(n.timestamp).toLocaleTimeString()}</span>
-
-                                {n.permission_id && (
-                                  <div className="mt-2.5 border-t border-neutral-200/10 pt-2.5">
-                                    {(() => {
-                                      const matchingPermission = permissions.find(p => p.id === n.permission_id);
-                                      if (!matchingPermission) return null;
-                                      
-                                      const isPending = (matchingPermission.status || "").toUpperCase() === "PENDING";
-                                      
-                                      if (user.role === "team_lead") {
-                                        if (isPending) {
-                                          return (
-                                            <div className="flex items-center gap-2 mt-1.5">
-                                              <button
-                                                onClick={async (e) => {
-                                                  e.stopPropagation();
-                                                  await handleEvaluatePermission(matchingPermission.id, PermissionStatus.APPROVED);
-                                                }}
-                                                className="flex-1 py-1.5 px-3 bg-emerald-500 hover:bg-emerald-600 text-black font-extrabold text-[10px] rounded-lg tracking-wide uppercase transition-all shadow-md active:scale-95 cursor-pointer text-center"
-                                              >
-                                                Approve
-                                              </button>
-                                              <button
-                                                onClick={async (e) => {
-                                                  e.stopPropagation();
-                                                  await handleEvaluatePermission(matchingPermission.id, PermissionStatus.REJECTED);
-                                                }}
-                                                className="flex-1 py-1.5 px-3 bg-rose-500 hover:bg-rose-600 text-white font-extrabold text-[10px] rounded-lg tracking-wide uppercase transition-all shadow-md active:scale-95 cursor-pointer text-center"
-                                              >
-                                                Reject
-                                              </button>
-                                            </div>
-                                          );
-                                        } else {
-                                          const statusText = (matchingPermission.status || "").toUpperCase();
-                                          const isApp = statusText === "APPROVED";
-                                          return (
-                                            <div className="flex items-center justify-between text-[10px] font-semibold mt-1.5">
-                                              <span className="opacity-60">Status:</span>
-                                              <span className={`px-2 py-0.5 rounded-md uppercase text-[9px] font-bold ${
-                                                isApp 
-                                                  ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20" 
-                                                  : "bg-rose-500/15 text-rose-400 border border-rose-500/20"
-                                              }`}>
-                                                {matchingPermission.status}
-                                              </span>
-                                            </div>
-                                          );
-                                        }
-                                      } else {
-                                        return (
-                                          <div className="flex items-center justify-between text-[10px] font-semibold mt-1.5">
-                                            <span className="opacity-60">Status:</span>
-                                            <span className={`px-2 py-0.5 rounded-md uppercase text-[9px] font-bold ${
-                                              matchingPermission.status === "APPROVED" || matchingPermission.status === "approved"
-                                                ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20" 
-                                                : matchingPermission.status === "REJECTED" || matchingPermission.status === "rejected"
-                                                  ? "bg-rose-500/15 text-rose-400 border border-rose-500/20"
-                                                  : "bg-amber-500/15 text-amber-400 border border-amber-500/20"
-                                            }`}>
-                                              {matchingPermission.status || "Pending"}
-                                            </span>
-                                          </div>
-                                        );
-                                      }
-                                    })()}
-                                  </div>
-                                )}
+                          groupedNotifications.map((group, gIdx) => (
+                            <div key={gIdx} className="space-y-2">
+                              <div className={`sticky top-0 z-10 py-1 px-2.5 rounded-lg backdrop-blur-md text-[10px] font-bold uppercase tracking-wider ${themeClass.accentText} ${themeClass.navBg} border border-cyan-500/20 flex items-center justify-between`}>
+                                <span>{group.label}</span>
+                                <span className={`text-[9px] font-mono font-normal ${themeClass.textMuted}`}>
+                                  {group.items.length} alert{group.items.length > 1 ? "s" : ""}
+                                </span>
                               </div>
-                              {!n.read && (
-                                <button 
-                                  onClick={() => handleMarkRead(n.id)}
-                                  className={`text-[9px] font-bold hover:underline shrink-0 cursor-pointer ${themeClass.accentText} bg-cyan-500/10 hover:bg-cyan-500/20 px-2 py-0.5 rounded-md`}
-                                >
-                                  Read
-                                </button>
-                              )}
+                              <div className="space-y-2">
+                                {group.items.map((n, idx) => (
+                                  <div key={n.id || idx} className={`p-3 rounded-xl border flex items-start justify-between space-x-2.5 text-[11px] leading-relaxed transition-all ${
+                                    n.read 
+                                      ? `${themeClass.innerBg} ${themeClass.accentBorder} ${themeClass.textMuted}` 
+                                      : `${themeClass.accentBg} border-cyan-500/30`
+                                  }`}>
+                                    <div className="flex-1 min-w-0">
+                                      <strong className={`block font-semibold mb-0.5 truncate ${themeClass.textTitle}`}>{n.title}</strong>
+                                      <p className={n.read ? `${themeClass.textMuted} line-clamp-2` : `${themeClass.textHighlight} font-medium`}>{n.message}</p>
+                                      <span className={`block text-[9px] tracking-wider font-mono mt-1.5 ${themeClass.textMuted}`}>
+                                        {new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                      </span>
+
+                                      {n.permission_id && (
+                                        <div className="mt-2.5 border-t border-neutral-200/10 pt-2.5">
+                                          {(() => {
+                                            const matchingPermission = permissions.find(p => p.id === n.permission_id);
+                                            if (!matchingPermission) return null;
+                                            
+                                            const isPending = (matchingPermission.status || "").toUpperCase() === "PENDING";
+                                            
+                                            if (user.role === "team_lead") {
+                                              if (isPending) {
+                                                return (
+                                                  <div className="flex items-center gap-2 mt-1.5">
+                                                    <button
+                                                      onClick={async (e) => {
+                                                        e.stopPropagation();
+                                                        await handleEvaluatePermission(matchingPermission.id, PermissionStatus.APPROVED);
+                                                      }}
+                                                      className="flex-1 py-1.5 px-3 bg-emerald-500 hover:bg-emerald-600 text-black font-extrabold text-[10px] rounded-lg tracking-wide uppercase transition-all shadow-md active:scale-95 cursor-pointer text-center"
+                                                    >
+                                                      Approve
+                                                    </button>
+                                                    <button
+                                                      onClick={async (e) => {
+                                                        e.stopPropagation();
+                                                        await handleEvaluatePermission(matchingPermission.id, PermissionStatus.REJECTED);
+                                                      }}
+                                                      className="flex-1 py-1.5 px-3 bg-rose-500 hover:bg-rose-600 text-white font-extrabold text-[10px] rounded-lg tracking-wide uppercase transition-all shadow-md active:scale-95 cursor-pointer text-center"
+                                                    >
+                                                      Reject
+                                                    </button>
+                                                  </div>
+                                                );
+                                              } else {
+                                                const statusText = (matchingPermission.status || "").toUpperCase();
+                                                const isApp = statusText === "APPROVED";
+                                                return (
+                                                  <div className="flex items-center justify-between text-[10px] font-semibold mt-1.5">
+                                                    <span className="opacity-60">Status:</span>
+                                                    <span className={`px-2 py-0.5 rounded-md uppercase text-[9px] font-bold ${
+                                                      isApp 
+                                                        ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20" 
+                                                        : "bg-rose-500/15 text-rose-400 border border-rose-500/20"
+                                                    }`}>
+                                                      {matchingPermission.status}
+                                                    </span>
+                                                  </div>
+                                                );
+                                              }
+                                            } else {
+                                              return (
+                                                <div className="flex items-center justify-between text-[10px] font-semibold mt-1.5">
+                                                  <span className="opacity-60">Status:</span>
+                                                  <span className={`px-2 py-0.5 rounded-md uppercase text-[9px] font-bold ${
+                                                    matchingPermission.status === "APPROVED" || matchingPermission.status === "approved"
+                                                      ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20" 
+                                                      : matchingPermission.status === "REJECTED" || matchingPermission.status === "rejected"
+                                                        ? "bg-rose-500/15 text-rose-400 border border-rose-500/20"
+                                                        : "bg-amber-500/15 text-amber-400 border border-amber-500/20"
+                                                  }`}>
+                                                    {matchingPermission.status || "Pending"}
+                                                  </span>
+                                                </div>
+                                              );
+                                            }
+                                          })()}
+                                        </div>
+                                      )}
+                                    </div>
+                                    {!n.read && (
+                                      <button 
+                                        onClick={() => handleMarkRead(n.id)}
+                                        className={`text-[9px] font-bold hover:underline shrink-0 cursor-pointer ${themeClass.accentText} bg-cyan-500/10 hover:bg-cyan-500/20 px-2 py-0.5 rounded-md`}
+                                      >
+                                        Read
+                                      </button>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
                             </div>
                           ))
                         )}
@@ -1078,7 +1156,7 @@ export default function WorkerDashboard({
                           id="worker_signout_menu"
                           onClick={() => {
                             setShowSettingsModal(false);
-                            onLogout();
+                            setShowConfirmLogout(true);
                           }}
                           className={`w-full py-2.5 px-3 rounded-xl border flex items-center justify-center space-x-2 transition-all cursor-pointer text-xs font-semibold ${
                             isDark 
@@ -1405,99 +1483,140 @@ export default function WorkerDashboard({
               </div>
             </div>
 
-            {/* Shift Assessment Header & Profile Box */}
-            <div className={`p-6 rounded-3xl border shadow-md space-y-4 ${themeClass.cardBg} ${themeClass.accentBorder}`}>
-              <div className="flex justify-between items-center pb-2 border-b border-neutral-200/10">
-                <h3 className={`font-display font-semibold text-lg ${themeClass.textTitle}`}>
-                  {translations.shiftAssessment || "Shift Assessment"}
-                </h3>
-                <span className={`text-[10px] uppercase font-bold tracking-wider font-mono ${themeClass.textMuted}`}>
-                  {translations.workerVerifiedView || "Worker Verified View"}
-                </span>
-              </div>
-
-              {/* Profile Box */}
-              <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 ${themeClass.innerBg} ${themeClass.accentBorder}`}>
-                <div className="flex items-center space-x-4">
-                  <img
-                    src={user.profilePhoto?.medium || IMAGES.defaultWorkerAvatar}
-                    alt=""
-                    className={`h-14 w-14 rounded-2xl object-cover border-2 shadow-sm ${themeClass.accentBorder}`}
-                  />
-                  <div>
-                    <h4 className={`font-bold text-sm leading-tight ${themeClass.textTitle}`}>
-                      {user.firstName} {user.lastName}
-                    </h4>
-                    <p className={`text-[11px] ${themeClass.textMuted}`}>
-                      {user.email} &bull; {user.phone ? formatPhoneNumber(user.phone) : (translations.noPhoneLinked || "No phone linked")}
-                    </p>
-                    <div className="flex gap-2 mt-1.5">
-                      <span className={`text-[9px] font-bold font-mono px-2 py-0.5 rounded-full border bg-amber-500/10 text-amber-400 border-amber-500/20 uppercase`}>
-                        {user.role === "team_member" 
-                          ? (translations.teamMember || "team member") 
-                          : user.role === "team_lead" 
-                          ? (translations.teamLead || "team lead") 
-                          : user.role === "company_admin" 
-                          ? (translations.companyAdmin || "company admin") 
-                          : user.role === "super_admin" 
-                          ? (translations.superAdmin || "super admin") 
-                          : user.role
-                        }
-                      </span>
-                      <span className={`text-[9px] font-bold font-mono px-2 py-0.5 rounded-full border bg-cyan-500/10 text-cyan-400 border-cyan-500/20 uppercase`}>
-                        {departments.find((d) => d.id === user.department_id)?.name || user.departmentName || (translations.unassigned || "Unassigned")}
-                      </span>
-                    </div>
+            {/* Worker Profile Collapsible Container (Profile Only) */}
+            <div className={`rounded-3xl border shadow-md overflow-hidden transition-all duration-300 ${themeClass.cardBg} ${themeClass.accentBorder}`}>
+              {/* List Stripe Header (Interactive Expand/Collapse Row) */}
+              <div
+                onClick={() => setIsShiftAssessmentExpanded((prev) => !prev)}
+                className={`p-4 sm:p-5 flex items-center justify-between gap-3 cursor-pointer select-none transition-colors hover:bg-neutral-500/5 ${
+                  isShiftAssessmentExpanded ? "border-b border-neutral-200/10" : ""
+                }`}
+                title={isShiftAssessmentExpanded ? "Click to collapse Worker Profile" : "Click to expand Worker Profile"}
+              >
+                <div className="flex items-center space-x-3.5 min-w-0">
+                  <div className={`p-2 rounded-xl border flex items-center justify-center shrink-0 transition-all ${
+                    isShiftAssessmentExpanded ? "bg-cyan-500/10 text-cyan-500 border-cyan-500/20" : `${themeClass.innerBg} ${themeClass.accentBorder}`
+                  }`}>
+                    {isShiftAssessmentExpanded ? (
+                      <ChevronUp className="h-4 w-4" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4" />
+                    )}
                   </div>
+                  <h3 className={`font-display font-semibold text-base sm:text-lg ${themeClass.textTitle}`}>
+                    {translations.workerProfile || translations.shiftAssessment || "Worker Profile"}
+                  </h3>
                 </div>
-                <div className="flex flex-col sm:items-end space-y-1">
-                  <span className={`text-[10px] uppercase font-bold tracking-wider block font-mono ${themeClass.textMuted}`}>{translations.joinedOn || "Joined On"}</span>
-                  <span className="font-mono text-xs font-semibold">
-                    {user.createdAt ? user.createdAt.substring(0, 10) : "2026-06-11"}
+
+                <div className="flex items-center space-x-2.5 shrink-0 ml-auto">
+                  <span className={`text-[10px] font-mono font-bold uppercase tracking-wider hidden md:inline-block ${themeClass.textMuted}`}>
+                    {isShiftAssessmentExpanded ? (translations.clickToCollapse || "Click to Collapse") : (translations.clickToExpand || "Click to Expand")}
                   </span>
                 </div>
               </div>
+
+              {/* Expandable Body: Worker Profile Box ONLY */}
+              <AnimatePresence initial={false}>
+                {isShiftAssessmentExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                    className="overflow-hidden"
+                  >
+                    <div className="p-4 sm:p-6">
+                      <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 ${themeClass.innerBg} ${themeClass.accentBorder}`}>
+                        <div className="flex items-center space-x-4">
+                          <img
+                            src={user.profilePhoto?.medium || IMAGES.defaultWorkerAvatar}
+                            alt=""
+                            className={`h-14 w-14 rounded-2xl object-cover border-2 shadow-sm ${themeClass.accentBorder}`}
+                          />
+                          <div>
+                            <h4 className={`font-bold text-sm leading-tight ${themeClass.textTitle}`}>
+                              {user.firstName} {user.lastName}
+                            </h4>
+                            <p className={`text-[11px] ${themeClass.textMuted}`}>
+                              {user.email} &bull; {user.phone ? formatPhoneNumber(user.phone) : (translations.noPhoneLinked || "No phone linked")}
+                            </p>
+                            <div className="flex flex-wrap gap-2 mt-1.5">
+                              <span className={`text-[9px] font-bold font-mono px-2 py-0.5 rounded-full border bg-amber-500/10 text-amber-400 border-amber-500/20 uppercase`}>
+                                {user.role === "team_member" 
+                                  ? (translations.teamMember || "team member") 
+                                  : user.role === "team_lead" 
+                                  ? (translations.teamLead || "team lead") 
+                                  : user.role === "company_admin" 
+                                  ? (translations.companyAdmin || "company admin") 
+                                  : user.role === "super_admin" 
+                                  ? (translations.superAdmin || "super admin") 
+                                  : user.role
+                                }
+                              </span>
+                              <span className={`text-[9px] font-bold font-mono px-2 py-0.5 rounded-full border bg-cyan-500/10 text-cyan-400 border-cyan-500/20 uppercase`}>
+                                {departments.find((d) => d.id === user.department_id)?.name || user.departmentName || (translations.unassigned || "Unassigned")}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex flex-col sm:items-end space-y-1">
+                          <span className={`text-[10px] uppercase font-bold tracking-wider block font-mono ${themeClass.textMuted}`}>{translations.joinedOn || "Joined On"}</span>
+                          <span className="font-mono text-xs font-semibold">
+                            {user.createdAt ? user.createdAt.substring(0, 10) : "2026-06-11"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
-            {/* Timeframe Selector Button Row */}
-            {(workerActiveSummaryTab === "info" || workerActiveSummaryTab === "history") && (
-              <div className={`flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border rounded-2xl gap-4 ${themeClass.cardBg}`}>
-                <div>
-                  <span className={`text-[10px] uppercase font-bold tracking-wider font-mono block mb-1 ${themeClass.textMuted}`}>{translations.workerMetricsTimeframeBasis || "Worker Metrics Timeframe Basis"}</span>
-                  <p className={`text-xs font-light ${themeClass.textMuted}`}>{translations.dynamicallyRecalculate || "Dynamically recalculate attendance ratios, trend index, and metrics."}</p>
+            {/* Separate Collapsible Container for Assessment History, Calendar, Work Hours, Punch History & Settings */}
+            <div className={`rounded-3xl border shadow-md overflow-hidden transition-all duration-300 ${themeClass.cardBg} ${themeClass.accentBorder}`}>
+              {/* List Stripe Header for Assessment Details */}
+              <div
+                onClick={() => setIsAssessmentHistoryExpanded((prev) => !prev)}
+                className={`p-4 sm:p-5 flex items-center justify-between gap-3 cursor-pointer select-none transition-colors hover:bg-neutral-500/5 ${
+                  isAssessmentHistoryExpanded ? "border-b border-neutral-200/10" : ""
+                }`}
+                title={isAssessmentHistoryExpanded ? "Click to collapse assessment records" : "Click to expand assessment records"}
+              >
+                <div className="flex items-center space-x-3.5 min-w-0">
+                  <div className={`p-2 rounded-xl border flex items-center justify-center shrink-0 transition-all ${
+                    isAssessmentHistoryExpanded ? "bg-cyan-500/10 text-cyan-500 border-cyan-500/20" : `${themeClass.innerBg} ${themeClass.accentBorder}`
+                  }`}>
+                    {isAssessmentHistoryExpanded ? (
+                      <ChevronUp className="h-4 w-4" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4" />
+                    )}
+                  </div>
+                  <h3 className={`font-display font-semibold text-base sm:text-lg ${themeClass.textTitle}`}>
+                    {translations.assessmentRecordsHistory || "Assessment Records & History"}
+                  </h3>
                 </div>
-                <div className={`flex rounded-2xl p-1 border select-none max-w-sm w-full divide-x-0 ${themeClass.innerBg}`}>
-                  {(["daily", "weekly", "monthly", "yearly"] as const).map((tf) => (
-                    <button
-                      key={tf}
-                      type="button"
-                      onClick={() => setWorkerTimeframe(tf)}
-                      className={`flex-1 py-1.5 px-3 text-xs font-semibold rounded-xl text-center capitalize transition-all cursor-pointer ${
-                        workerTimeframe === tf 
-                          ? isDark 
-                            ? `${themeClass.buttonSelected} scale-[1.02]` 
-                            : "bg-white text-cyan-600 shadow-sm font-bold scale-[1.02] border border-neutral-200"
-                          : isDark
-                            ? `${themeClass.textMuted} hover:${themeClass.textHighlight}`
-                            : "text-neutral-500 hover:text-neutral-900"
-                      }`}
-                    >
-                      {tf === "daily" 
-                        ? (translations.tfDaily || "daily") 
-                        : tf === "weekly" 
-                        ? (translations.tfWeekly || "weekly") 
-                        : tf === "monthly" 
-                        ? (translations.tfMonthly || "monthly") 
-                        : (translations.tfYearly || "yearly")
-                      }
-                    </button>
-                  ))}
+
+                <div className="flex items-center space-x-2 shrink-0">
+                  <span className={`text-[10px] font-mono font-bold uppercase tracking-wider hidden sm:inline-block ${themeClass.textMuted}`}>
+                    {isAssessmentHistoryExpanded ? (translations.clickToCollapse || "Click to Collapse") : (translations.clickToExpand || "Click to Expand")}
+                  </span>
                 </div>
               </div>
-            )}
 
-            {/* Tab Selector with responsive navigation arrows */}
-            <div className="relative group w-full px-2">
+              {/* Expandable Body for Sub-tabs & Sub-tab Contents */}
+              <AnimatePresence initial={false}>
+                {isAssessmentHistoryExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                    className="overflow-hidden"
+                  >
+                    <div className="p-4 sm:p-6 space-y-6">
+                      {/* Tab Selector with responsive navigation arrows */}
+                      <div className="relative group w-full px-2">
               {/* Left Arrow */}
               <button
                 type="button"
@@ -1551,13 +1670,51 @@ export default function WorkerDashboard({
 
             {/* TAB PANELS */}
             {workerActiveSummaryTab === "info" && (
-              <div className="space-y-6 flex flex-col items-center">
+              <div className="space-y-6 flex flex-col items-center w-full">
+                {/* Worker Metrics Timeframe Basis - between Summary Tab and Present / Performance Index containers */}
+                <div className={`flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border rounded-2xl gap-4 ${themeClass.cardBg} w-full max-w-2xl mx-auto`}>
+                  <div>
+                    <span className={`text-[10px] uppercase font-bold tracking-wider font-mono block mb-1 ${themeClass.textMuted}`}>{translations.workerMetricsTimeframeBasis || "Worker Metrics Timeframe Basis"}</span>
+                    <p className={`text-xs font-light ${themeClass.textMuted}`}>{translations.dynamicallyRecalculate || "Dynamically recalculate attendance ratios, trend index, and metrics."}</p>
+                  </div>
+                  <div className={`flex rounded-2xl p-1 border select-none max-w-sm w-full divide-x-0 ${themeClass.innerBg}`}>
+                    {(["daily", "weekly", "monthly", "yearly"] as const).map((tf) => (
+                      <button
+                        key={tf}
+                        type="button"
+                        onClick={() => setWorkerTimeframe(tf)}
+                        className={`flex-1 py-1.5 px-3 text-xs font-semibold rounded-xl text-center capitalize transition-all cursor-pointer ${
+                          workerTimeframe === tf 
+                            ? isDark 
+                              ? `${themeClass.buttonSelected} scale-[1.02]` 
+                              : "bg-white text-cyan-600 shadow-sm font-bold scale-[1.02] border border-neutral-200"
+                            : isDark
+                              ? `${themeClass.textMuted} hover:${themeClass.textHighlight}`
+                              : "text-neutral-500 hover:text-neutral-900"
+                        }`}
+                      >
+                        {tf === "daily" 
+                          ? (translations.tfDaily || "daily") 
+                          : tf === "weekly" 
+                          ? (translations.tfWeekly || "weekly") 
+                          : tf === "monthly" 
+                          ? (translations.tfMonthly || "monthly") 
+                          : (translations.tfYearly || "yearly")
+                        }
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 {/* Quick Metrics display */}
                 <div className="grid grid-cols-2 gap-4 w-full max-w-2xl mx-auto">
                   <div className={`rounded-2xl p-5 border shadow-md font-bold ${themeClass.cardBg}`}>
-                    <span className={`text-[10px] uppercase font-extrabold tracking-wide ${themeClass.textMuted}`}>{translations.present || "Present"}</span>
+                    <span className={`text-[10px] uppercase font-extrabold tracking-wide ${themeClass.textMuted}`}>{translations.presentStatus || "Present Status"}</span>
                     <h3 className={`text-2xl font-display font-extrabold tracking-tight mt-1 ${themeClass.textTitle}`}>
-                      {computedWorkerStats.present} / {computedWorkerStats.eligible} {translations.daysSuffix || "Days"}
+                      {workerTimeframe === "daily" 
+                        ? (computedWorkerStats.present > 0 ? "Present" : "Absent")
+                        : `${computedWorkerStats.present}/${computedWorkerStats.eligible} ${computedWorkerStats.eligible === 1 ? "Day" : "Days"}`
+                      }
                     </h3>
                   </div>
                   <div className={`rounded-2xl p-5 border shadow-md font-bold ${
@@ -1854,15 +2011,18 @@ export default function WorkerDashboard({
             )}
 
             {workerActiveSummaryTab === "analytics" && (() => {
-              const activeDays = user.activityDays || settings?.activityDays || {
-                Monday: true, Tuesday: true, Wednesday: true, Thursday: true, Friday: true, Saturday: false, Sunday: false
-              };
+              const activeDays = (user?.activityDays && Object.keys(user.activityDays).length > 0)
+                ? user.activityDays
+                : ((settings?.activityDays && Object.keys(settings.activityDays).length > 0)
+                  ? settings.activityDays
+                  : {
+                      Monday: true, Tuesday: true, Wednesday: true, Thursday: true, Friday: true, Saturday: false, Sunday: false
+                    });
               const daysList = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
               const personalPermissions = permissions.filter(p => p.worker_id === user.id && (p.status || "").toLowerCase() === "approved");
               
-              const getShiftTimeForDay = (day: string) => {
-                const rawTime = settings?.dailyShiftTimes?.[day] || settings?.checkIn?.time || "08:00";
-                const parts = rawTime.split(":");
+              const formatTimeStr = (raw: string) => {
+                const parts = raw.split(":");
                 let hours = parseInt(parts[0], 10);
                 let minutes = parseInt(parts[1], 10);
                 if (isNaN(hours)) hours = 8;
@@ -1870,6 +2030,17 @@ export default function WorkerDashboard({
                 const ampm = hours >= 12 ? "PM" : "AM";
                 const hour12 = hours % 12 === 0 ? 12 : hours % 12;
                 return `${String(hour12).padStart(2, "0")}:${String(minutes).padStart(2, "0")} ${ampm}`;
+              };
+
+              const getShiftTimeForDay = (day: string) => {
+                const rawIn = settings?.dailyShiftTimes?.[day] || settings?.checkIn?.time || "08:00";
+                const rawOut = settings?.dailyShiftOutTimes?.[day] || settings?.checkOut?.time || "17:00";
+                const inStr = formatTimeStr(rawIn);
+                const outStr = formatTimeStr(rawOut);
+                if (settings?.onlyShowTimeIn !== false) {
+                  return `In: ${inStr}`;
+                }
+                return `In: ${inStr} | Out: ${outStr}`;
               };
 
               return (
@@ -1887,7 +2058,7 @@ export default function WorkerDashboard({
                               <span className="font-bold">{translations[d] || d}</span>
                             </div>
                             <span className="font-mono font-medium text-[11px]">
-                              {isScheduled ? `${translations.shiftColon || "Shift"}: ${shiftTime}` : (translations.offDay || "Off-Day")}
+                              {isScheduled ? shiftTime : (translations.offDay || "Off-Day")}
                             </span>
                           </div>
                         );
@@ -1975,9 +2146,78 @@ export default function WorkerDashboard({
             })()}
 
             {workerActiveSummaryTab === "history" && (() => {
-              const workerLogs = attendanceRecords.sort((a, b) => b.date.localeCompare(a.date));
+              const latestDateStr = attendanceRecords.reduce(
+                (max, r: any) => (r.date > max ? r.date : max),
+                getLocalDateString()
+              );
+              const latestDate = parseLocalDate(latestDateStr);
+
+              let startStr = "";
+              let endStr = "";
+
+              if (workerTimeframe === "daily") {
+                startStr = latestDateStr;
+                endStr = latestDateStr;
+              } else if (workerTimeframe === "weekly") {
+                const day = latestDate.getDay();
+                const dStart = new Date(latestDate);
+                dStart.setDate(latestDate.getDate() - day);
+                const dEnd = new Date(dStart);
+                dEnd.setDate(dStart.getDate() + 6);
+                startStr = getLocalDateString(dStart);
+                endStr = getLocalDateString(dEnd);
+              } else if (workerTimeframe === "monthly") {
+                const dStart = new Date(latestDate.getFullYear(), latestDate.getMonth(), 1);
+                const dEnd = new Date(latestDate.getFullYear(), latestDate.getMonth() + 1, 0);
+                startStr = getLocalDateString(dStart);
+                endStr = getLocalDateString(dEnd);
+              } else if (workerTimeframe === "yearly") {
+                const dStart = new Date(latestDate.getFullYear(), 0, 1);
+                const dEnd = new Date(latestDate.getFullYear(), 11, 31);
+                startStr = getLocalDateString(dStart);
+                endStr = getLocalDateString(dEnd);
+              }
+
+              const workerLogs = attendanceRecords
+                .filter((r: any) => r.date >= startStr && r.date <= endStr)
+                .sort((a, b) => b.date.localeCompare(a.date));
               return (
-                <div className="space-y-3 font-sans">
+                <div className="space-y-4 font-sans w-full">
+                  {/* Worker Metrics Timeframe Basis - captured below Punch History tab, just above Attendance Log table */}
+                  <div className={`flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border rounded-2xl gap-4 ${themeClass.cardBg} w-full`}>
+                    <div>
+                      <span className={`text-[10px] uppercase font-bold tracking-wider font-mono block mb-1 ${themeClass.textMuted}`}>{translations.workerMetricsTimeframeBasis || "Worker Metrics Timeframe Basis"}</span>
+                      <p className={`text-xs font-light ${themeClass.textMuted}`}>{translations.dynamicallyRecalculate || "Dynamically recalculate attendance ratios, trend index, and metrics."}</p>
+                    </div>
+                    <div className={`flex rounded-2xl p-1 border select-none max-w-sm w-full divide-x-0 ${themeClass.innerBg}`}>
+                      {(["daily", "weekly", "monthly", "yearly"] as const).map((tf) => (
+                        <button
+                          key={tf}
+                          type="button"
+                          onClick={() => setWorkerTimeframe(tf)}
+                          className={`flex-1 py-1.5 px-3 text-xs font-semibold rounded-xl text-center capitalize transition-all cursor-pointer ${
+                            workerTimeframe === tf 
+                              ? isDark 
+                                ? `${themeClass.buttonSelected} scale-[1.02]` 
+                                : "bg-white text-cyan-600 shadow-sm font-bold scale-[1.02] border border-neutral-200"
+                              : isDark
+                                ? `${themeClass.textMuted} hover:${themeClass.textHighlight}`
+                                : "text-neutral-500 hover:text-neutral-900"
+                          }`}
+                        >
+                          {tf === "daily" 
+                            ? (translations.tfDaily || "daily") 
+                            : tf === "weekly" 
+                            ? (translations.tfWeekly || "weekly") 
+                            : tf === "monthly" 
+                            ? (translations.tfMonthly || "monthly") 
+                            : (translations.tfYearly || "yearly")
+                          }
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <div className={`p-6 rounded-3xl border shadow-md ${themeClass.cardBg}`}>
                     <div className="flex justify-between items-center mb-4">
                       <div className="flex items-center space-x-2">
@@ -2011,8 +2251,9 @@ export default function WorkerDashboard({
                               <th className="p-3">{translations.colDate || "Date"}</th>
                               <th className="p-3">{translations.colIn || "Check-in Time"}</th>
                               {!settings?.onlyShowTimeIn && <th className="p-3">{translations.colOut || "Check-out Time"}</th>}
-                              <th className="p-3">{(settings?.onlyShowTimeIn !== false) ? (translations.colStatusIn || "Arrival Status") : (translations.colCovered || "Shift Duration")}</th>
-                              <th className="p-3">{translations.colStatusIn || "Attendance Status"}</th>
+                              <th className="p-3">{translations.attendanceStatusLabel || "Attendance Status"}</th>
+                              <th className="p-3">{(settings?.onlyShowTimeIn !== false) ? (translations.arrivalTrackedLabel || "Arrival Record") : (translations.colCovered || "Shift Duration")}</th>
+                              {!settings?.onlyShowTimeIn && <th className="p-3">{translations.colStatusOut || "Departure Status"}</th>}
                               <th className="p-3">{translations.activeExemptionCol || "Permission Status"}</th>
                             </tr>
                           </thead>
@@ -2025,15 +2266,20 @@ export default function WorkerDashboard({
                                 const permission = permissions.find(p => 
                                   p.worker_id === user.id && 
                                   (p.status || "").toLowerCase() === "approved" && 
-                                  p.startDate <= log.date && 
-                                  p.endDate >= log.date
+                                  (p.startDate || p.date) <= log.date && 
+                                  (p.endDate || p.date || p.startDate) >= log.date
                                 );
+                                const isOnLeaveAttended = Boolean(permission && (log.timeIn || log.statusIn));
                                 const permissionStatus = permission 
                                   ? `${translations.approvedStatus || "Approved"} (${permission.type})` 
                                   : (translations.standardShiftLabel || "Standard Shift");
                                 
                                 return (
-                                  <tr key={idx} className={`border-b ${themeClass.tableRowHover} duration-100`}>
+                                  <tr key={idx} className={`border-b duration-100 ${
+                                    isOnLeaveAttended 
+                                      ? "bg-amber-500/15 dark:bg-amber-950/40 border-amber-500/40 text-amber-900 dark:text-amber-200" 
+                                      : themeClass.tableRowHover
+                                  }`}>
                                     <td className={`p-3 font-sans font-medium ${themeClass.textTitle}`}>
                                       {formatPunchDate(log.date)}
                                     </td>
@@ -2041,18 +2287,57 @@ export default function WorkerDashboard({
                                     {!settings?.onlyShowTimeIn && (
                                       <td className={`p-3 font-mono ${themeClass.textHighlight}`}>{log.timeOut || (translations.activeShiftLabel || "Active Shift")}</td>
                                     )}
+                                    <td className="p-3">
+                                      <div className="flex flex-wrap items-center gap-1.5">
+                                        {(() => {
+                                          const statusUpper = (log.statusIn || "").toString().toUpperCase();
+                                          if (statusUpper === "LATE") {
+                                            return (
+                                              <span className="inline-block px-2 py-0.5 rounded-full text-[9px] font-semibold border uppercase bg-amber-500/10 text-amber-500 border-amber-500/20">
+                                                LATE
+                                              </span>
+                                            );
+                                          }
+                                          if (statusUpper === "ABSENT") {
+                                            return (
+                                              <span className="inline-block px-2 py-0.5 rounded-full text-[9px] font-semibold border uppercase bg-red-500/10 text-red-500 border-red-500/20">
+                                                ABSENT
+                                              </span>
+                                            );
+                                          }
+                                          return (
+                                            <span className="inline-block px-2 py-0.5 rounded-full text-[9px] font-semibold border uppercase bg-emerald-500/10 text-emerald-500 border-emerald-500/20">
+                                              ON TIME
+                                            </span>
+                                          );
+                                        })()}
+                                        {isOnLeaveAttended && (
+                                          <span className="inline-block px-2 py-0.5 rounded-full text-[9px] font-bold border uppercase bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/40">
+                                            On Leave
+                                          </span>
+                                        )}
+                                      </div>
+                                    </td>
                                     <td className={`p-3 font-mono font-bold ${themeClass.accentText}`}>
                                     {settings?.onlyShowTimeIn !== false ? (translations.arrivalTrackedLabel || "Arrival Tracked") : `${hoursWorked} hrs`}
                                     </td>
-                                    <td className="p-3">
-                                      <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-semibold border uppercase ${
-                                        log.statusIn === 'PRESENT' || log.statusIn === 'present'
-                                          ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' 
-                                          : 'bg-orange-500/10 text-orange-500 border-orange-500/20'
-                                      }`}>
-                                        {log.statusIn === 'PRESENT' || log.statusIn === 'present' ? (translations.approvedStatus || "PRESENT") : (translations.pendingStatus || log.statusIn)}
-                                      </span>
-                                    </td>
+                                    {!settings?.onlyShowTimeIn && (
+                                      <td className="p-3">
+                                        {log.statusOut === "Overtime" ? (
+                                          <span className="inline-block px-2 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wider bg-purple-500/15 text-purple-400 border border-purple-500/30">
+                                            Overtime
+                                          </span>
+                                        ) : log.statusOut === "Closing Time" || log.statusOut === "Auto Checkout" ? (
+                                          <span className="inline-block px-2 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wider bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                                            {log.statusOut}
+                                          </span>
+                                        ) : (
+                                          <span className={`text-[10px] ${themeClass.textMuted}`}>
+                                            {log.statusOut || (log.timeOut ? "Normal Checkout" : "Active Shift")}
+                                          </span>
+                                        )}
+                                      </td>
+                                    )}
                                     <td className="p-3">
                                       <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-mono font-semibold ${
                                         permission ? 'bg-cyan-500/10 text-cyan-400' : 'bg-neutral-500/10 text-neutral-400'
@@ -2065,7 +2350,7 @@ export default function WorkerDashboard({
                               })
                             ) : (
                               <tr>
-                                <td colSpan={settings?.onlyShowTimeIn !== false ? 5 : 6} className="p-8 text-center text-neutral-500 font-light">
+                                <td colSpan={settings?.onlyShowTimeIn !== false ? 5 : 7} className="p-8 text-center text-neutral-500 font-light">
                                   {translations.noHistoricalAttendance || "No historical attendance records logged."}
                                 </td>
                               </tr>
@@ -2197,6 +2482,11 @@ export default function WorkerDashboard({
               </div>
             )}
 
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
         )}
 
@@ -2518,6 +2808,59 @@ export default function WorkerDashboard({
               </div>
             </div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Logout Confirmation Modal */}
+      <AnimatePresence>
+        {showConfirmLogout && (
+          <div
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[10000] flex items-center justify-center p-4 select-none"
+            onClick={() => setShowConfirmLogout(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className={`${themeClass.cardBg} rounded-3xl max-w-sm w-full p-6 text-center space-y-6 shadow-2xl border ${themeClass.accentBorder}`}
+            >
+              <div className="h-14 w-14 bg-red-500/10 text-red-500 border border-red-500/20 rounded-2xl mx-auto flex items-center justify-center">
+                <LogOut className="h-6 w-6" />
+              </div>
+              <div>
+                <h4 className={`font-bold text-lg leading-snug ${themeClass.textTitle}`}>
+                  {translations.confirmLogout || "Are you sure you want to sign out?"}
+                </h4>
+                <p className={`text-xs mt-1 ${themeClass.textMuted}`}>
+                  Your shift session logs and pending activity will be saved securely.
+                </p>
+              </div>
+              <div className="flex space-x-3 w-full">
+                <button
+                  id="worker_logout_yes"
+                  onClick={() => {
+                    setShowConfirmLogout(false);
+                    onLogout();
+                  }}
+                  className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl active:scale-95 transition-all cursor-pointer min-h-[44px]"
+                >
+                  {translations.yes || "Yes, Sign Out"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmLogout(false)}
+                  className={`flex-1 py-3 font-semibold text-xs rounded-xl active:scale-95 transition-all cursor-pointer min-h-[44px] ${
+                    isDark
+                      ? "bg-neutral-900 hover:bg-neutral-800 text-neutral-300 border border-neutral-800"
+                      : "bg-neutral-100 hover:bg-neutral-200 text-neutral-800"
+                  }`}
+                >
+                  {translations.cancel || "Cancel"}
+                </button>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 

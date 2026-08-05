@@ -48,6 +48,7 @@ export interface Tenant {
 
 export interface User {
   id: string;
+  uid?: string;
   tenant_id: string;
   firstName: string;
   lastName: string;

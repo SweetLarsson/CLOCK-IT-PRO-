@@ -85,13 +85,13 @@ export default function CustomSelect({
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className={`w-full flex items-center justify-between text-left transition-all relative border outline-none min-h-[44px] pr-10 cursor-pointer ${className}`}
+        className={`w-full flex items-center justify-between text-left transition-all relative border outline-none pr-9 cursor-pointer ${className}`}
       >
-        <span className="truncate pr-2">
+        <span className="truncate pr-1">
           {selectedOption ? selectedOption.label : placeholder}
         </span>
         {/* Properly padded chevron down icon */}
-        <span className="absolute right-4.5 top-1/2 -translate-y-1/2 flex items-center justify-center text-neutral-400 dark:text-neutral-500 pointer-events-none transition-transform duration-200">
+        <span className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center justify-center text-neutral-400 dark:text-neutral-500 pointer-events-none transition-transform duration-200">
           <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} />
         </span>
       </button>
@@ -99,7 +99,7 @@ export default function CustomSelect({
       {/* Styled Dropdown List with Rounded Corners based on active theme */}
       {isOpen && (
         <div
-          className={`absolute left-0 right-0 mt-1.5 z-50 rounded-2xl p-1.5 max-h-60 overflow-y-auto border ${currentTheme.dropdownBg} ${dropdownClassName}`}
+          className={`absolute left-0 min-w-full w-max max-w-[240px] mt-1.5 z-50 rounded-2xl p-1.5 max-h-60 overflow-y-auto border shadow-2xl ${currentTheme.dropdownBg} ${dropdownClassName}`}
         >
           {options.length === 0 ? (
             <div className={`text-center py-3 text-xs ${currentTheme.optionUnselected}`}>

@@ -25,6 +25,11 @@ import {
   ReportJob,
   VisitorLog
 } from "./src/types.js";
+import { 
+  seedPostgresDatabase, 
+  syncStateToPostgres, 
+  getFullDBStateFromPostgres 
+} from "./src/db/service.js";
 
 const app = express();
 const PORT = 3000;
@@ -87,6 +92,9 @@ function loadDB(): DBState {
 
 function saveDB(state: DBState) {
   fs.writeFileSync(DB_FILE, JSON.stringify(state, null, 2), "utf8");
+  syncStateToPostgres(state).catch((err) => {
+    console.error("Error in background PostgreSQL sync:", err);
+  });
 }
 
 function enforceForcedCheckout(tenant_id: string) {
@@ -458,10 +466,62 @@ function getInitialState(): DBState {
   };
 }
 
-// Ensure database file loaded
+// Ensure database file loaded and sync/seed with PostgreSQL
 let db = loadDB();
 
+seedPostgresDatabase(db).then(async () => {
+  try {
+    const pgState = await getFullDBStateFromPostgres(db.tenants[0]?.id || "default-tenant");
+    if (pgState && pgState.tenants && pgState.tenants.length > 0) {
+      db = pgState;
+      saveDB(db);
+    }
+  } catch (e: any) {
+    console.warn("Initial load from PostgreSQL skipped:", e?.message || e);
+  }
+}).catch((err) => {
+  console.warn("PostgreSQL boot sync skipped (database connection unavailable):", err?.message || err);
+});
+
 // ---------------- SERVER ENDPOINTS ----------------
+
+// SYSTEM HEALTH & DATABASE MONITORING
+app.get("/api/admin/system-health", async (req, res) => {
+  try {
+    const tenant_id = (req.query.tenant_id as string) || "default-tenant";
+    let pgState = null;
+    try {
+      pgState = await getFullDBStateFromPostgres(tenant_id);
+    } catch (e) {
+      // Fall back to local DB if Postgres connection times out or fails
+    }
+    const activeDb = pgState || db;
+    res.json({
+      status: "healthy",
+      database: pgState ? "PostgreSQL" : "JSON / In-Memory Data Store",
+      engine: pgState ? "Cloud SQL (Drizzle ORM)" : "Local JSON Ledger",
+      databaseName: process.env.SQL_DB_NAME || "scan-clock-in",
+      connectionHost: process.env.SQL_HOST || "Local Data Store",
+      uptimeSeconds: Math.floor(process.uptime()),
+      activeSseClients: sseClients.length,
+      metrics: {
+        tenantsCount: activeDb.tenants?.length || 0,
+        usersCount: activeDb.users?.length || 0,
+        departmentsCount: activeDb.departments?.length || 0,
+        attendanceRecordsCount: activeDb.attendance?.length || 0,
+        permissionsCount: activeDb.permissions?.length || 0,
+        notificationsCount: activeDb.notifications?.length || 0,
+        subscriptionsCount: activeDb.subscriptions?.length || 0,
+        settingsCount: activeDb.settings?.length || 0,
+        auditLogsCount: activeDb.auditLogs?.length || 0,
+        visitorLogsCount: activeDb.visitorLogs?.length || 0,
+        reportJobsCount: activeDb.reportJobs?.length || 0
+      }
+    });
+  } catch (error: any) {
+    res.status(500).json({ status: "degraded", error: error.message });
+  }
+});
 
 // SERVER-SENT EVENTS
 app.get("/api/events/subscribe", (req, res) => {
@@ -874,6 +934,93 @@ app.post("/api/auth/login", (req, res) => {
   // Find active or trial subscription to supply along
   const subscription = db.subscriptions.find(s => s.tenant_id === user.tenant_id && s.status !== "expired");
 
+  broadcastToTenant(user.tenant_id, "USER_SIGNED_IN", {
+    user: {
+      id: user.id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      role: user.role
+    },
+    timestamp: new Date().toISOString()
+  });
+
+  return res.json({
+    success: true,
+    user,
+    tenant,
+    settings,
+    subscription
+  });
+});
+
+app.post("/api/auth/social-login", (req, res) => {
+  const { provider, email, name, photo, tenant_id } = req.body;
+  if (!email || !provider) {
+    return res.status(400).json({ error: "Email and provider are required" });
+  }
+
+  db = loadDB();
+
+  // Find user by email (case-insensitive)
+  let user = db.users.find(u => u.email.toLowerCase() === email.toLowerCase());
+
+  if (!user) {
+    // If user does not exist, auto-provision a new user profile via social SSO
+    const targetTenantId = tenant_id || (db.tenants[0] ? db.tenants[0].id : "default-tenant");
+    const tenant = db.tenants.find(t => t.id === targetTenantId) || db.tenants[0];
+    const depts = db.departments.filter(d => d.tenant_id === tenant?.id);
+    const defaultDeptId = depts.length > 0 ? depts[0].id : "dept-general";
+
+    const nameParts = (name || email.split("@")[0] || "User").split(" ");
+    const firstName = nameParts[0] || "User";
+    const lastName = nameParts.slice(1).join(" ") || (provider === "google" ? "Google User" : "Apple User");
+
+    const newUserId = `usr_${provider}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const assignedRole = email.toLowerCase().includes("admin") ? UserRole.COMPANY_ADMIN : UserRole.TEAM_MEMBER;
+    user = {
+      id: newUserId,
+      tenant_id: tenant ? tenant.id : "default-tenant",
+      email: email.toLowerCase(),
+      firstName: firstName,
+      lastName: lastName,
+      gender: "Male",
+      phone: "+1-555-0199",
+      role: assignedRole,
+      department_id: defaultDeptId,
+      status: "active",
+      createdAt: new Date().toISOString()
+    };
+
+    db.users.push(user);
+    saveDB(db);
+    syncStateToPostgres(db).catch(() => {});
+  }
+
+  if (user.status !== "active") {
+    return res.status(403).json({ error: "Account suspended by platform supervisors" });
+  }
+
+  const tenant = db.tenants.find(t => t.id === user.tenant_id);
+  const settings = db.settings.find(s => s.tenant_id === user.tenant_id) || {
+    theme: "light",
+    language: "en"
+  };
+
+  const subscription = db.subscriptions.find(s => s.tenant_id === user.tenant_id && s.status !== "expired");
+
+  broadcastToTenant(user.tenant_id, "USER_SIGNED_IN", {
+    user: {
+      id: user.id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      role: user.role,
+      authProvider: provider
+    },
+    timestamp: new Date().toISOString()
+  });
+
   return res.json({
     success: true,
     user,
@@ -1259,7 +1406,7 @@ app.post("/api/tenant/workers/add", (req, res) => {
 });
 
 app.post("/api/tenant/workers/update", (req, res) => {
-  const { tenant_id, worker_id, firstName, lastName, email, phone, role, department_id, status, gender, activityDays } = req.body;
+  const { tenant_id, worker_id, firstName, lastName, email, phone, role, department_id, status, gender, activityDays, profilePhoto, profilePhotos } = req.body;
   if (!tenant_id || !worker_id) {
     return res.status(400).json({ error: "tenant_id and worker_id are required" });
   }
@@ -1301,6 +1448,8 @@ app.post("/api/tenant/workers/update", (req, res) => {
   if (status !== undefined) existing.status = status;
   if (gender !== undefined) existing.gender = gender;
   if (activityDays !== undefined) existing.activityDays = activityDays;
+  if (profilePhoto !== undefined) existing.profilePhoto = profilePhoto;
+  if (profilePhotos !== undefined) existing.profilePhoto = profilePhotos;
 
   // Generate specific notifications if details changed
   const roleChanged = role !== undefined && role !== oldRole;
@@ -1635,16 +1784,40 @@ app.post("/api/attendance/check-out", (req, res) => {
 
   const timeOutStr = localTime || new Date().toTimeString().split(" ")[0];
 
+  // Determine departure status based on shift closing time & overtime settings
+  const settings = db.settings.find(s => s.tenant_id === tenant_id);
+  const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const dateParts = todayStr.split("-").map(Number);
+  const recDate = new Date(dateParts[0], dateParts[1] - 1, dateParts[2]);
+  const dayName = daysOfWeek[recDate.getDay()];
+  const closingTime = settings?.dailyShiftOutTimes?.[dayName] || settings?.checkOut?.time || "17:00";
+  const [cH, cM] = closingTime.split(":").map(Number);
+  const closingSecs = (cH || 17) * 3600 + (cM || 0) * 60;
+
+  const [outH, outM, outS] = timeOutStr.split(":").map(Number);
+  const outSecs = (outH || 0) * 3600 + (outM || 0) * 60 + (outS || 0);
+
+  const overtimeEnabled = settings ? (settings.overtimeEnabled === true) : false;
+
+  let statusOut = "Normal Checkout";
+  if (outSecs >= closingSecs) {
+    if (overtimeEnabled) {
+      statusOut = "Overtime";
+    } else {
+      statusOut = "Closing Time";
+    }
+  }
+
   db.attendance[attIdx].timeOut = timeOutStr;
-  db.attendance[attIdx].statusOut = "Normal Checkout";
+  db.attendance[attIdx].statusOut = statusOut;
 
   // Calculate duration
   const [inH, inM, inS] = db.attendance[attIdx].timeIn.split(":").map(Number);
-  const [outH, outM, outS] = timeOutStr.split(":").map(Number);
-  const totalInSecs = inH * 3600 + inM * 60 + inS;
-  const totalOutSecs = outH * 3600 + outM * 60 + outS;
+  const totalInSecs = (inH || 0) * 3600 + (inM || 0) * 60 + (inS || 0);
+  let durationSecs = outSecs - totalInSecs;
+  if (durationSecs < 0) durationSecs += 86400;
   
-  db.attendance[attIdx].coveredTime = Math.max(0, totalOutSecs - totalInSecs);
+  db.attendance[attIdx].coveredTime = Math.max(0, durationSecs);
 
   const workerObj = db.users.find(u => u.id === worker_id && u.tenant_id === tenant_id);
   const wordName = workerObj ? `${workerObj.firstName} ${workerObj.lastName}` : "Someone";
@@ -2205,57 +2378,66 @@ function runAutoCheckout() {
         // Find tenant settings
         const settings = freshDb.settings.find((s: any) => s.tenant_id === record.tenant_id);
         const overtimeEnabled = settings ? (settings.overtimeEnabled === true) : false;
+        const overtimeHours = (overtimeEnabled && settings?.overtimeHours) ? Number(settings.overtimeHours) : 0;
         
-        if (!overtimeEnabled) {
-          // Parse date to find day of week
-          const dateParts = record.date.split("-").map(Number);
-          if (dateParts.length === 3) {
-            const recDate = new Date(dateParts[0], dateParts[1] - 1, dateParts[2]);
-            const dayName = daysOfWeek[recDate.getDay()];
-            
-            const closingTime = settings?.dailyShiftOutTimes?.[dayName] || settings?.checkOut?.time || "17:00";
-            
-            // Construct full checkout timestamp
-            const checkoutTargetStr = `${record.date}T${closingTime}:00`;
-            const checkoutTimeMs = new Date(checkoutTargetStr).getTime();
-            
-            if (!isNaN(checkoutTimeMs) && Date.now() >= checkoutTimeMs) {
-              // Perform auto-checkout
-              const timeOutStr = `${closingTime}:00`;
-              record.timeOut = timeOutStr;
-              record.statusOut = "Auto Checkout";
-              
-              // Calculate duration
-              const [inH, inM, inS] = record.timeIn.split(":").map(Number);
-              const [outH, outM, outS] = timeOutStr.split(":").map(Number);
-              const totalInSecs = inH * 3600 + (inM || 0) * 60 + (inS || 0);
-              const totalOutSecs = outH * 3600 + (outM || 0) * 60 + (outS || 0);
-              record.coveredTime = Math.max(0, totalOutSecs - totalInSecs);
-              
-              updated = true;
-              
-              // Broadcast update
-              const workerObj = freshDb.users.find((u: any) => u.id === record.worker_id && u.tenant_id === record.tenant_id);
-              const wordName = workerObj ? `${workerObj.firstName} ${workerObj.lastName}` : "Someone";
-              
-              const notif_id = "notif-" + Math.random().toString(36).substring(2, 11);
-              const notif = {
-                id: notif_id,
-                tenant_id: record.tenant_id,
-                worker_id: record.worker_id,
-                title: "Auto Check-Out Recorded",
-                message: `${wordName} was automatically checked out at closing time (${closingTime})`,
-                timestamp: new Date().toISOString(),
-                read: false
-              };
-              freshDb.notifications.push(notif);
-              
-              broadcastToTenant(record.tenant_id, "ATTENDANCE_UPDATED", {
-                attendance: record,
-                workerName: wordName,
-                notification: notif
-              });
-            }
+        // Parse date to find day of week
+        const dateParts = record.date.split("-").map(Number);
+        if (dateParts.length === 3) {
+          const recDate = new Date(dateParts[0], dateParts[1] - 1, dateParts[2]);
+          const dayName = daysOfWeek[recDate.getDay()];
+          
+          const closingTime = settings?.dailyShiftOutTimes?.[dayName] || settings?.checkOut?.time || "17:00";
+          const [cH, cM] = closingTime.split(":").map(Number);
+          const closingDate = new Date(dateParts[0], dateParts[1] - 1, dateParts[2], cH || 17, cM || 0, 0);
+
+          // If overtime is active and hours frame selected, count is sustained until closing time + overtime hours
+          const cutoffDate = (overtimeEnabled && overtimeHours > 0)
+            ? new Date(closingDate.getTime() + overtimeHours * 3600 * 1000)
+            : closingDate;
+
+          const isOvertimeLogout = overtimeEnabled && overtimeHours > 0;
+
+          if (!isNaN(cutoffDate.getTime()) && Date.now() >= cutoffDate.getTime()) {
+            const outH = String(cutoffDate.getHours()).padStart(2, "0");
+            const outM = String(cutoffDate.getMinutes()).padStart(2, "0");
+            const timeOutStr = `${outH}:${outM}:00`;
+
+            record.timeOut = timeOutStr;
+            record.statusOut = isOvertimeLogout ? "Overtime" : "Closing Time";
+
+            // Calculate duration
+            const [inH, inM, inS] = record.timeIn.split(":").map(Number);
+            const totalInSecs = (inH || 0) * 3600 + (inM || 0) * 60 + (inS || 0);
+            const totalOutSecs = cutoffDate.getHours() * 3600 + cutoffDate.getMinutes() * 60;
+            let durationSecs = totalOutSecs - totalInSecs;
+            if (durationSecs < 0) durationSecs += 86400;
+            record.coveredTime = Math.max(0, durationSecs);
+
+            updated = true;
+
+            const workerObj = freshDb.users.find((u: any) => u.id === record.worker_id && u.tenant_id === record.tenant_id);
+            const wordName = workerObj ? `${workerObj.firstName} ${workerObj.lastName}` : "Someone";
+
+            const notif_id = "notif-" + Math.random().toString(36).substring(2, 11);
+            const notif = {
+              id: notif_id,
+              tenant_id: record.tenant_id,
+              worker_id: record.worker_id,
+              title: "Auto Check-Out Recorded",
+              message: isOvertimeLogout
+                ? `${wordName} was automatically logged out at end of shift overtime (${timeOutStr})`
+                : `${wordName} was automatically logged out at closing time (${closingTime})`,
+              timestamp: new Date().toISOString(),
+              read: false
+            };
+            freshDb.notifications.push(notif);
+
+            broadcastToTenant(record.tenant_id, "ATTENDANCE_UPDATED", {
+              attendance: record,
+              workerName: wordName,
+              notification: notif,
+              autoLoggedOutWorkerId: record.worker_id
+            });
           }
         }
       }
@@ -2282,7 +2464,7 @@ async function startServer() {
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: process.env.DISABLE_HMR === 'true' ? false : undefined },
       appType: "spa"
     });
     app.use(vite.middlewares);

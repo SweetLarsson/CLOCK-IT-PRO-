@@ -42,3 +42,51 @@ export function formatDateToCustomString(dateStr: string): string {
     return dateStr;
   }
 }
+
+export function groupNotificationsByDate<T extends { timestamp: string | number }>(notifs: T[]): { label: string; items: T[] }[] {
+  if (!notifs || notifs.length === 0) return [];
+
+  const sorted = [...notifs].sort((a, b) => {
+    const timeA = new Date(a.timestamp).getTime();
+    const timeB = new Date(b.timestamp).getTime();
+    const validA = isNaN(timeA) ? 0 : timeA;
+    const validB = isNaN(timeB) ? 0 : timeB;
+    return validB - validA;
+  });
+
+  const now = new Date();
+  const todayStr = now.toDateString();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const yesterdayStr = yesterday.toDateString();
+
+  const groupsMap = new Map<string, { label: string; items: T[] }>();
+
+  sorted.forEach((n) => {
+    const d = new Date(n.timestamp);
+    const dateStr = isNaN(d.getTime()) ? "unknown" : d.toDateString();
+
+    let label = "";
+    if (dateStr === todayStr) {
+      label = "Today";
+    } else if (dateStr === yesterdayStr) {
+      label = "Yesterday";
+    } else if (dateStr === "unknown") {
+      label = "Recent";
+    } else {
+      label = d.toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+    }
+
+    if (!groupsMap.has(dateStr)) {
+      groupsMap.set(dateStr, { label, items: [] });
+    }
+    groupsMap.get(dateStr)!.items.push(n);
+  });
+
+  return Array.from(groupsMap.values());
+}
+
