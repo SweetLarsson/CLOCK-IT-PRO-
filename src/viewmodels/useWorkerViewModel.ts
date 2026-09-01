@@ -6,6 +6,13 @@
 import React, { useState, useEffect, useRef } from "react";
 import { AttendanceStatus, PermissionStatus } from "../types.js";
 import { playCheckInSound } from "../utils/soundSynth.js";
+import { calculateShiftSeconds, calculatePerformanceIndex, formatDurationHHMMSS } from "../utils/timeFormatter.ts";
+import {
+  addOfflineAttendanceAction,
+  getPendingQueueCount,
+  syncOfflineQueue,
+  registerOfflineSyncListeners,
+} from "../utils/offlineAttendanceQueue.js";
 
 function getLocalDateString(dateInput?: Date): string {
   const d = dateInput || new Date();
@@ -57,7 +64,12 @@ export function useWorkerViewModel({
   const [scannerFeedback, setScannerFeedback] = useState<string | null>(null);
   const [isSuccessScan, setIsSuccessScan] = useState<boolean | null>(null);
 
+  // Offline Queue State
+  const [pendingOfflineCount, setPendingOfflineCount] = useState<number>(getPendingQueueCount());
+  const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== "undefined" ? navigator.onLine : true);
+
   // Permission Request Form State
+
   const [exemptionReason, setExemptionReason] = useState<"Medical" | "Official" | "Vacation" | "Personal" | "Mandatory">("Medical");
   const [exemptionStart, setExemptionStart] = useState("");
   const [exemptionEnd, setExemptionEnd] = useState("");
@@ -219,6 +231,54 @@ export function useWorkerViewModel({
     };
   }, [user.id, tenant.id]);
 
+  // Offline Synchronization & Network State Listeners
+  useEffect(() => {
+    const handleStatusChange = () => {
+      setIsOnline(typeof navigator !== "undefined" ? navigator.onLine : true);
+      setPendingOfflineCount(getPendingQueueCount());
+    };
+
+    const handleQueueChange = () => {
+      setPendingOfflineCount(getPendingQueueCount());
+    };
+
+    const handleSynced = (e: any) => {
+      setPendingOfflineCount(getPendingQueueCount());
+      syncWorkerLogs();
+      if (e?.detail?.successCount > 0) {
+        onNotifyAdmin("Offline Sync Restored", `Successfully synchronized ${e.detail.successCount} queued attendance logs to cloud.`);
+      }
+    };
+
+    window.addEventListener("online", handleStatusChange);
+    window.addEventListener("offline", handleStatusChange);
+    window.addEventListener("offline-attendance-queue-changed", handleQueueChange);
+    window.addEventListener("offline-attendance-synced", handleSynced);
+
+    // Register offline background sync engine
+    const cleanupSync = registerOfflineSyncListeners(tenant.id);
+
+    return () => {
+      window.removeEventListener("online", handleStatusChange);
+      window.removeEventListener("offline", handleStatusChange);
+      window.removeEventListener("offline-attendance-queue-changed", handleQueueChange);
+      window.removeEventListener("offline-attendance-synced", handleSynced);
+      cleanupSync();
+    };
+  }, [tenant.id]);
+
+  // Manual Trigger for Offline Synchronization
+  const handleManualSyncOffline = async () => {
+    if (!navigator.onLine) {
+      alert("Device is currently offline. Please connect to Wi-Fi or cellular network to synchronize queued logs.");
+      return;
+    }
+    const res = await syncOfflineQueue(tenant.id);
+    setPendingOfflineCount(getPendingQueueCount());
+    syncWorkerLogs();
+    return res;
+  };
+
   // Handle Photo Sync & Thumbnail Generation locally via Canvas
   const handleDpUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -319,13 +379,44 @@ export function useWorkerViewModel({
 
     if (simulateMismatchedCompany) {
       setIsSuccessScan(false);
-      setScannerFeedback(translations.wrongQr);
+      setScannerFeedback(translations.wrongQr || "Unrecognized Company Identity QR");
+      return;
+    }
+
+    const localDate = new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0') + '-' + String(new Date().getDate()).padStart(2, '0');
+    const localTime = new Date().toTimeString().split(" ")[0];
+
+    // If device is offline, immediately queue offline
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      addOfflineAttendanceAction({
+        type: "check-in",
+        tenant_id: tenant.id,
+        worker_id: user.id,
+        localDate,
+        localTime
+      });
+      setPendingOfflineCount(getPendingQueueCount());
+      
+      const optimisticRec: any = {
+        id: `offline-temp-${Date.now()}`,
+        tenant_id: tenant.id,
+        worker_id: user.id,
+        department_id: user.department_id || "unassigned",
+        date: localDate,
+        timeIn: localTime,
+        statusIn: AttendanceStatus.PRESENT,
+        coveredTime: 0
+      };
+      setAttendanceRecords((prev: any[]) => [...prev.filter((r) => !(r.date === localDate && r.worker_id === user.id)), optimisticRec]);
+      
+      playCheckInSound("beep");
+      setIsSuccessScan(true);
+      setScannerFeedback("Offline Check-In Queued! (Saved locally & will sync when online)");
+      onNotifyAdmin("Offline Check-In Queued", `${user.firstName} checked in locally while offline.`);
       return;
     }
 
     try {
-      const localDate = new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0') + '-' + String(new Date().getDate()).padStart(2, '0');
-      const localTime = new Date().toTimeString().split(" ")[0];
       const res = await fetch("/api/attendance/check-in", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -362,16 +453,70 @@ export function useWorkerViewModel({
       onNotifyAdmin("Check-In Registered", `${user.firstName} authorized entry check-in`);
       syncWorkerLogs();
     } catch (e) {
-      setIsSuccessScan(false);
-      setScannerFeedback(translations.noInternet);
+      // Network failure during fetch -> queue offline
+      addOfflineAttendanceAction({
+        type: "check-in",
+        tenant_id: tenant.id,
+        worker_id: user.id,
+        localDate,
+        localTime
+      });
+      setPendingOfflineCount(getPendingQueueCount());
+      
+      const optimisticRec: any = {
+        id: `offline-temp-${Date.now()}`,
+        tenant_id: tenant.id,
+        worker_id: user.id,
+        department_id: user.department_id || "unassigned",
+        date: localDate,
+        timeIn: localTime,
+        statusIn: AttendanceStatus.PRESENT,
+        coveredTime: 0
+      };
+      setAttendanceRecords((prev: any[]) => [...prev.filter((r) => !(r.date === localDate && r.worker_id === user.id)), optimisticRec]);
+
+      playCheckInSound("beep");
+      setIsSuccessScan(true);
+      setScannerFeedback("Offline Check-In Queued! (Saved locally & will sync when online)");
     }
   };
 
 
   const triggerCheckOutHandshake = async () => {
+    const localDate = new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0') + '-' + String(new Date().getDate()).padStart(2, '0');
+    const localTime = new Date().toTimeString().split(" ")[0];
+
+    // If device is offline, immediately queue offline
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      addOfflineAttendanceAction({
+        type: "check-out",
+        tenant_id: tenant.id,
+        worker_id: user.id,
+        localDate,
+        localTime
+      });
+      setPendingOfflineCount(getPendingQueueCount());
+
+      setAttendanceRecords((prev: any[]) =>
+        prev.map((rec) => {
+          if (rec.date === localDate && rec.worker_id === user.id) {
+            return {
+              ...rec,
+              timeOut: localTime,
+              statusOut: "Normal Checkout"
+            };
+          }
+          return rec;
+        })
+      );
+
+      setIsSuccessScan(true);
+      setScannerFeedback("Offline Check-Out Queued! (Saved locally & will sync when online)");
+      onNotifyAdmin("Offline Check-Out Queued", `${user.firstName} checked out locally while offline.`);
+      return { localDate, localTime, offline: true };
+    }
+
     try {
-      const localDate = new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0') + '-' + String(new Date().getDate()).padStart(2, '0');
-      const localTime = new Date().toTimeString().split(" ")[0];
       const res = await fetch("/api/attendance/check-out", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -388,10 +533,35 @@ export function useWorkerViewModel({
       syncWorkerLogs();
       return data.attendance;
     } catch (e) {
-      alert("Sign out offline anomaly.");
-      return null;
+      // Network failure -> queue offline
+      addOfflineAttendanceAction({
+        type: "check-out",
+        tenant_id: tenant.id,
+        worker_id: user.id,
+        localDate,
+        localTime
+      });
+      setPendingOfflineCount(getPendingQueueCount());
+
+      setAttendanceRecords((prev: any[]) =>
+        prev.map((rec) => {
+          if (rec.date === localDate && rec.worker_id === user.id) {
+            return {
+              ...rec,
+              timeOut: localTime,
+              statusOut: "Normal Checkout"
+            };
+          }
+          return rec;
+        })
+      );
+
+      setIsSuccessScan(true);
+      setScannerFeedback("Offline Check-Out Queued! (Saved locally & will sync when online)");
+      return { localDate, localTime, offline: true };
     }
   };
+
 
   // Exemption requests
   const handleExemptionSubmit = async (e: React.FormEvent) => {
@@ -588,27 +758,10 @@ export function useWorkerViewModel({
             lateCount++;
           }
 
-          // Calculate hours worked for this day
+          // Calculate hours worked for this day adhering to workday closing rules
           const r = atts[0];
-          let hoursWorked = 0;
-          if (r.timeIn && r.timeOut) {
-            const [h1, m1, s1] = r.timeIn.split(":").map(Number);
-            const [h2, m2, s2] = r.timeOut.split(":").map(Number);
-            const sIn = h1 * 3600 + m1 * 60 + (s1 || 0);
-            const sOut = h2 * 3600 + m2 * 60 + (s2 || 0);
-            if (sOut > sIn) {
-              hoursWorked = (sOut - sIn) / 3600;
-            } else if (r.coveredTime) {
-              hoursWorked = r.coveredTime / 3600;
-            } else {
-              hoursWorked = 0;
-            }
-          } else if (r.coveredTime) {
-            hoursWorked = r.coveredTime / 3600;
-          } else {
-            hoursWorked = 0;
-          }
-          totalCoveredSeconds += hoursWorked * 3600;
+          const shiftSecs = calculateShiftSeconds(r, settings);
+          totalCoveredSeconds += shiftSecs;
         }
       }
 
@@ -622,9 +775,7 @@ export function useWorkerViewModel({
       ? Number((((attendedDays + approvedPermissionDays) / (expectedDays + approvedPermissionDays)) * 100).toFixed(2)) 
       : 0;
 
-    const perfScore = (expectedDays > 0 && attendedDays > 0) 
-      ? Math.max(0, Math.min(100, Number((((attendedDays - (lateCount * 0.1)) / expectedDays) * 100).toFixed(2)))) 
-      : 0;
+    const perfScore = calculatePerformanceIndex(attendedDays, expectedDays);
 
     const workHours = Number((totalCoveredSeconds / 3600).toFixed(2));
 
@@ -637,7 +788,10 @@ export function useWorkerViewModel({
       attendancePercentage,
       availabilityPercentage,
       performancePercentage: perfScore,
+      performanceIndex: perfScore,
       workHours,
+      totalSeconds: totalCoveredSeconds,
+      workHoursFormatted: formatDurationHHMMSS(totalCoveredSeconds),
       registrationDate: regDateStr,
       activeDays
     };
@@ -705,6 +859,10 @@ export function useWorkerViewModel({
     statsObj,
     getPersonalWorkerMetrics,
     syncWorkerLogs,
-    isRefreshingLogs
+    isRefreshingLogs,
+    pendingOfflineCount,
+    isOnline,
+    handleManualSyncOffline
   };
 }
+

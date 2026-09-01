@@ -12,6 +12,7 @@ import { TRANSLATIONS } from "./translations.js";
 import { UserRole } from "./types.js";
 import { Bell, CheckCircle2, Info, X, ShieldCheck } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { updatePwaManifest } from "./utils/pwaManager.js";
 
 interface AppSession {
   user: any;
@@ -336,19 +337,61 @@ export default function App() {
     }
   }, []);
 
-  // Capture QR code mobile redirection parameter
+  // Capture QR code mobile redirection parameter and PWA app launches
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const action = params.get("action");
     const tenantId = params.get("tenant_id");
+    const pwaRole = params.get("pwa") || params.get("role");
+
     if (action === "check-in" && tenantId) {
       localStorage.setItem("pending_check_in", JSON.stringify({ tenantId, timestamp: Date.now() }));
       const saved = localStorage.getItem("clock_it_session");
       if (!saved && !session) {
         setCurrentScreen("auth");
       }
+    } else if (pwaRole && !session) {
+      const saved = localStorage.getItem("clock_it_session");
+      if (!saved) {
+        setCurrentScreen("auth");
+      }
     }
   }, [session]);
+
+  // Synchronize PWA Manifest based on the active role and session
+  useEffect(() => {
+    if (session?.user) {
+      const isAdmin =
+        session.user.role === UserRole.COMPANY_ADMIN ||
+        session.user.role === UserRole.SUPER_ADMIN;
+      const isWorker =
+        session.user.role === UserRole.TEAM_MEMBER ||
+        session.user.role === UserRole.TEAM_LEAD;
+      const role = isAdmin ? "admin" : isWorker ? "worker" : "guest";
+      const tenantName = session.tenant?.companyName || session.tenant?.name || "";
+      const workerName = session.user.firstName ? `${session.user.firstName} ${session.user.lastName}` : "";
+      const theme = session.settings?.theme || "dark";
+
+      updatePwaManifest({
+        role,
+        tenantName,
+        workerName,
+        theme
+      });
+    } else {
+      updatePwaManifest({
+        role: "guest",
+        theme: "dark"
+      });
+    }
+  }, [
+    session?.user?.role,
+    session?.user?.firstName,
+    session?.user?.lastName,
+    session?.tenant?.companyName,
+    session?.tenant?.name,
+    session?.settings?.theme
+  ]);
 
   // Theme application on change
   useEffect(() => {

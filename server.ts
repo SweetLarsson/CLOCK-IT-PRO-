@@ -6,6 +6,7 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import { Resend } from "resend";
 import { createServer as createViteServer } from "vite";
 import { 
   UserRole, 
@@ -23,7 +24,9 @@ import {
   AuditLog, 
   TenantSettings, 
   ReportJob,
-  VisitorLog
+  VisitorLog,
+  CentralAnnouncement,
+  AnnouncementFeedbackSubmission
 } from "./src/types.js";
 import { 
   seedPostgresDatabase, 
@@ -68,6 +71,7 @@ interface DBState {
   reportJobs: ReportJob[];
   auditLogs: AuditLog[];
   visitorLogs: VisitorLog[];
+  announcements?: CentralAnnouncement[];
   pendingSubscriptions?: any[];
 }
 
@@ -81,6 +85,7 @@ function loadDB(): DBState {
     const raw = fs.readFileSync(DB_FILE, "utf8");
     const parsed = JSON.parse(raw);
     parsed.visitorLogs = parsed.visitorLogs || [];
+    parsed.announcements = parsed.announcements || [];
     parsed.pendingSubscriptions = parsed.pendingSubscriptions || [];
     return parsed;
   } catch (e) {
@@ -95,6 +100,18 @@ function saveDB(state: DBState) {
   syncStateToPostgres(state).catch((err) => {
     console.error("Error in background PostgreSQL sync:", err);
   });
+}
+
+function formatDurationHHMMSS(totalSeconds: number | null | undefined): string {
+  if (totalSeconds === null || totalSeconds === undefined || isNaN(totalSeconds) || totalSeconds <= 0) {
+    return "00:00:00";
+  }
+  const rounded = Math.floor(totalSeconds);
+  const hrs = Math.floor(rounded / 3600);
+  const mins = Math.floor((rounded % 3600) / 60);
+  const secs = rounded % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(hrs)}:${pad(mins)}:${pad(secs)}`;
 }
 
 function enforceForcedCheckout(tenant_id: string) {
@@ -120,7 +137,8 @@ function enforceForcedCheckout(tenant_id: string) {
         const [inH, inM, inS] = a.timeIn.split(":").map(Number);
         const totalInSecs = inH * 3600 + inM * 60 + (inS || 0);
         const totalOutSecs = outH * 3600 + outM * 60;
-        a.coveredTime = Math.max(0, totalOutSecs - totalInSecs);
+        // After-hours clock-in rule: if clocked in after closing time, shift duration is 0
+        a.coveredTime = totalInSecs >= totalOutSecs ? 0 : Math.max(0, totalOutSecs - totalInSecs);
         
         const workerObj = db.users.find(u => u.id === a.worker_id && u.tenant_id === tenant_id);
         const wordName = workerObj ? `${workerObj.firstName} ${workerObj.lastName}` : "Worker";
@@ -164,6 +182,7 @@ function getInitialState(): DBState {
     phone: "+2348123456789",
     role: UserRole.COMPANY_ADMIN,
     status: "active",
+    password: "Password123!",
     createdAt: new Date().toISOString()
   };
 
@@ -198,6 +217,7 @@ function getInitialState(): DBState {
     role: UserRole.TEAM_LEAD,
     department_id: "dept-eng",
     status: "active",
+    password: "Password123!",
     title: "Engineering Solutions Lead",
     createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
   };
@@ -212,6 +232,7 @@ function getInitialState(): DBState {
     role: UserRole.TEAM_MEMBER,
     department_id: "dept-eng",
     status: "active",
+    password: "Password123!",
     title: "Senior Fullstack Engineer",
     createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
   };
@@ -226,6 +247,7 @@ function getInitialState(): DBState {
     role: UserRole.TEAM_LEAD,
     department_id: "dept-sales",
     status: "active",
+    password: "Password123!",
     title: "Global Enterprise Sales Lead",
     createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
   };
@@ -240,6 +262,7 @@ function getInitialState(): DBState {
     role: UserRole.TEAM_MEMBER,
     department_id: "dept-hr",
     status: "active",
+    password: "Password123!",
     title: "HR Payroll Specialist",
     createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
   };
@@ -462,7 +485,8 @@ function getInitialState(): DBState {
     settings: [defaultSettings],
     reportJobs: [],
     auditLogs: [auditLog],
-    visitorLogs: []
+    visitorLogs: [],
+    announcements: []
   };
 }
 
@@ -581,7 +605,7 @@ app.post("/api/auth/register-company", (req, res) => {
   let isAuthorized = false;
   let chosenPlan = SubscriptionPlanCode.STARTER;
   let chosenPrice = 10000;
-  let paymentMethod: "opay" | "paystack" | "manual" | "admin_authorization" = "manual";
+  let paymentMethod: "card" | "opay" | "paystack" | "manual" | "admin_authorization" = "manual";
 
   // Check administrative authorization / bypass or paid token
   if (subscriptionToken === "ADMIN_AUTH_CODE" || subscriptionToken === "ADMIN_BYPASS_TOKEN") {
@@ -641,6 +665,7 @@ app.post("/api/auth/register-company", (req, res) => {
     phone,
     role: UserRole.COMPANY_ADMIN,
     status: "active",
+    password,
     createdAt: new Date().toISOString()
   };
 
@@ -801,6 +826,7 @@ app.post("/api/auth/register-worker", (req, res) => {
     role: UserRole.TEAM_MEMBER,
     department_id: assignedDeptId || (defaultDept ? defaultDept.id : undefined),
     status: "active",
+    password,
     gender,
     title: "Associated Worker",
     createdAt: new Date().toISOString(),
@@ -921,6 +947,12 @@ app.post("/api/auth/login", (req, res) => {
     return res.status(401).json({ error: "Invalid credentials recorded" });
   }
 
+  // Strictly validate assigned password
+  const expectedPassword = user.password || "Password123!";
+  if (password !== expectedPassword) {
+    return res.status(401).json({ error: "Invalid email or password. Please verify your credentials and try again." });
+  }
+
   if (user.status !== "active") {
     return res.status(403).json({ error: "Account suspended by platform supervisors" });
   }
@@ -951,6 +983,232 @@ app.post("/api/auth/login", (req, res) => {
     tenant,
     settings,
     subscription
+  });
+});
+
+// Resend Email Client Lazy Initializer
+let resendClient: Resend | null = null;
+function getResendClient(): Resend | null {
+  const apiKey = (process.env.RESEND_API_KEY || "").trim();
+  if (!apiKey || apiKey.length < 5) return null;
+  if (!resendClient) {
+    try {
+      resendClient = new Resend(apiKey);
+    } catch {
+      return null;
+    }
+  }
+  return resendClient;
+}
+
+// In-memory store for pending password reset PIN codes (valid for 15 minutes)
+interface PasswordResetToken {
+  email: string;
+  code: string;
+  expiresAt: number;
+}
+const pendingResets: Map<string, PasswordResetToken> = new Map();
+
+// RESEND API: FORGOT PASSWORD ENDPOINT
+app.post("/api/auth/forgot-password", async (req, res) => {
+  const { email } = req.body;
+  if (!email || typeof email !== "string" || !email.includes("@")) {
+    return res.status(400).json({ error: "Please provide a valid email address." });
+  }
+
+  db = loadDB();
+  const user = db.users.find(u => u.email.toLowerCase() === email.trim().toLowerCase());
+  if (!user) {
+    return res.status(404).json({ 
+      error: `No registered account found with the email "${email}". Please double-check for typos or contact your company administrator.` 
+    });
+  }
+
+  // Generate secure 6-digit numeric PIN
+  const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
+  const expiresAt = Date.now() + 15 * 60 * 1000; // 15 minutes
+
+  pendingResets.set(user.email.toLowerCase(), {
+    email: user.email.toLowerCase(),
+    code: resetCode,
+    expiresAt
+  });
+
+  const tenant = db.tenants.find(t => t.id === user.tenant_id);
+  const companyName = tenant?.name || "Clock-It Pro";
+
+  const resend = getResendClient();
+  let emailSent = false;
+  let emailError: string | null = null;
+
+  if (resend) {
+    try {
+      let rawFrom = (process.env.RESEND_FROM_EMAIL || "").replace(/^["']|["']$/g, "").trim();
+      
+      // Common public webmail domains that cannot be used as Resend sender domains
+      const publicWebmailDomains = [
+        "gmail.com", "googlemail.com", "yahoo.", "hotmail.", "outlook.",
+        "live.", "icloud.com", "aol.com", "mail.com", "proton.", "protonmail.",
+        "zoho.", "yandex.", "gmx."
+      ];
+      
+      const isPublicWebmail = publicWebmailDomains.some(domain => rawFrom.toLowerCase().includes(domain));
+      
+      // Default to Resend's authorized testing sender if not configured or if a public webmail is provided
+      let fromEmail = (!rawFrom || !rawFrom.includes("@") || isPublicWebmail)
+        ? "Clock-It Security <onboarding@resend.dev>"
+        : rawFrom;
+
+      const htmlContent = `
+        <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 560px; margin: 0 auto; padding: 32px; background-color: #0f172a; color: #f8fafc; border-radius: 20px; border: 1px solid #1e293b;">
+          <div style="text-align: center; margin-bottom: 24px;">
+            <h1 style="color: #38bdf8; font-size: 24px; margin: 0; font-weight: 800; letter-spacing: -0.025em;">CLOCK-IT PRO+</h1>
+            <p style="color: #94a3b8; font-size: 13px; margin: 4px 0 0 0;">${companyName} Security & Authentication Services</p>
+          </div>
+          <div style="background-color: #1e293b; border-radius: 16px; padding: 24px; border: 1px solid #334155; margin-bottom: 24px;">
+            <h2 style="font-size: 18px; color: #ffffff; margin-top: 0;">Password Reset Verification</h2>
+            <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6;">Hello ${user.firstName},</p>
+            <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6;">A password reset request was initiated for your Clock-It account (${user.email}). Please enter the following 6-digit security PIN to reset your password:</p>
+            <div style="text-align: center; margin: 28px 0;">
+              <div style="display: inline-block; background: linear-gradient(135deg, #0284c7, #2563eb); color: #ffffff; font-size: 32px; font-weight: 800; letter-spacing: 0.35em; padding: 14px 28px; border-radius: 12px; font-family: monospace; box-shadow: 0 10px 15px -3px rgba(2, 132, 199, 0.3);">
+                ${resetCode}
+              </div>
+              <p style="color: #94a3b8; font-size: 12px; margin-top: 10px;">This authorization PIN is valid for <strong>15 minutes</strong>.</p>
+            </div>
+            <p style="color: #94a3b8; font-size: 13px; line-height: 1.5; margin-bottom: 0;">If you did not request this password reset, no action is needed. Your existing password remains secure.</p>
+          </div>
+          <div style="text-align: center; color: #64748b; font-size: 11px;">
+            <p>© ${new Date().getFullYear()} ${companyName}. Secured by Clock-It Attendance & Identity Protocol.</p>
+          </div>
+        </div>
+      `;
+
+      let result: any = null;
+      try {
+        result = await resend.emails.send({
+          from: fromEmail,
+          to: [user.email.trim()],
+          subject: `[Clock-It] Password Reset PIN: ${resetCode}`,
+          html: htmlContent
+        });
+      } catch (sendErr: any) {
+        result = { error: sendErr };
+      }
+
+      // If sending failed due to domain verification with a custom from address, retry once with onboarding@resend.dev
+      if (result?.error && fromEmail !== "Clock-It Security <onboarding@resend.dev>") {
+        try {
+          result = await resend.emails.send({
+            from: "Clock-It Security <onboarding@resend.dev>",
+            to: [user.email.trim()],
+            subject: `[Clock-It] Password Reset PIN: ${resetCode}`,
+            html: htmlContent
+          });
+        } catch (retryErr: any) {
+          result = { error: retryErr };
+        }
+      }
+
+      if (result?.error) {
+        emailError = result.error.message || (typeof result.error === 'string' ? result.error : "Email delivery notice");
+        const isSandboxNotice = emailError.toLowerCase().includes("testing emails to your own email address") ||
+                                emailError.toLowerCase().includes("verify a domain") ||
+                                emailError.toLowerCase().includes("domain is not verified");
+        if (isSandboxNotice) {
+          console.log(`[Resend Notice]: Free test mode restricts delivery to verified domain/owner. Provided fallback code.`);
+        } else {
+          console.log(`[Resend Notice]: ${emailError}`);
+        }
+      } else if (result?.data) {
+        emailSent = true;
+      }
+    } catch (err: any) {
+      emailError = err.message || "Failed to dispatch email through Resend API.";
+      console.log(`[Resend Notice Handled]: ${emailError}`);
+    }
+  }
+
+  // Audit log
+  db.auditLogs.push({
+    id: "log-" + Math.random().toString(36).substring(2, 11),
+    tenant_id: user.tenant_id,
+    user_id: user.id,
+    action: "PASSWORD_RESET_REQUESTED",
+    timestamp: new Date().toISOString(),
+    details: `Password reset verification PIN requested for ${user.email} (Resend Status: ${emailSent ? "Dispatched" : "Local/Fallback"}).`
+  });
+  saveDB(db);
+
+  return res.json({
+    success: true,
+    emailSent,
+    message: emailSent 
+      ? `A 6-digit password reset PIN has been dispatched to ${email} via Resend. Please check your inbox and spam folder.`
+      : `Password reset PIN generated for ${email}.`,
+    demoResetCode: !emailSent ? resetCode : undefined
+  });
+});
+
+// RESEND API: RESET PASSWORD VERIFY & COMMIT
+app.post("/api/auth/reset-password", (req, res) => {
+  const { email, resetCode, newPassword } = req.body;
+  if (!email || !resetCode || !newPassword) {
+    return res.status(400).json({ error: "Email, 6-digit reset PIN, and new password are all required." });
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanCode = resetCode.trim();
+
+  const record = pendingResets.get(cleanEmail);
+  if (!record) {
+    return res.status(400).json({ 
+      error: "No active password reset request was found for this email. Please request a new verification PIN." 
+    });
+  }
+
+  if (Date.now() > record.expiresAt) {
+    pendingResets.delete(cleanEmail);
+    return res.status(400).json({ 
+      error: "The 6-digit verification PIN has expired (valid for 15 minutes). Please request a new PIN code." 
+    });
+  }
+
+  if (record.code !== cleanCode) {
+    return res.status(400).json({ 
+      error: "The 6-digit verification PIN entered is incorrect. Please verify the code and retry." 
+    });
+  }
+
+  // Password Policy Check: minimum 8 characters, uppercase, lowercase, number, special character
+  const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+  if (!passwordRegex.test(newPassword)) {
+    return res.status(400).json({ 
+      error: "Password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character." 
+    });
+  }
+
+  db = loadDB();
+  const user = db.users.find(u => u.email.toLowerCase() === cleanEmail);
+  if (!user) {
+    return res.status(404).json({ error: "User account not found." });
+  }
+
+  user.password = newPassword;
+  pendingResets.delete(cleanEmail);
+
+  db.auditLogs.push({
+    id: "log-" + Math.random().toString(36).substring(2, 11),
+    tenant_id: user.tenant_id,
+    user_id: user.id,
+    action: "PASSWORD_RESET_COMPLETED",
+    timestamp: new Date().toISOString(),
+    details: `Password was successfully reset for account ${cleanEmail}.`
+  });
+  saveDB(db);
+
+  return res.json({
+    success: true,
+    message: "Your password has been successfully updated! You can now log in with your new password."
   });
 });
 
@@ -1281,9 +1539,27 @@ app.post("/api/tenant/departments/assign-lead", (req, res) => {
   return res.json({ success: true });
 });
 
+// UPDATE TENANT PROFILE (NAME, EMAIL, PHONE)
+app.post("/api/tenant/update", (req, res) => {
+  const { tenant_id, name, email, phone } = req.body;
+  if (!tenant_id) return res.status(400).json({ error: "tenant_id required" });
+
+  db = loadDB();
+  const tIdx = db.tenants.findIndex(t => t.id === tenant_id);
+  if (tIdx !== -1) {
+    if (name && name.trim()) db.tenants[tIdx].name = name.trim();
+    if (email && email.trim()) db.tenants[tIdx].email = email.trim();
+    if (phone && phone.trim()) db.tenants[tIdx].phone = phone.trim();
+    saveDB(db);
+    broadcastToTenant(tenant_id, "TENANT_UPDATED", db.tenants[tIdx]);
+    return res.json({ success: true, tenant: db.tenants[tIdx] });
+  }
+  return res.status(404).json({ error: "Tenant not found" });
+});
+
 // SETTINGS & WORK DAYS
 app.post("/api/tenant/settings/save", (req, res) => {
-  const { tenant_id, theme, language, activityDays, checkIn, checkOut, overtimeHours, overtimeEnabled, onlyShowTimeIn, selectedIntervalDays, dailyShiftTimes, dailyShiftOutTimes, companyLogoUrl } = req.body;
+  const { tenant_id, theme, language, layout, sideNavCollapsed, activityDays, checkIn, checkOut, overtimeHours, overtimeEnabled, onlyShowTimeIn, selectedIntervalDays, dailyShiftTimes, dailyShiftOutTimes, companyLogoUrl } = req.body;
   if (!tenant_id) return res.status(400).json({ error: "tenant_id required" });
 
   db = loadDB();
@@ -1292,6 +1568,8 @@ app.post("/api/tenant/settings/save", (req, res) => {
     tenant_id,
     theme: theme || "light",
     language: language || "en",
+    layout: layout || "top",
+    sideNavCollapsed: Boolean(sideNavCollapsed),
     activityDays: activityDays || {},
     checkIn: checkIn || { time: "08:00", latenessThreshold: 10, soundEnabled: true },
     checkOut: checkOut || { time: "17:00", soundEnabled: true },
@@ -1382,6 +1660,7 @@ app.post("/api/tenant/workers/add", (req, res) => {
     role: role || UserRole.TEAM_MEMBER,
     department_id: department_id || undefined,
     status: "active",
+    password: req.body.password || "Password123!",
     gender: gender || "Not Specified",
     createdAt: new Date().toISOString(),
     activityDays: activityDays || undefined,
@@ -1447,6 +1726,7 @@ app.post("/api/tenant/workers/update", (req, res) => {
   }
   if (status !== undefined) existing.status = status;
   if (gender !== undefined) existing.gender = gender;
+  if (req.body.password !== undefined && req.body.password) existing.password = req.body.password;
   if (activityDays !== undefined) existing.activityDays = activityDays;
   if (profilePhoto !== undefined) existing.profilePhoto = profilePhoto;
   if (profilePhotos !== undefined) existing.profilePhoto = profilePhotos;
@@ -1814,8 +2094,13 @@ app.post("/api/attendance/check-out", (req, res) => {
   // Calculate duration
   const [inH, inM, inS] = db.attendance[attIdx].timeIn.split(":").map(Number);
   const totalInSecs = (inH || 0) * 3600 + (inM || 0) * 60 + (inS || 0);
-  let durationSecs = outSecs - totalInSecs;
-  if (durationSecs < 0) durationSecs += 86400;
+  
+  // Workday closing rule: clock-in after configured workday close results in 00:00:00 shift hours
+  let durationSecs = 0;
+  if (totalInSecs < closingSecs) {
+    durationSecs = outSecs - totalInSecs;
+    if (durationSecs < 0) durationSecs += 86400;
+  }
   
   db.attendance[attIdx].coveredTime = Math.max(0, durationSecs);
 
@@ -1845,6 +2130,299 @@ app.post("/api/attendance/check-out", (req, res) => {
   return res.json({ success: true, attendance: db.attendance[attIdx] });
 });
 
+
+app.post("/api/attendance/manual-create", (req, res) => {
+  const worker_id = req.body.worker_id || req.body.workerId;
+  const { tenant_id, date, timeIn, statusIn, timeOut, statusOut, coveredTime } = req.body;
+  if (!tenant_id || !worker_id || !date || !timeIn) {
+    return res.status(400).json({ error: "Missing required attendance parameters (tenant_id, worker_id, date, timeIn)" });
+  }
+
+  // Reject future dates
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  if (date > todayStr) {
+    return res.status(400).json({ error: "Attendance records cannot be created for future dates." });
+  }
+
+  db = loadDB();
+  const worker = db.users.find(u => u.id === worker_id && u.tenant_id === tenant_id);
+  if (!worker) {
+    return res.status(404).json({ error: "Worker not found in tenant organization" });
+  }
+
+  // Ensure no duplicate attendance record for the same employee on the same date
+  const existingRecord = db.attendance.find(a => a.tenant_id === tenant_id && a.worker_id === worker_id && a.date === date);
+  if (existingRecord) {
+    return res.status(400).json({ error: `An attendance record already exists for this employee on ${date}. Duplicate records on the same date are not permitted.` });
+  }
+
+  let calculatedDuration = coveredTime !== undefined && coveredTime !== null ? Number(coveredTime) : 0;
+  if (timeOut && (!calculatedDuration || calculatedDuration === 0)) {
+    try {
+      const [inH, inM, inS] = timeIn.split(":").map(Number);
+      const [outH, outM, outS] = timeOut.split(":").map(Number);
+      const inSecs = (inH || 0) * 3600 + (inM || 0) * 60 + (inS || 0);
+      const outSecs = (outH || 0) * 3600 + (outM || 0) * 60 + (outS || 0);
+      let diff = outSecs - inSecs;
+      if (diff < 0) diff += 86400;
+      calculatedDuration = Math.max(0, diff);
+    } catch (e) {}
+  }
+
+  const newRecord: Attendance = {
+    id: "att-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7),
+    tenant_id,
+    worker_id,
+    department_id: worker.department_id || "unassigned",
+    date,
+    timeIn,
+    statusIn: statusIn || "Normal Arrival",
+    timeOut: timeOut || undefined,
+    statusOut: statusOut || (timeOut ? "Normal Checkout" : undefined),
+    coveredTime: calculatedDuration,
+  };
+
+  db.attendance.push(newRecord);
+  saveDB(db);
+
+  const workerName = `${worker.firstName} ${worker.lastName}`;
+  const notif_id = "notif-" + Math.random().toString(36).substring(2, 11);
+  const notif: Notification = {
+    id: notif_id,
+    tenant_id,
+    worker_id,
+    title: "Attendance Record Created",
+    message: `Admin created attendance record for ${workerName} on ${date}`,
+    timestamp: new Date().toISOString(),
+    read: false
+  };
+  db.notifications.push(notif);
+  saveDB(db);
+
+  broadcastToTenant(tenant_id, "ATTENDANCE_CREATED", {
+    attendance: newRecord,
+    workerName,
+    notification: notif
+  });
+
+  return res.json({ success: true, record: newRecord });
+});
+app.post("/api/attendance/manual-update", (req, res) => {
+  const record_id = req.body.record_id || req.body.id || req.body.recordId;
+  const { tenant_id, date, timeIn, statusIn, timeOut, statusOut, coveredTime } = req.body;
+  if (!tenant_id || !record_id) {
+    return res.status(400).json({ error: "tenant_id and record_id are required" });
+  }
+
+  // Reject future dates
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  if (date && date > todayStr) {
+    return res.status(400).json({ error: "Attendance records cannot be updated to future dates." });
+  }
+
+  db = loadDB();
+  const attIdx = db.attendance.findIndex(a => a.id === record_id && a.tenant_id === tenant_id);
+  if (attIdx === -1) {
+    return res.status(404).json({ error: "Attendance record not found" });
+  }
+
+  const rec = db.attendance[attIdx];
+
+  // If changing the date, ensure no duplicate record on the target date for this worker
+  if (date !== undefined) {
+    const existingRecord = db.attendance.find(
+      a => a.tenant_id === tenant_id && a.worker_id === rec.worker_id && a.date === date && a.id !== record_id
+    );
+    if (existingRecord) {
+      return res.status(400).json({ error: `An attendance record already exists for this employee on ${date}. Duplicate records on the same date are not permitted.` });
+    }
+    rec.date = date;
+  }
+
+  if (timeIn !== undefined) rec.timeIn = timeIn;
+  if (statusIn !== undefined) rec.statusIn = statusIn;
+  if (timeOut !== undefined) rec.timeOut = timeOut;
+  if (statusOut !== undefined) rec.statusOut = statusOut;
+  
+  if (rec.timeIn && rec.timeOut) {
+    try {
+      const [inH, inM, inS] = rec.timeIn.split(":").map(Number);
+      const [outH, outM, outS] = rec.timeOut.split(":").map(Number);
+      const inSecs = (inH || 0) * 3600 + (inM || 0) * 60 + (inS || 0);
+      const outSecs = (outH || 0) * 3600 + (outM || 0) * 60 + (outS || 0);
+      let diff = outSecs - inSecs;
+      if (diff < 0) diff += 86400;
+      rec.coveredTime = coveredTime !== undefined && coveredTime !== null ? Number(coveredTime) : Math.max(0, diff);
+    } catch (e) {
+      if (coveredTime !== undefined) rec.coveredTime = Number(coveredTime);
+    }
+  } else if (coveredTime !== undefined && coveredTime !== null) {
+    rec.coveredTime = Number(coveredTime);
+  }
+
+  saveDB(db);
+
+  const workerObj = db.users.find(u => u.id === rec.worker_id && u.tenant_id === tenant_id);
+  const workerName = workerObj ? `${workerObj.firstName} ${workerObj.lastName}` : "Employee";
+  const notif_id = "notif-" + Math.random().toString(36).substring(2, 11);
+  const notif: Notification = {
+    id: notif_id,
+    tenant_id,
+    worker_id: rec.worker_id,
+    title: "Attendance Record Updated",
+    message: `Attendance log for ${workerName} on ${rec.date} was updated by administrator.`,
+    timestamp: new Date().toISOString(),
+    read: false
+  };
+  db.notifications.push(notif);
+  saveDB(db);
+
+  broadcastToTenant(tenant_id, "ATTENDANCE_UPDATED", {
+    attendance: rec,
+    workerName,
+    notification: notif
+  });
+
+  return res.json({ success: true, record: rec });
+});
+app.post("/api/attendance/manual-delete", (req, res) => {
+  const record_id = req.body.record_id || req.body.id || req.body.recordId;
+  const { tenant_id } = req.body;
+  if (!tenant_id || !record_id) {
+    return res.status(400).json({ error: "tenant_id and record_id are required" });
+  }
+  db = loadDB();
+  const attIdx = db.attendance.findIndex(a => a.id === record_id && a.tenant_id === tenant_id);
+  if (attIdx === -1) {
+    return res.status(404).json({ error: "Attendance record not found" });
+  }
+
+  const [deletedRec] = db.attendance.splice(attIdx, 1);
+  saveDB(db);
+
+  const workerObj = db.users.find(u => u.id === deletedRec.worker_id && u.tenant_id === tenant_id);
+  const workerName = workerObj ? `${workerObj.firstName} ${workerObj.lastName}` : "Employee";
+  const notif_id = "notif-" + Math.random().toString(36).substring(2, 11);
+  const notif: Notification = {
+    id: notif_id,
+    tenant_id,
+    worker_id: deletedRec.worker_id,
+    title: "Attendance Record Removed",
+    message: `Attendance record for ${workerName} on ${deletedRec.date} was deleted.`,
+    timestamp: new Date().toISOString(),
+    read: false
+  };
+  db.notifications.push(notif);
+  saveDB(db);
+
+  broadcastToTenant(tenant_id, "ATTENDANCE_UPDATED", {
+    action: "delete",
+    record_id,
+    workerName,
+    notification: notif
+  });
+
+  return res.json({ success: true, deleted_id: record_id });
+});
+
+app.post("/api/attendance/sync-offline", (req, res) => {
+  const { tenant_id, queue } = req.body;
+  if (!tenant_id || !Array.isArray(queue)) {
+    return res.status(400).json({ error: "tenant_id and queue array are required" });
+  }
+  db = loadDB();
+  const results: any[] = [];
+  let syncedCount = 0;
+
+  for (const item of queue) {
+    try {
+      const { id, type, worker_id, localDate, localTime } = item;
+      const todayStr = localDate || new Date().toISOString().split("T")[0];
+      const timeStr = localTime || new Date().toTimeString().split(" ")[0];
+
+      if (type === "check-in") {
+        const existingRecord = db.attendance.find(a => a.tenant_id === tenant_id && a.worker_id === worker_id && a.date === todayStr);
+        if (existingRecord) {
+          results.push({ id, status: "already_exists", recordId: existingRecord.id });
+          continue;
+        }
+        const workerObj = db.users.find(u => u.id === worker_id && u.tenant_id === tenant_id);
+        if (!workerObj) {
+          results.push({ id, status: "error", message: "Worker not found" });
+          continue;
+        }
+        const settings = db.settings.find(s => s.tenant_id === tenant_id);
+        const checkInTarget = settings?.checkIn?.time || "08:00";
+        const graceMins = settings?.checkIn?.latenessThreshold || 10;
+        const currentHHMM = timeStr.substring(0, 5);
+        const [targetH, targetM] = checkInTarget.split(":").map(Number);
+        const [nowH, nowM] = currentHHMM.split(":").map(Number);
+        const targetTotalMinutes = (targetH || 8) * 60 + (targetM || 0);
+        const nowTotalMinutes = (nowH || 0) * 60 + (nowM || 0);
+        const isLatenessActive = settings?.checkIn?.latenessActive !== false;
+        let statusIn: any = "Normal Arrival";
+        if (isLatenessActive && nowTotalMinutes > (targetTotalMinutes + graceMins)) {
+          statusIn = "Late Arrival";
+        }
+
+        const newRec: Attendance = {
+          id: "att-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7),
+          tenant_id,
+          worker_id,
+          department_id: workerObj.department_id || "unassigned",
+          date: todayStr,
+          timeIn: timeStr,
+          statusIn,
+          coveredTime: 0
+        };
+        db.attendance.push(newRec);
+        syncedCount++;
+        results.push({ id, status: "synced", record: newRec });
+        
+        broadcastToTenant(tenant_id, "ATTENDANCE_CREATED", {
+          attendance: newRec,
+          workerName: `${workerObj.firstName} ${workerObj.lastName}`
+        });
+      } else if (type === "check-out") {
+        const attIdx = db.attendance.findIndex(a => a.tenant_id === tenant_id && a.worker_id === worker_id && a.date === todayStr);
+        if (attIdx === -1) {
+          results.push({ id, status: "no_checkin_found" });
+          continue;
+        }
+        if (db.attendance[attIdx].timeOut) {
+          results.push({ id, status: "already_checked_out" });
+          continue;
+        }
+        db.attendance[attIdx].timeOut = timeStr;
+        db.attendance[attIdx].statusOut = "Normal Checkout";
+        try {
+          const [inH, inM, inS] = db.attendance[attIdx].timeIn.split(":").map(Number);
+          const [outH, outM, outS] = timeStr.split(":").map(Number);
+          const inSecs = (inH || 0) * 3600 + (inM || 0) * 60 + (inS || 0);
+          const outSecs = (outH || 0) * 3600 + (outM || 0) * 60 + (outS || 0);
+          let diff = outSecs - inSecs;
+          if (diff < 0) diff += 86400;
+          db.attendance[attIdx].coveredTime = Math.max(0, diff);
+        } catch (e) {}
+        syncedCount++;
+        results.push({ id, status: "synced", record: db.attendance[attIdx] });
+
+        const workerObj = db.users.find(u => u.id === worker_id && u.tenant_id === tenant_id);
+        broadcastToTenant(tenant_id, "ATTENDANCE_UPDATED", {
+          attendance: db.attendance[attIdx],
+          workerName: workerObj ? `${workerObj.firstName} ${workerObj.lastName}` : "Employee"
+        });
+      }
+    } catch (itemErr: any) {
+      results.push({ id: item.id, status: "error", message: itemErr.message });
+    }
+  }
+
+  saveDB(db);
+  return res.json({ success: true, syncedCount, results });
+});
 app.get("/api/tenant/subscription", (req, res) => {
   const tenant_id = req.query.tenant_id as string;
   if (!tenant_id) return res.status(400).json({ error: "tenant_id required" });
@@ -2195,7 +2773,7 @@ app.get("/api/reports/download/:job_id", (req, res) => {
         const worker = db.users.find(u => u.id === r.worker_id);
         const name = worker ? `${worker.firstName} ${worker.lastName}` : "Unknown";
         const dept = db.departments.find(d => d.id === r.department_id)?.name || "Unassigned";
-        const hr = r.coveredTime ? (r.coveredTime / 3600).toFixed(2) : "0.00";
+        const hr = formatDurationHHMMSS(r.coveredTime);
         csvContent += `${idx + 1},${r.date},"${name}",${r.timeIn},${r.statusIn},${r.timeOut || "-"},${r.statusOut || "-"},${hr},"${dept}"\n`;
       });
     } else if (job.type === "permissions") {
@@ -2269,7 +2847,7 @@ app.get("/api/reports/download/:job_id", (req, res) => {
         const worker = db.users.find(u => u.id === r.worker_id);
         const name = worker ? `${worker.firstName} ${worker.lastName}` : "Unknown";
         const dept = db.departments.find(d => d.id === r.department_id)?.name || "Unassigned";
-        const hr = r.coveredTime ? (r.coveredTime / 3600).toFixed(2) : "0.00";
+        const hr = formatDurationHHMMSS(r.coveredTime);
         htmlPDF += `
           <tr>
             <td>${idx + 1}</td>
@@ -2279,7 +2857,7 @@ app.get("/api/reports/download/:job_id", (req, res) => {
             <td><span class="badge badge-${r.statusIn}">${r.statusIn.toUpperCase()}</span></td>
             <td>${r.timeOut || "Active Shift"}</td>
             <td>${r.statusOut || "Pending Check-out"}</td>
-            <td>${hr} hrs</td>
+            <td>${hr}</td>
             <td>${dept}</td>
           </tr>
         `;
@@ -2408,9 +2986,14 @@ function runAutoCheckout() {
             // Calculate duration
             const [inH, inM, inS] = record.timeIn.split(":").map(Number);
             const totalInSecs = (inH || 0) * 3600 + (inM || 0) * 60 + (inS || 0);
+            const closingSecs = (cH || 17) * 3600 + (cM || 0) * 60;
             const totalOutSecs = cutoffDate.getHours() * 3600 + cutoffDate.getMinutes() * 60;
-            let durationSecs = totalOutSecs - totalInSecs;
-            if (durationSecs < 0) durationSecs += 86400;
+            
+            let durationSecs = 0;
+            if (totalInSecs < closingSecs) {
+              durationSecs = totalOutSecs - totalInSecs;
+              if (durationSecs < 0) durationSecs += 86400;
+            }
             record.coveredTime = Math.max(0, durationSecs);
 
             updated = true;
@@ -2451,6 +3034,476 @@ function runAutoCheckout() {
     console.error("Error running auto-checkout job:", err);
   }
 }
+
+// ---------------- APPLICATION CENTRAL ANNOUNCEMENTS ----------------
+
+// Get announcements for a tenant
+app.get("/api/tenant/announcements", (req, res) => {
+  try {
+    const tenant_id = (req.query.tenant_id as string) || "default-tenant";
+    db.announcements = db.announcements || [];
+    const tenantAnnouncements = db.announcements
+      .filter((a) => a.tenant_id === tenant_id)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    
+    const activeAnnouncement = tenantAnnouncements.find((a) => a.isActive) || null;
+    res.json({
+      success: true,
+      announcements: tenantAnnouncements,
+      activeAnnouncement
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Create or update announcement
+app.post("/api/tenant/announcements", (req, res) => {
+  try {
+    const {
+      id,
+      tenant_id = "default-tenant",
+      type = "text",
+      title,
+      content,
+      imageUrl,
+      isActive = true,
+      priority = "normal",
+      enableRating = false,
+      ratingPrompt = "How would you rate this announcement / initiative?",
+      formFields = [],
+      expiresAt
+    } = req.body;
+
+    if (!title) {
+      return res.status(400).json({ success: false, error: "Title is required" });
+    }
+
+    db.announcements = db.announcements || [];
+
+    // If making this active, deactivate all existing announcements for this tenant
+    if (isActive) {
+      db.announcements.forEach((a) => {
+        if (a.tenant_id === tenant_id) {
+          a.isActive = false;
+        }
+      });
+    }
+
+    let announcement: CentralAnnouncement;
+    const existingIndex = id ? db.announcements.findIndex((a) => a.id === id && a.tenant_id === tenant_id) : -1;
+
+    if (existingIndex >= 0) {
+      // Update existing
+      announcement = {
+        ...db.announcements[existingIndex],
+        type,
+        title,
+        content: content || "",
+        imageUrl: imageUrl || "",
+        isActive,
+        priority,
+        enableRating,
+        ratingPrompt,
+        formFields,
+        expiresAt,
+        updatedAt: new Date().toISOString()
+      };
+      db.announcements[existingIndex] = announcement;
+    } else {
+      // Create new
+      announcement = {
+        id: "announcement-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7),
+        tenant_id,
+        type,
+        title,
+        content: content || "",
+        imageUrl: imageUrl || "",
+        isActive,
+        priority,
+        enableRating,
+        ratingPrompt,
+        formFields,
+        feedbackSubmissions: [],
+        acknowledgedWorkerIds: [],
+        createdAt: new Date().toISOString()
+      };
+      db.announcements.unshift(announcement);
+    }
+
+    saveDB(db);
+
+    // Real-time broadcast to all connected tenant workers & admins
+    broadcastToTenant(tenant_id, "ANNOUNCEMENT_UPDATED", {
+      announcement,
+      activeAnnouncement: announcement.isActive ? announcement : null
+    });
+
+    res.json({
+      success: true,
+      announcement
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Delete announcement
+app.delete("/api/tenant/announcements/:id", (req, res) => {
+  try {
+    const { id } = req.params;
+    const tenant_id = (req.query.tenant_id as string) || "default-tenant";
+
+    db.announcements = db.announcements || [];
+    const index = db.announcements.findIndex((a) => a.id === id && a.tenant_id === tenant_id);
+
+    if (index >= 0) {
+      db.announcements.splice(index, 1);
+      saveDB(db);
+
+      const activeAnnouncement = db.announcements.find((a) => a.tenant_id === tenant_id && a.isActive) || null;
+      broadcastToTenant(tenant_id, "ANNOUNCEMENT_UPDATED", {
+        activeAnnouncement
+      });
+      return res.json({ success: true, message: "Announcement deleted" });
+    }
+
+    res.status(404).json({ success: false, error: "Announcement not found" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Worker response / rating / form submission
+app.post("/api/tenant/announcements/:id/respond", (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      tenant_id = "default-tenant",
+      worker_id,
+      worker_name = "Worker",
+      worker_email,
+      worker_department,
+      rating,
+      feedback,
+      formAnswers = {}
+    } = req.body;
+
+    if (!worker_id) {
+      return res.status(400).json({ success: false, error: "worker_id is required" });
+    }
+
+    db.announcements = db.announcements || [];
+    const announcement = db.announcements.find((a) => a.id === id && a.tenant_id === tenant_id);
+
+    if (!announcement) {
+      return res.status(404).json({ success: false, error: "Announcement not found" });
+    }
+
+    announcement.feedbackSubmissions = announcement.feedbackSubmissions || [];
+    announcement.acknowledgedWorkerIds = announcement.acknowledgedWorkerIds || [];
+
+    // Check if worker already submitted, update or add
+    const existingSubmissionIdx = announcement.feedbackSubmissions.findIndex((s) => s.worker_id === worker_id);
+    const submission: AnnouncementFeedbackSubmission = {
+      id: "resp-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6),
+      worker_id,
+      worker_name,
+      worker_email,
+      worker_department,
+      rating: typeof rating === "number" ? rating : undefined,
+      feedback: feedback || "",
+      formAnswers,
+      submittedAt: new Date().toISOString()
+    };
+
+    if (existingSubmissionIdx >= 0) {
+      announcement.feedbackSubmissions[existingSubmissionIdx] = submission;
+    } else {
+      announcement.feedbackSubmissions.push(submission);
+    }
+
+    if (!announcement.acknowledgedWorkerIds.includes(worker_id)) {
+      announcement.acknowledgedWorkerIds.push(worker_id);
+    }
+
+    saveDB(db);
+
+    broadcastToTenant(tenant_id, "ANNOUNCEMENT_FEEDBACK_RECEIVED", {
+      announcement_id: id,
+      submission,
+      totalSubmissions: announcement.feedbackSubmissions.length
+    });
+
+    res.json({
+      success: true,
+      message: "Feedback submitted successfully",
+      submission
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Worker simple acknowledgment
+app.post("/api/tenant/announcements/:id/acknowledge", (req, res) => {
+  try {
+    const { id } = req.params;
+    const { tenant_id = "default-tenant", worker_id } = req.body;
+
+    if (!worker_id) {
+      return res.status(400).json({ success: false, error: "worker_id is required" });
+    }
+
+    db.announcements = db.announcements || [];
+    const announcement = db.announcements.find((a) => a.id === id && a.tenant_id === tenant_id);
+
+    if (!announcement) {
+      return res.status(404).json({ success: false, error: "Announcement not found" });
+    }
+
+    announcement.acknowledgedWorkerIds = announcement.acknowledgedWorkerIds || [];
+    if (!announcement.acknowledgedWorkerIds.includes(worker_id)) {
+      announcement.acknowledgedWorkerIds.push(worker_id);
+      saveDB(db);
+    }
+
+    res.json({
+      success: true,
+      message: "Announcement acknowledged"
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Toggle announcement active status
+app.post("/api/tenant/announcements/:id/toggle-active", (req, res) => {
+  try {
+    const { id } = req.params;
+    const { tenant_id = "default-tenant" } = req.body;
+
+    db.announcements = db.announcements || [];
+    const announcement = db.announcements.find((a) => a.id === id && a.tenant_id === tenant_id);
+
+    if (!announcement) {
+      return res.status(404).json({ success: false, error: "Announcement not found" });
+    }
+
+    const nextState = !announcement.isActive;
+    if (nextState) {
+      // Deactivate all others
+      db.announcements.forEach((a) => {
+        if (a.tenant_id === tenant_id) a.isActive = false;
+      });
+    }
+    announcement.isActive = nextState;
+    saveDB(db);
+
+    broadcastToTenant(tenant_id, "ANNOUNCEMENT_UPDATED", {
+      announcement,
+      activeAnnouncement: nextState ? announcement : null
+    });
+
+    res.json({
+      success: true,
+      announcement
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// -------------------------------------------------------------
+// PWA Infrastructure: Dynamic Web Manifest, Service Worker & Icons
+// -------------------------------------------------------------
+
+app.get("/sw.js", (req, res) => {
+  const swPath = path.join(process.cwd(), "public", "sw.js");
+  res.setHeader("Content-Type", "application/javascript");
+  res.setHeader("Service-Worker-Allowed", "/");
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  if (fs.existsSync(swPath)) {
+    res.sendFile(swPath);
+  } else {
+    res.send(`
+      self.addEventListener('install', e => self.skipWaiting());
+      self.addEventListener('activate', e => self.clients.claim());
+      self.addEventListener('fetch', e => e.respondWith(fetch(e.request)));
+    `);
+  }
+});
+
+function generatePwaManifest(role: string = "guest", tenantName?: string, workerName?: string, theme: string = "dark") {
+  const isAdmin = role === "admin";
+  const isWorker = role === "worker";
+
+  let name = "CLOCK-IT PRO+ | SaaS Workforce Management";
+  let short_name = "CLOCK-IT";
+  let start_url = "/";
+  let description = "Enterprise Workforce Attendance & Shift Operations Management";
+  let theme_color = "#06b6d4";
+  const background_color = theme === "light" ? "#f8fafc" : theme === "army" ? "#141C10" : theme === "navy" ? "#0B132B" : "#0a0a0a";
+
+  if (isAdmin) {
+    name = tenantName ? `${tenantName} - Admin Portal` : "CLOCK-IT Admin Portal";
+    short_name = tenantName ? `${tenantName.slice(0, 10)} Admin` : "Admin Portal";
+    start_url = "/?pwa=admin";
+    description = `Enterprise Admin Dashboard & Workforce Operations Terminal for ${tenantName || "Organization"}`;
+    theme_color = "#06b6d4";
+  } else if (isWorker) {
+    name = tenantName ? `${tenantName} - Staff Workspace${workerName ? ` (${workerName})` : ""}` : "CLOCK-IT Staff Workspace";
+    short_name = tenantName ? `${tenantName.slice(0, 10)} Staff` : "Staff Portal";
+    start_url = "/?pwa=worker";
+    description = `Worker Attendance Terminal, Shift Check-In & Permission Portal for ${workerName || "Staff"}`;
+    theme_color = "#10b981";
+  }
+
+  return {
+    name,
+    short_name,
+    description,
+    start_url,
+    scope: "/",
+    display: "standalone",
+    orientation: isWorker ? "portrait-primary" : "any",
+    theme_color,
+    background_color,
+    categories: ["business", "productivity", "utilities"],
+    icons: [
+      {
+        src: `/api/pwa-icon?role=${role}&size=192`,
+        sizes: "192x192",
+        type: "image/svg+xml",
+        purpose: "any maskable"
+      },
+      {
+        src: `/api/pwa-icon?role=${role}&size=512`,
+        sizes: "512x512",
+        type: "image/svg+xml",
+        purpose: "any maskable"
+      }
+    ],
+    shortcuts: isAdmin
+      ? [
+          {
+            name: "Attendance Logs",
+            short_name: "Logs",
+            description: "View real-time attendance logs",
+            url: "/?pwa=admin&tab=logs"
+          },
+          {
+            name: "Shift Register",
+            short_name: "Register",
+            description: "View daily shift roster & roll calls",
+            url: "/?pwa=admin&tab=register"
+          },
+          {
+            name: "Terminal QR Code",
+            short_name: "QR Code",
+            description: "Display live check-in terminal QR code",
+            url: "/?pwa=admin&action=qr"
+          }
+        ]
+      : isWorker
+      ? [
+          {
+            name: "Check In / Out",
+            short_name: "Check-In",
+            description: "Scan terminal QR code or submit attendance code",
+            url: "/?pwa=worker&action=checkin"
+          },
+          {
+            name: "My Shift History",
+            short_name: "My Logs",
+            description: "Inspect personal attendance records",
+            url: "/?pwa=worker&tab=logs"
+          },
+          {
+            name: "Request Permission",
+            short_name: "Permission",
+            description: "Submit leave / exemption request",
+            url: "/?pwa=worker&action=permission"
+          }
+        ]
+      : []
+  };
+}
+
+app.get(["/manifest.webmanifest", "/manifest.json", "/api/manifest"], (req, res) => {
+  const role = (req.query.role as string) || (req.query.pwa as string) || "guest";
+  const tenantName = req.query.tenant as string;
+  const workerName = req.query.worker as string;
+  const theme = (req.query.theme as string) || "dark";
+
+  const manifest = generatePwaManifest(role, tenantName, workerName, theme);
+  res.setHeader("Content-Type", "application/manifest+json");
+  res.setHeader("Cache-Control", "no-cache");
+  res.json(manifest);
+});
+
+app.get("/api/pwa-icon", (req, res) => {
+  const role = (req.query.role as string) || "guest";
+  const size = parseInt((req.query.size as string) || "512", 10);
+  const isAdmin = role === "admin";
+  const isWorker = role === "worker";
+
+  const primaryColor = isAdmin ? "#06b6d4" : isWorker ? "#10b981" : "#06b6d4";
+  const secondaryColor = isAdmin ? "#3b82f6" : isWorker ? "#06b6d4" : "#3b82f6";
+  const labelText = isAdmin ? "ADMIN" : isWorker ? "WORKER" : "CLOCK-IT";
+
+  const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+    <linearGradient id="primaryGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="${primaryColor}" />
+      <stop offset="100%" stop-color="${secondaryColor}" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="16" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <rect width="${size}" height="${size}" rx="${Math.floor(size * 0.2)}" fill="url(#bgGrad)" />
+  <rect width="${size - 16}" height="${size - 16}" x="8" y="8" rx="${Math.floor(size * 0.18)}" fill="none" stroke="${primaryColor}" stroke-opacity="0.3" stroke-width="6" />
+
+  <circle cx="${size / 2}" cy="${size * 0.44}" r="${size * 0.28}" fill="none" stroke="url(#primaryGrad)" stroke-width="12" filter="url(#glow)" opacity="0.4" />
+  <circle cx="${size / 2}" cy="${size * 0.44}" r="${size * 0.28}" fill="none" stroke="url(#primaryGrad)" stroke-width="10" />
+
+  ${
+    isAdmin
+      ? `
+  <path d="M ${size * 0.5} ${size * 0.22} L ${size * 0.68} ${size * 0.3} L ${size * 0.68} ${size * 0.46} C ${size * 0.68} ${size * 0.6} ${size * 0.5} ${size * 0.66} ${size * 0.5} ${size * 0.66} C ${size * 0.5} ${size * 0.66} ${size * 0.32} ${size * 0.6} ${size * 0.32} ${size * 0.46} L ${size * 0.32} ${size * 0.3} Z" fill="url(#primaryGrad)" opacity="0.2" />
+  <path d="M ${size * 0.5} ${size * 0.24} L ${size * 0.66} ${size * 0.31} L ${size * 0.66} ${size * 0.45} C ${size * 0.66} ${size * 0.58} ${size * 0.5} ${size * 0.64} ${size * 0.5} ${size * 0.64} C ${size * 0.5} ${size * 0.64} ${size * 0.34} ${size * 0.58} ${size * 0.34} ${size * 0.45} L ${size * 0.34} ${size * 0.31} Z" fill="none" stroke="url(#primaryGrad)" stroke-width="12" stroke-linejoin="round" />
+  <circle cx="${size * 0.5}" cy="${size * 0.44}" r="${size * 0.08}" fill="url(#primaryGrad)" />
+  `
+      : isWorker
+      ? `
+  <circle cx="${size * 0.5}" cy="${size * 0.38}" r="${size * 0.09}" fill="url(#primaryGrad)" />
+  <path d="M ${size * 0.34} ${size * 0.58} C ${size * 0.34} ${size * 0.48} ${size * 0.66} ${size * 0.48} ${size * 0.66} ${size * 0.58}" fill="none" stroke="url(#primaryGrad)" stroke-width="14" stroke-linecap="round" />
+  <circle cx="${size * 0.5}" cy="${size * 0.44}" r="${size * 0.22}" fill="none" stroke="url(#primaryGrad)" stroke-width="6" stroke-dasharray="10 14" opacity="0.6" />
+  <path d="M ${size * 0.5} ${size * 0.32} L ${size * 0.5} ${size * 0.44} L ${size * 0.58} ${size * 0.44}" fill="none" stroke="#ffffff" stroke-width="10" stroke-linecap="round" />
+  `
+      : `
+  <circle cx="${size * 0.5}" cy="${size * 0.44}" r="${size * 0.22}" fill="none" stroke="url(#primaryGrad)" stroke-width="12" />
+  <path d="M ${size * 0.3} ${size * 0.44} L ${size * 0.5} ${size * 0.44} L ${size * 0.5} ${size * 0.3}" fill="none" stroke="url(#primaryGrad)" stroke-width="12" stroke-linecap="round" />
+  `
+  }
+
+  <rect x="${size * 0.18}" y="${size * 0.78}" width="${size * 0.64}" height="${size * 0.13}" rx="${size * 0.065}" fill="url(#primaryGrad)" />
+  <text x="${size * 0.5}" y="${size * 0.865}" font-family="system-ui, -apple-system, sans-serif" font-size="${size * 0.055}" font-weight="900" fill="#000000" text-anchor="middle" letter-spacing="4">${labelText}</text>
+</svg>
+  `.trim();
+
+  res.setHeader("Content-Type", "image/svg+xml");
+  res.setHeader("Cache-Control", "public, max-age=86400");
+  res.send(svg);
+});
 
 async function startServer() {
   // Start the background checkout monitor

@@ -32,15 +32,30 @@ import {
   ChevronDown,
   ChevronUp,
   Users,
-  Settings
+  Settings,
+  Maximize,
+  Minimize,
+  KeyRound,
+  Binary,
+  ToggleLeft,
+  ToggleRight,
+  Copy,
+  Check,
+  Megaphone,
+  WifiOff,
 } from "lucide-react";
-import { AttendanceStatus, PermissionStatus } from "../types.js";
+import { AttendanceStatus, PermissionStatus, CentralAnnouncement } from "../types.js";
 import { formatDateToCustomString, groupNotificationsByDate } from "../utils/dateFormatter.js";
 import { formatPhoneNumber } from "../utils/phoneFormatter.js";
+import { formatDurationHHMMSS } from "../utils/timeFormatter.js";
+import { getAlternativeAttendanceCode, validateAlternativeAttendanceCode } from "../utils/alternativeCode.js";
+import { useFullscreenShortcut } from "../utils/useFullscreenShortcut.js";
 import CustomSelect from "./CustomSelect";
 import CustomDatePicker from "./CustomDatePicker";
 import { useWorkerViewModel } from "../viewmodels/useWorkerViewModel.js";
 import { IMAGES } from "../assets/assets.js";
+import { WorkerCentralAnnouncementModal } from "./WorkerCentralAnnouncementModal";
+import { PwaInstallComponent } from "./PwaInstallButton.js";
 
 interface WorkerDashboardProps {
   user: any;
@@ -157,7 +172,10 @@ export default function WorkerDashboard({
     statsObj,
     getPersonalWorkerMetrics,
     syncWorkerLogs,
-    isRefreshingLogs
+    isRefreshingLogs,
+    pendingOfflineCount,
+    isOnline,
+    handleManualSyncOffline
   } = useWorkerViewModel({
     initialUser,
     tenant,
@@ -172,8 +190,22 @@ export default function WorkerDashboard({
   const [workerActiveSummaryTab, setWorkerActiveSummaryTab] = React.useState<"info" | "analytics" | "hours" | "history" | "actions">("info");
   const [isShiftAssessmentExpanded, setIsShiftAssessmentExpanded] = React.useState<boolean>(false);
   const [isAssessmentHistoryExpanded, setIsAssessmentHistoryExpanded] = React.useState<boolean>(false);
+  const [isCompanyEmailRevealed, setIsCompanyEmailRevealed] = React.useState<boolean>(false);
   const workerSummaryTabRowRef = React.useRef<HTMLDivElement>(null);
   const workerPunchHistoryRef = React.useRef<HTMLDivElement>(null);
+
+  const formatEllipsisEmail = (emailStr?: string) => {
+    if (!emailStr || emailStr === "N/A") return "N/A";
+    const atIdx = emailStr.indexOf("@");
+    if (atIdx > 0) {
+      const userPart = emailStr.substring(0, atIdx);
+      const domainPart = emailStr.substring(atIdx + 1);
+      const truncatedUser = userPart.length > 3 ? `${userPart.substring(0, 3)}...` : `${userPart}...`;
+      const truncatedDomain = domainPart.length > 4 ? `${domainPart.substring(0, 3)}...` : domainPart;
+      return `${truncatedUser}@${truncatedDomain}`;
+    }
+    return emailStr.length > 6 ? `${emailStr.substring(0, 6)}...` : `${emailStr}...`;
+  };
 
   const scrollContainer = (
     ref: React.RefObject<HTMLDivElement | null>,
@@ -222,6 +254,8 @@ export default function WorkerDashboard({
   });
 
   const [departments, setDepartments] = React.useState<any[]>([]);
+  const [activeAnnouncement, setActiveAnnouncement] = React.useState<CentralAnnouncement | null>(null);
+  const [showAnnouncementModal, setShowAnnouncementModal] = React.useState(false);
 
   React.useEffect(() => {
     const fetchDepts = async () => {
@@ -235,8 +269,28 @@ export default function WorkerDashboard({
         console.error("Failed to fetch departments", err);
       }
     };
+
+    const fetchAnnouncements = async () => {
+      try {
+        const res = await fetch(`/api/tenant/announcements?tenant_id=${tenant.id}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.activeAnnouncement) {
+            setActiveAnnouncement(data.activeAnnouncement);
+            const isAlreadyAck = data.activeAnnouncement.acknowledgedWorkerIds?.includes(user.id);
+            if (!isAlreadyAck) {
+              setShowAnnouncementModal(true);
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch central announcements", err);
+      }
+    };
+
     fetchDepts();
-  }, [tenant.id, user.department_id]);
+    fetchAnnouncements();
+  }, [tenant.id, user.department_id, user.id]);
 
   const isDark = theme !== "light";
 
@@ -249,6 +303,7 @@ export default function WorkerDashboard({
           navBg: "bg-[#182313] border-[#2C3E25]",
           cardBg: "bg-[#1C2916] border-[#2D4222]",
           innerBg: "bg-[#11180D] border-[#23331D]",
+          dashedBorder: "border-dashed border-emerald-500/40",
           accentText: "text-emerald-400",
           accentBorder: "border-[#2D4222]",
           accentBg: "bg-emerald-500/10",
@@ -266,6 +321,7 @@ export default function WorkerDashboard({
           navBg: "bg-[#111A35] border-[#162244]",
           cardBg: "bg-[#1C2541] border-[#202E5A]",
           innerBg: "bg-[#0E1529] border-[#152042]",
+          dashedBorder: "border-dashed border-cyan-500/40",
           accentText: "text-cyan-400",
           accentBorder: "border-[#202E5A]",
           accentBg: "bg-cyan-500/10",
@@ -283,6 +339,7 @@ export default function WorkerDashboard({
           navBg: "bg-[#0D0D0D] border-[#262626]",
           cardBg: "bg-[#0D0D0D] border-[#262626]",
           innerBg: "bg-[#070707] border-[#262626]",
+          dashedBorder: "border-dashed border-cyan-500/35",
           accentText: "text-cyan-400",
           accentBorder: "border-[#262626]",
           accentBg: "bg-cyan-500/10",
@@ -301,6 +358,7 @@ export default function WorkerDashboard({
           navBg: "bg-white border-neutral-205",
           cardBg: "bg-white border-neutral-200 shadow-sm",
           innerBg: "bg-neutral-50 border-neutral-200",
+          dashedBorder: "border-dashed border-cyan-500/40",
           accentText: "text-cyan-600",
           accentBorder: "border-neutral-200",
           accentBg: "bg-cyan-500/10",
@@ -330,6 +388,112 @@ export default function WorkerDashboard({
   const [scannedActionType, setScannedActionType] = React.useState<"check-in" | "check-out">("check-in");
   const [showCheckOutTimeModal, setShowCheckOutTimeModal] = React.useState(false);
   const [lastCheckOutTime, setLastCheckOutTime] = React.useState<string | null>(null);
+
+  // Alternative 6-character code check-in state
+  const [isAltCheckIn, setIsAltCheckIn] = React.useState(false);
+  const [altCodeDigits, setAltCodeDigits] = React.useState<string[]>(["", "", "", "", "", ""]);
+  const [altCodeError, setAltCodeError] = React.useState<string | null>(null);
+  const [isVerifyingAltCode, setIsVerifyingAltCode] = React.useState(false);
+  const altInputRefs = React.useRef<(HTMLInputElement | null)[]>([]);
+
+  const handleAltCodeDigitChange = (index: number, value: string) => {
+    const clean = value.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+    const newDigits = [...altCodeDigits];
+    
+    if (clean.length > 1) {
+      // User typed or pasted multiple characters in a single box
+      const chars = clean.slice(0, 6).split("");
+      for (let i = 0; i < 6; i++) {
+        newDigits[i] = chars[i] || "";
+      }
+      setAltCodeDigits(newDigits);
+      setAltCodeError(null);
+      
+      const lastIndex = Math.min(chars.length, 5);
+      altInputRefs.current[lastIndex]?.focus();
+      
+      if (chars.length === 6) {
+        handleVerifyAltCode(newDigits);
+      }
+      return;
+    }
+
+    newDigits[index] = clean;
+    setAltCodeDigits(newDigits);
+    setAltCodeError(null);
+
+    // Auto advance to next field if a character was entered
+    if (clean && index < 5) {
+      altInputRefs.current[index + 1]?.focus();
+    }
+
+    // If all 6 fields are now populated, automatically verify
+    if (clean && index === 5 && newDigits.every(d => d.trim().length === 1)) {
+      handleVerifyAltCode(newDigits);
+    }
+  };
+
+  const handleAltCodeKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Backspace") {
+      if (!altCodeDigits[index] && index > 0) {
+        e.preventDefault();
+        const newDigits = [...altCodeDigits];
+        newDigits[index - 1] = "";
+        setAltCodeDigits(newDigits);
+        altInputRefs.current[index - 1]?.focus();
+      }
+    } else if (e.key === "ArrowLeft" && index > 0) {
+      altInputRefs.current[index - 1]?.focus();
+    } else if (e.key === "ArrowRight" && index < 5) {
+      altInputRefs.current[index + 1]?.focus();
+    }
+  };
+
+  const handleAltCodePaste = (e: React.ClipboardEvent) => {
+    e.preventDefault();
+    const pastedText = e.clipboardData.getData("text");
+    const clean = pastedText.replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 6);
+    if (!clean) return;
+
+    const newDigits = ["", "", "", "", "", ""];
+    for (let i = 0; i < clean.length; i++) {
+      newDigits[i] = clean[i];
+    }
+    setAltCodeDigits(newDigits);
+    setAltCodeError(null);
+
+    const targetIndex = Math.min(clean.length, 5);
+    altInputRefs.current[targetIndex]?.focus();
+
+    if (clean.length === 6) {
+      handleVerifyAltCode(newDigits);
+    }
+  };
+
+  const handleVerifyAltCode = (codeArray = altCodeDigits) => {
+    const fullCode = codeArray.join("").trim().toUpperCase();
+    if (fullCode.length < 6) {
+      setAltCodeError(translations.enterSixCharAltCode || "Please enter all 6 alphanumeric characters.");
+      return;
+    }
+
+    setIsVerifyingAltCode(true);
+    setAltCodeError(null);
+
+    const isValid = validateAlternativeAttendanceCode(fullCode, tenant.id);
+    setTimeout(() => {
+      setIsVerifyingAltCode(false);
+      if (isValid) {
+        setIsSuccessScan(true);
+        setScannerFeedback(translations.authorizedCodeDetected || "Authorized code token verified!");
+        setScannedActionType(isCheckedInToday ? "check-out" : "check-in");
+        setShowVerifyAttendanceModal(true);
+      } else {
+        setIsSuccessScan(false);
+        setAltCodeError(translations.invalidAltCode || "Invalid 6-character attendance code. Please verify and retry.");
+      }
+    }, 350);
+  };
 
   React.useEffect(() => {
     if (showSettingsModal) {
@@ -1032,6 +1196,20 @@ export default function WorkerDashboard({
                     </div>
 
                     <div className="space-y-4">
+                      {/* PWA Mobile & Desktop App */}
+                      <div className="space-y-1.5 flex flex-col">
+                        <span className={`text-[10px] font-semibold uppercase tracking-wider block ${themeClass.textMuted}`}>
+                          PWA Mobile & Desktop App
+                        </span>
+                        <PwaInstallComponent
+                          role="worker"
+                          tenantName={tenant?.name || tenant?.companyName}
+                          workerName={`${user?.firstName || ""} ${user?.lastName || ""}`.trim()}
+                          theme={tempTheme || "dark"}
+                          variant="menu-item"
+                        />
+                      </div>
+
                       {/* Avatar Upload */}
                       <div className="space-y-1.5 flex flex-col">
                         <span className={`text-[10px] font-semibold uppercase tracking-wider block ${themeClass.textMuted}`}>Profile Photo</span>
@@ -1201,6 +1379,34 @@ export default function WorkerDashboard({
         </div>
       </nav>
 
+      {/* Offline Status & Pending Sync Alert Banner */}
+      {(!isOnline || pendingOfflineCount > 0) && (
+        <div className={`px-4 sm:px-6 py-2.5 border-b flex flex-col sm:flex-row sm:items-center justify-between gap-2 transition-colors ${
+          !isOnline 
+            ? "bg-amber-500/15 border-amber-500/30 text-amber-900 dark:text-amber-200" 
+            : "bg-cyan-500/15 border-cyan-500/30 text-cyan-900 dark:text-cyan-200"
+        }`}>
+          <div className="flex items-center space-x-2 text-xs">
+            <WifiOff className="h-4 w-4 shrink-0" />
+            <span className="font-semibold">
+              {!isOnline
+                ? `Offline Mode Active — Check-in/out actions are queued safely on this device (${pendingOfflineCount} pending).`
+                : `${pendingOfflineCount} offline attendance record(s) queued for synchronization.`}
+            </span>
+          </div>
+          {isOnline && pendingOfflineCount > 0 && (
+            <button
+              type="button"
+              onClick={handleManualSyncOffline}
+              className="self-start sm:self-auto px-3 py-1 bg-cyan-500 hover:bg-cyan-400 text-black text-[11px] font-bold rounded-lg cursor-pointer transition-all shadow-sm flex items-center space-x-1"
+            >
+              <RefreshCw className="h-3 w-3" />
+              <span>Synchronize Now</span>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Main Body Grid */}
       <main className="max-w-4xl w-full mx-auto p-4 sm:p-6 space-y-6">
         
@@ -1215,7 +1421,7 @@ export default function WorkerDashboard({
         )}
 
         {/* Tab Selection */}
-        <div className={`flex rounded-2xl p-1 shadow-xl sticky top-[73px] z-10 ${themeClass.navBg}`}>
+        <div className={`flex rounded-2xl p-1 shadow-xl sticky top-[73px] z-10 border ${themeClass.dashedBorder} ${themeClass.navBg}`}>
           <button 
             onClick={() => setActiveTab("scan")}
             className={`flex-1 py-3 text-xs sm:text-sm font-semibold rounded-xl text-center cursor-pointer transition-all flex items-center justify-center ${activeTab === "scan" ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/40" : `hover:${themeClass.accentText} ${themeClass.textMuted}`}`}
@@ -1252,11 +1458,130 @@ export default function WorkerDashboard({
                   </p>
                 </div>
               </div>
-            ) : cameraState === "closed" ? (
-              <div className={`rounded-3xl p-8 text-center space-y-6 flex flex-col items-center border shadow-md ${themeClass.cardBg}`}>
-                <div className={`h-16 w-16 rounded-2xl flex items-center justify-center border shadow-inner ${themeClass.innerBg} ${themeClass.accentText}`}>
-                  <QrCode className="h-8 w-8" />
+            ) : isAltCheckIn ? (
+              /* ALTERNATIVE 6-CHARACTER CODE CHECK-IN MODE */
+              <div className={`rounded-3xl p-6 sm:p-8 text-center space-y-6 flex flex-col items-center border shadow-md relative ${themeClass.cardBg}`}>
+                
+                {/* Center switch button: Click to switch back to Camera QR Scanner */}
+                <button
+                  id="worker_center_switch_to_qr"
+                  type="button"
+                  onClick={() => {
+                    setIsAltCheckIn(false);
+                    setAltCodeError(null);
+                    setScannerFeedback(null);
+                  }}
+                  className={`h-16 w-16 sm:h-20 sm:w-20 rounded-3xl flex items-center justify-center border shadow-inner transition-all duration-300 cursor-pointer group hover:scale-105 active:scale-95 relative ${themeClass.innerBg} border-cyan-500/30 hover:border-cyan-400 text-cyan-400`}
+                  title={translations.switchToScanner || "Click to switch to Camera QR Scanner"}
+                  aria-label="Switch to QR Code Scanner"
+                >
+                  <KeyRound className="h-8 w-8 sm:h-9 sm:w-9 text-cyan-400 transition-transform duration-300 group-hover:scale-110" />
+                </button>
+
+                <div>
+                  <h3 className={`font-semibold text-lg mb-1.5 ${themeClass.textTitle}`}>
+                    {translations.verifyActiveAttendance || "Verify Active Attendance"}
+                  </h3>
+                  <p className={`text-xs font-light max-w-sm mx-auto leading-relaxed ${themeClass.textMuted}`}>
+                    {translations.alternativeCheckInDesc || "Enter the 6-character attendance code provided by your administrator or displayed below the terminal QR."}
+                  </p>
                 </div>
+
+                {/* Six fields separated by only one dash between the first 3 and last 3 fields - Strictly Square */}
+                <div className="w-full max-w-md flex flex-col items-center">
+                  <div 
+                    className="flex items-center justify-center gap-1.5 sm:gap-2.5 my-2 w-full select-none"
+                    onPaste={handleAltCodePaste}
+                  >
+                    {altCodeDigits.map((digit, idx) => (
+                      <React.Fragment key={idx}>
+                        <input
+                          ref={(el) => (altInputRefs.current[idx] = el)}
+                          id={`alt_code_field_${idx}`}
+                          type="text"
+                          maxLength={1}
+                          value={digit}
+                          onChange={(e) => handleAltCodeDigitChange(idx, e.target.value)}
+                          onKeyDown={(e) => handleAltCodeKeyDown(idx, e)}
+                          className={`w-11 h-11 sm:w-14 sm:h-14 aspect-square flex items-center justify-center text-center text-lg sm:text-2xl font-mono font-black uppercase rounded-2xl border-2 transition-all outline-none shadow-sm caret-transparent ${
+                            digit
+                              ? "border-cyan-500 bg-cyan-500/10 text-cyan-400 shadow-cyan-500/20 ring-1 ring-cyan-500/40"
+                              : `${themeClass.inputBg} border-neutral-700/50 text-slate-100 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/30`
+                          }`}
+                          autoComplete="off"
+                          spellCheck="false"
+                        />
+                        {idx === 2 && (
+                          <span className={`text-lg sm:text-2xl font-black font-mono select-none px-1 sm:px-2 ${themeClass.textMuted}`}>
+                            -
+                          </span>
+                        )}
+                      </React.Fragment>
+                    ))}
+                  </div>
+
+                  {/* Error feedback */}
+                  {altCodeError && (
+                    <div className="w-full max-w-sm mt-3 p-3 rounded-xl bg-red-500/10 border border-red-500/25 text-red-400 text-xs font-semibold flex items-center justify-center space-x-2">
+                      <XCircle className="h-4 w-4 shrink-0" />
+                      <span>{altCodeError}</span>
+                    </div>
+                  )}
+
+                  {/* Action buttons */}
+                  <div className="w-full max-w-sm flex flex-col sm:flex-row gap-2.5 mt-5">
+                    <button
+                      id="worker_verify_alt_code_btn"
+                      type="button"
+                      disabled={isVerifyingAltCode || altCodeDigits.some(d => !d)}
+                      onClick={() => handleVerifyAltCode()}
+                      className="flex-1 py-3.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 disabled:opacity-50 text-white font-semibold rounded-xl text-xs sm:text-sm shadow-md transition-all cursor-pointer flex items-center justify-center space-x-2 min-h-[44px]"
+                    >
+                      {isVerifyingAltCode ? (
+                        <>
+                          <RefreshCw className="h-4 w-4 animate-spin" />
+                          <span>Verifying Code...</span>
+                        </>
+                      ) : (
+                        <span>{translations.verifyAltCodeBtn || "Verify Code & Submit Attendance"}</span>
+                      )}
+                    </button>
+                    
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAltCodeDigits(["", "", "", "", "", ""]);
+                        setAltCodeError(null);
+                        altInputRefs.current[0]?.focus();
+                      }}
+                      className={`px-4 py-3.5 rounded-xl border text-xs font-semibold cursor-pointer ${themeClass.innerBg} ${themeClass.textMuted} hover:${themeClass.textTitle}`}
+                    >
+                      {translations.clearCode || "Clear"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : cameraState === "closed" ? (
+              <div className={`rounded-3xl p-8 text-center space-y-6 flex flex-col items-center border shadow-md relative ${themeClass.cardBg}`}>
+                
+                {/* Center switch button: Click to switch to 6-character PIN code check-in */}
+                <button
+                  id="worker_center_switch_to_pin"
+                  type="button"
+                  onClick={() => {
+                    setIsAltCheckIn(true);
+                    setScannerFeedback(null);
+                    setAltCodeError(null);
+                    setTimeout(() => {
+                      altInputRefs.current[0]?.focus();
+                    }, 100);
+                  }}
+                  className={`h-16 w-16 sm:h-20 sm:w-20 rounded-3xl flex items-center justify-center border shadow-inner transition-all duration-300 cursor-pointer group hover:scale-105 active:scale-95 relative ${themeClass.innerBg} ${themeClass.accentBorder} hover:border-cyan-400`}
+                  title={translations.switchToAltCode || "Click to switch to 6-Character PIN verification"}
+                  aria-label="Switch to PIN Code Check-In"
+                >
+                  <QrCode className={`h-8 w-8 sm:h-9 sm:w-9 ${themeClass.accentText} transition-transform duration-300 group-hover:scale-110`} />
+                </button>
                 <div>
                   <h3 className={`font-semibold text-lg mb-1.5 ${themeClass.textTitle}`}>{translations.verifyActiveAttendance || "Verify Active Attendance"}</h3>
                   <p className={`text-xs font-light max-w-sm mx-auto leading-relaxed ${themeClass.textMuted}`}>
@@ -1277,7 +1602,27 @@ export default function WorkerDashboard({
             ) : (
               <div className={`rounded-3xl p-6 sm:p-8 border relative overflow-hidden flex flex-col items-center shadow-lg bg-[#0F172A]/10 border-neutral-200 dark:border-neutral-800 ${themeClass.cardBg}`}>
                 
-                <div className="absolute top-4 right-4 z-10">
+                {/* Switch at top right of the container */}
+                <div className="absolute top-4 right-4 z-10 flex items-center space-x-2">
+                  <button
+                    id="worker_toggle_alt_checkin_viewing"
+                    type="button"
+                    onClick={() => {
+                      setCameraState("closed");
+                      setIsAltCheckIn(true);
+                      setScannerFeedback(null);
+                      setAltCodeError(null);
+                      setTimeout(() => {
+                        altInputRefs.current[0]?.focus();
+                      }, 100);
+                    }}
+                    className={`p-1.5 rounded-xl border transition-all cursor-pointer flex items-center space-x-1 shadow-sm ${themeClass.innerBg} ${themeClass.accentBorder} ${themeClass.textMuted} hover:${themeClass.accentText}`}
+                    title="Switch to 6-Character Alternative Code Check-In"
+                  >
+                    <KeyRound className="h-3.5 w-3.5 text-cyan-400" />
+                    <span className="text-[10px] font-bold font-mono">Code</span>
+                  </button>
+
                   <button 
                     onClick={() => { setCameraState("closed"); setScannerFeedback(null); }}
                     className={`h-8 w-8 rounded-full flex items-center justify-center cursor-pointer border ${
@@ -1350,21 +1695,23 @@ export default function WorkerDashboard({
 
             {/* Static shift state log panels */}
             <div className={`rounded-3xl p-6 border shadow-sm space-y-4 ${themeClass.cardBg}`}>
-              <div className="flex justify-between items-center border-b border-neutral-100 dark:border-neutral-850 pb-3">
-                <div>
+              <div className="flex flex-col sm:flex-row justify-between items-center text-center sm:text-left gap-3 border-b border-neutral-100 dark:border-neutral-850 pb-3">
+                <div className="w-full sm:w-auto">
                   <span className={`text-[10px] uppercase font-bold tracking-wider font-mono block ${themeClass.textMuted}`}>{translations.loggedShiftSession || "Logged Shift Session"}</span>
                   <p className={`text-[11px] font-light ${themeClass.textMuted}`}>{translations.officialRecordedClock || "Official recorded clock-in and clock-out logs"}</p>
                 </div>
-                <span className={`text-xs px-2.5 py-1 rounded-full font-bold select-none ${
-                  todayRecord 
-                    ? (todayRecord.timeOut ? 'bg-neutral-500/10 text-neutral-400 border border-neutral-800' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/15')
-                    : 'bg-amber-500/10 text-amber-500 border border-amber-500/15'
-                }`}>
-                  {todayRecord 
-                    ? (todayRecord.timeOut ? (translations.shiftCompleted || "Shift Completed") : (translations.shiftInProgress || "Shift In Progress"))
-                    : (translations.noShiftActive || "No Shift Active")
-                  }
-                </span>
+                <div className="flex justify-center w-full sm:w-auto">
+                  <span className={`text-xs px-3.5 py-1 rounded-full font-bold select-none text-center ${
+                    todayRecord 
+                      ? (todayRecord.timeOut ? 'bg-neutral-500/10 text-neutral-400 border border-neutral-800' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/15')
+                      : 'bg-amber-500/10 text-amber-500 border border-amber-500/15'
+                  }`}>
+                    {todayRecord 
+                      ? (todayRecord.timeOut ? (translations.shiftCompleted || "Shift Completed") : (translations.shiftInProgress || "Shift In Progress"))
+                      : (translations.noShiftActive || "No Shift Active")
+                    }
+                  </span>
+                </div>
               </div>
 
               <div className="grid grid-cols-3 gap-4 text-center">
@@ -1453,11 +1800,20 @@ export default function WorkerDashboard({
                 {/* Company Details in a single straight line */}
                 <div className="hidden sm:flex items-center space-x-4 text-xs font-light">
                   <span className={`h-4 w-px bg-neutral-200/10`} />
-                  <div className="flex flex-col">
+                  <div className="flex flex-col pr-2">
                     <span className={`text-[9px] uppercase font-bold tracking-wider block font-mono ${themeClass.textMuted}`}>
                       {translations.companyEmail || "Company Email"}
                     </span>
-                    <span className={themeClass.textHighlight}>{tenant.email || "N/A"}</span>
+                    <button
+                      type="button"
+                      onClick={() => setIsCompanyEmailRevealed(prev => !prev)}
+                      className={`text-left cursor-pointer transition-all hover:underline flex items-center gap-1 group outline-none font-mono text-xs ${themeClass.textHighlight}`}
+                      title={isCompanyEmailRevealed ? "Click to conceal email" : "Click to reveal full email"}
+                    >
+                      <span className="font-mono text-xs select-none">
+                        {isCompanyEmailRevealed ? (tenant.email || "N/A") : formatEllipsisEmail(tenant.email)}
+                      </span>
+                    </button>
                   </div>
                   <span className={`h-4 w-px bg-neutral-200/10`} />
                   <div className="flex flex-col">
@@ -1476,8 +1832,15 @@ export default function WorkerDashboard({
                 </div>
 
                 {/* Mobile visible fallback */}
-                <div className="flex sm:hidden flex-col text-right">
-                  <span className={`text-[10px] ${themeClass.textHighlight}`}>{tenant.email}</span>
+                <div className="flex sm:hidden flex-col text-right pr-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsCompanyEmailRevealed(prev => !prev)}
+                    className={`text-[10px] cursor-pointer hover:underline text-right outline-none font-mono ${themeClass.textHighlight}`}
+                    title={isCompanyEmailRevealed ? "Click to conceal email" : "Click to reveal full email"}
+                  >
+                    {isCompanyEmailRevealed ? (tenant.email || "N/A") : formatEllipsisEmail(tenant.email)}
+                  </button>
                   <span className={`text-[9px] ${themeClass.textMuted}`}>{formatPhoneNumber(tenant.phone)}</span>
                 </div>
               </div>
@@ -2098,45 +2461,316 @@ export default function WorkerDashboard({
               const monthlyM = getPersonalWorkerMetrics("monthly");
               const yearlyM = getPersonalWorkerMetrics("yearly");
               const cumulativeM = getPersonalWorkerMetrics("cumulative");
+              const selectedM = getPersonalWorkerMetrics(workerTimeframe);
+
+              const getTimeframeLabel = (tf: string) => {
+                switch (tf) {
+                  case "daily": return translations.tfDaily || "Daily";
+                  case "weekly": return translations.tfWeekly || "Weekly";
+                  case "monthly": return translations.tfMonthly || "Monthly";
+                  case "yearly": return translations.tfYearly || "Yearly";
+                  default: return tf;
+                }
+              };
+
+              const getPerformanceBadge = (score: number) => {
+                if (score >= 90) {
+                  return { label: translations.perfOptimal || "Optimal Standing", bg: "bg-emerald-500/10 text-emerald-400 border-emerald-500/25" };
+                } else if (score >= 75) {
+                  return { label: translations.perfGood || "Good Standing", bg: "bg-cyan-500/10 text-cyan-400 border-cyan-500/25" };
+                } else if (score >= 50) {
+                  return { label: translations.perfSatisfactory || "Satisfactory", bg: "bg-amber-500/10 text-amber-400 border-amber-500/25" };
+                } else {
+                  return { label: translations.perfNeedsImprovement || "Needs Attention", bg: "bg-red-500/10 text-red-400 border-red-500/25" };
+                }
+              };
+
+              const perfBadge = getPerformanceBadge(selectedM.performancePercentage);
 
               return (
                 <div className="space-y-4 font-sans">
-                  <div className={`p-6 rounded-3xl border shadow-md ${themeClass.cardBg}`}>
-                    <span className={`text-[10px] uppercase font-bold tracking-wider font-mono block mb-3 ${themeClass.textMuted}`}>{translations.cumulativeHoursMatrix || "Cumulative Hours matrix"}</span>
-                    <div className="grid grid-cols-2 gap-4">
+                  {/* Worker Metrics Timeframe Basis Selector */}
+                  <div className={`flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border rounded-2xl gap-4 ${themeClass.cardBg} w-full`}>
+                    <div>
+                      <span className={`text-[10px] uppercase font-bold tracking-wider font-mono block mb-1 ${themeClass.textMuted}`}>
+                        {translations.workerMetricsTimeframeBasis || "Worker Metrics Timeframe Basis"}
+                      </span>
+                      <p className={`text-xs font-light ${themeClass.textMuted}`}>
+                        {translations.dynamicallyRecalculateHours || "Dynamically calculate work hours, performance score, and shift metrics across timeframes."}
+                      </p>
+                    </div>
+                    <div className={`flex rounded-2xl p-1 border select-none max-w-sm w-full divide-x-0 ${themeClass.innerBg}`}>
+                      {(["daily", "weekly", "monthly", "yearly"] as const).map((tf) => (
+                        <button
+                          key={tf}
+                          type="button"
+                          onClick={() => setWorkerTimeframe(tf)}
+                          className={`flex-1 py-1.5 px-3 text-xs font-semibold rounded-xl text-center capitalize transition-all cursor-pointer ${
+                            workerTimeframe === tf 
+                              ? isDark 
+                                ? `${themeClass.buttonSelected} scale-[1.02]` 
+                                : "bg-white text-cyan-600 shadow-sm font-bold scale-[1.02] border border-neutral-200"
+                              : isDark
+                                ? `${themeClass.textMuted} hover:${themeClass.textHighlight}`
+                                : "text-neutral-500 hover:text-neutral-900"
+                          }`}
+                        >
+                          {getTimeframeLabel(tf)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Active Timeframe Performance & Work Hours Focus Overview */}
+                  <div className={`p-6 rounded-3xl border shadow-md space-y-5 ${themeClass.cardBg}`}>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-neutral-200/50 dark:border-neutral-800 pb-3">
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <span className={`text-[10px] uppercase font-bold tracking-wider font-mono ${themeClass.textMuted}`}>
+                            {translations.activeTimeframeEvaluation || "Active Timeframe Evaluation"}
+                          </span>
+                          <span className="inline-block h-1 w-1 rounded-full bg-cyan-400" />
+                          <span className="text-[10px] font-mono font-semibold uppercase text-cyan-400">
+                            {getTimeframeLabel(workerTimeframe)} {translations.basis || "Basis"}
+                          </span>
+                        </div>
+                        <h4 className={`text-base font-bold mt-0.5 ${themeClass.textTitle}`}>
+                          {getTimeframeLabel(workerTimeframe)} {translations.workHoursAndPerformance || "Work Hours & Performance Overview"}
+                        </h4>
+                      </div>
+                      <span className={`text-[10px] px-2.5 py-1 rounded-lg border font-semibold self-start sm:self-auto ${perfBadge.bg}`}>
+                        {perfBadge.label}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                      {/* Work Hours Logged */}
                       <div className={`p-4 rounded-2xl border flex flex-col justify-between ${themeClass.innerBg} ${themeClass.accentBorder}`}>
-                        <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${themeClass.textMuted}`}>{translations.totalCumulativeHours || "Total Cumulative Hours"}</span>
-                        <div className="mt-2 flex items-baseline space-x-1">
-                          <strong className="text-2xl text-cyan-400 font-mono font-bold">{cumulativeM.workHours.toFixed(2)}</strong>
-                          <span className="text-[10px] font-medium text-gray-400">{translations.hoursSuffix || "hours"}</span>
+                        <div className="flex items-center justify-between">
+                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${themeClass.textMuted}`}>
+                            {translations.loggedWorkHours || "Logged Work Hours"}
+                          </span>
+                          <Clock className="h-3.5 w-3.5 text-cyan-400" />
+                        </div>
+                        <div className="mt-3 flex items-baseline space-x-1.5">
+                          <strong className="text-2xl sm:text-3xl text-cyan-400 font-mono font-bold tracking-tight">
+                            {selectedM.workHours.toFixed(2)}
+                          </strong>
+                          <span className="text-xs font-medium text-neutral-400">{translations.hoursSuffix || "hrs"}</span>
+                        </div>
+                        <span className={`text-[10px] font-mono mt-1 ${themeClass.textMuted}`}>
+                          {translations.duration || "Duration"}: {selectedM.workHoursFormatted || "00:00:00"}
+                        </span>
+                      </div>
+
+                      {/* Performance Score */}
+                      <div className={`p-4 rounded-2xl border flex flex-col justify-between ${themeClass.innerBg} ${themeClass.accentBorder}`}>
+                        <div className="flex items-center justify-between">
+                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${themeClass.textMuted}`}>
+                            {translations.performanceScore || "Performance Score"}
+                          </span>
+                          <TrendingUp className="h-3.5 w-3.5 text-emerald-400" />
+                        </div>
+                        <div className="mt-3 flex items-baseline space-x-1.5">
+                          <strong className={`text-2xl sm:text-3xl font-mono font-bold tracking-tight ${
+                            selectedM.performancePercentage >= 75 ? "text-emerald-400" : selectedM.performancePercentage >= 50 ? "text-amber-400" : "text-red-400"
+                          }`}>
+                            {selectedM.performancePercentage.toFixed(1)}%
+                          </strong>
+                        </div>
+                        <div className="w-full bg-neutral-200/40 dark:bg-neutral-800 h-1.5 rounded-full mt-2 overflow-hidden">
+                          <div 
+                            className="bg-gradient-to-r from-cyan-500 to-emerald-500 h-full rounded-full transition-all duration-500"
+                            style={{ width: `${Math.min(100, Math.max(0, selectedM.performancePercentage))}%` }}
+                          />
                         </div>
                       </div>
+
+                      {/* Attended vs Expected Days */}
                       <div className={`p-4 rounded-2xl border flex flex-col justify-between ${themeClass.innerBg} ${themeClass.accentBorder}`}>
-                        <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${themeClass.textMuted}`}>{translations.dailyShiftHours || "Daily Shift Hours"}</span>
-                        <div className="mt-2 flex items-baseline space-x-1">
+                        <div className="flex items-center justify-between">
+                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${themeClass.textMuted}`}>
+                            {translations.shiftAttendance || "Shift Attendance"}
+                          </span>
+                          <Calendar className="h-3.5 w-3.5 text-amber-400" />
+                        </div>
+                        <div className="mt-3 flex items-baseline space-x-1.5">
+                          <strong className="text-2xl sm:text-3xl font-mono font-bold tracking-tight text-amber-400">
+                            {selectedM.attendedDays}
+                          </strong>
+                          <span className="text-xs font-medium text-neutral-400">/ {selectedM.expectedDays} {translations.days || "days"}</span>
+                        </div>
+                        <span className={`text-[10px] font-mono mt-1 ${themeClass.textMuted}`}>
+                          {selectedM.attendancePercentage.toFixed(1)}% {translations.attendanceRate || "attendance rate"}
+                        </span>
+                      </div>
+
+                      {/* Punctuality / Late Status */}
+                      <div className={`p-4 rounded-2xl border flex flex-col justify-between ${themeClass.innerBg} ${themeClass.accentBorder}`}>
+                        <div className="flex items-center justify-between">
+                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${themeClass.textMuted}`}>
+                            {translations.punctualityRecord || "Punctuality Record"}
+                          </span>
+                          <CheckCircle2 className="h-3.5 w-3.5 text-indigo-400" />
+                        </div>
+                        <div className="mt-3 flex items-baseline space-x-1.5">
+                          <strong className="text-2xl sm:text-3xl font-mono font-bold tracking-tight text-indigo-400">
+                            {Math.max(0, selectedM.attendedDays - selectedM.lateCount)}
+                          </strong>
+                          <span className="text-xs font-medium text-neutral-400">{translations.onTime || "on-time"}</span>
+                        </div>
+                        <span className={`text-[10px] font-mono mt-1 ${selectedM.lateCount > 0 ? "text-amber-400" : themeClass.textMuted}`}>
+                          {selectedM.lateCount} {translations.latePunches || "late punch(es)"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Comparative Hours and Performance Matrix Across Daily, Weekly, Monthly, Yearly & Cumulative */}
+                  <div className={`p-6 rounded-3xl border shadow-md space-y-4 ${themeClass.cardBg}`}>
+                    <div className="flex items-center justify-between">
+                      <span className={`text-[10px] uppercase font-bold tracking-wider font-mono ${themeClass.textMuted}`}>
+                        {translations.cumulativeHoursMatrix || "Timeframe Comparative Performance & Hours Matrix"}
+                      </span>
+                      <span className={`text-[10px] font-mono ${themeClass.textMuted}`}>
+                        {translations.clickToSelectBasis || "Click a card to set active basis"}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {/* Daily Card */}
+                      <div 
+                        onClick={() => setWorkerTimeframe("daily")}
+                        className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between ${themeClass.innerBg} ${
+                          workerTimeframe === "daily" 
+                            ? "border-cyan-400 shadow-md ring-1 ring-cyan-400/40" 
+                            : `${themeClass.accentBorder} hover:border-cyan-500/40`
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${themeClass.textMuted}`}>
+                            {translations.dailyShiftHours || "Daily Period"}
+                          </span>
+                          <span className={`text-[9px] font-mono px-2 py-0.5 rounded-md font-bold ${
+                            dailyM.performancePercentage >= 75 ? "bg-emerald-500/10 text-emerald-400" : "bg-amber-500/10 text-amber-400"
+                          }`}>
+                            {dailyM.performancePercentage.toFixed(1)}% {translations.perfAbbr || "Perf"}
+                          </span>
+                        </div>
+                        <div className="mt-3 flex items-baseline space-x-1">
                           <strong className="text-2xl text-emerald-500 font-mono font-bold">{dailyM.workHours.toFixed(2)}</strong>
                           <span className="text-[10px] font-medium text-gray-400">{translations.hoursSuffix || "hours"}</span>
                         </div>
-                      </div>
-                      <div className={`p-4 rounded-2xl border flex flex-col justify-between ${themeClass.innerBg} ${themeClass.accentBorder}`}>
-                        <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${themeClass.textMuted}`}>{translations.weeklyAccumulated || "Weekly Accumulated"}</span>
-                        <div className="mt-2 flex items-baseline space-x-1">
-                          <strong className="text-xl text-amber-500 font-mono font-bold">{weeklyM.workHours.toFixed(2)}</strong>
-                          <span className="text-[10px] font-medium text-gray-400">{translations.hoursSuffix || "hours"}</span>
+                        <div className="mt-2 flex items-center justify-between text-[10px] text-neutral-400 font-mono">
+                          <span>{dailyM.attendedDays}/{dailyM.expectedDays} {translations.days || "days"}</span>
+                          <span>{dailyM.lateCount} {translations.late || "late"}</span>
                         </div>
                       </div>
-                      <div className={`p-4 rounded-2xl border flex flex-col justify-between ${themeClass.innerBg} ${themeClass.accentBorder}`}>
-                        <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${themeClass.textMuted}`}>{translations.monthlyTotalHours || "Monthly Total Hours"}</span>
-                        <div className="mt-2 flex items-baseline space-x-1">
-                          <strong className="text-xl text-indigo-400 font-mono font-bold">{monthlyM.workHours.toFixed(2)}</strong>
+
+                      {/* Weekly Card */}
+                      <div 
+                        onClick={() => setWorkerTimeframe("weekly")}
+                        className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between ${themeClass.innerBg} ${
+                          workerTimeframe === "weekly" 
+                            ? "border-cyan-400 shadow-md ring-1 ring-cyan-400/40" 
+                            : `${themeClass.accentBorder} hover:border-cyan-500/40`
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${themeClass.textMuted}`}>
+                            {translations.weeklyAccumulated || "Weekly Period"}
+                          </span>
+                          <span className={`text-[9px] font-mono px-2 py-0.5 rounded-md font-bold ${
+                            weeklyM.performancePercentage >= 75 ? "bg-emerald-500/10 text-emerald-400" : "bg-amber-500/10 text-amber-400"
+                          }`}>
+                            {weeklyM.performancePercentage.toFixed(1)}% {translations.perfAbbr || "Perf"}
+                          </span>
+                        </div>
+                        <div className="mt-3 flex items-baseline space-x-1">
+                          <strong className="text-2xl text-amber-500 font-mono font-bold">{weeklyM.workHours.toFixed(2)}</strong>
                           <span className="text-[10px] font-medium text-gray-400">{translations.hoursSuffix || "hours"}</span>
                         </div>
+                        <div className="mt-2 flex items-center justify-between text-[10px] text-neutral-400 font-mono">
+                          <span>{weeklyM.attendedDays}/{weeklyM.expectedDays} {translations.days || "days"}</span>
+                          <span>{weeklyM.lateCount} {translations.late || "late"}</span>
+                        </div>
                       </div>
-                      <div className={`p-4 rounded-2xl border flex flex-col justify-between ${themeClass.innerBg} ${themeClass.accentBorder} col-span-2`}>
-                        <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${themeClass.textMuted}`}>{translations.yearlyAggregatedTotal || "Yearly Aggregated Total"}</span>
-                        <div className="mt-2 flex items-baseline space-x-1">
+
+                      {/* Monthly Card */}
+                      <div 
+                        onClick={() => setWorkerTimeframe("monthly")}
+                        className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between ${themeClass.innerBg} ${
+                          workerTimeframe === "monthly" 
+                            ? "border-cyan-400 shadow-md ring-1 ring-cyan-400/40" 
+                            : `${themeClass.accentBorder} hover:border-cyan-500/40`
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${themeClass.textMuted}`}>
+                            {translations.monthlyTotalHours || "Monthly Period"}
+                          </span>
+                          <span className={`text-[9px] font-mono px-2 py-0.5 rounded-md font-bold ${
+                            monthlyM.performancePercentage >= 75 ? "bg-emerald-500/10 text-emerald-400" : "bg-amber-500/10 text-amber-400"
+                          }`}>
+                            {monthlyM.performancePercentage.toFixed(1)}% {translations.perfAbbr || "Perf"}
+                          </span>
+                        </div>
+                        <div className="mt-3 flex items-baseline space-x-1">
+                          <strong className="text-2xl text-indigo-400 font-mono font-bold">{monthlyM.workHours.toFixed(2)}</strong>
+                          <span className="text-[10px] font-medium text-gray-400">{translations.hoursSuffix || "hours"}</span>
+                        </div>
+                        <div className="mt-2 flex items-center justify-between text-[10px] text-neutral-400 font-mono">
+                          <span>{monthlyM.attendedDays}/{monthlyM.expectedDays} {translations.days || "days"}</span>
+                          <span>{monthlyM.lateCount} {translations.late || "late"}</span>
+                        </div>
+                      </div>
+
+                      {/* Yearly Card */}
+                      <div 
+                        onClick={() => setWorkerTimeframe("yearly")}
+                        className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between ${themeClass.innerBg} ${
+                          workerTimeframe === "yearly" 
+                            ? "border-cyan-400 shadow-md ring-1 ring-cyan-400/40" 
+                            : `${themeClass.accentBorder} hover:border-cyan-500/40`
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${themeClass.textMuted}`}>
+                            {translations.yearlyAggregatedTotal || "Yearly Period"}
+                          </span>
+                          <span className={`text-[9px] font-mono px-2 py-0.5 rounded-md font-bold ${
+                            yearlyM.performancePercentage >= 75 ? "bg-emerald-500/10 text-emerald-400" : "bg-amber-500/10 text-amber-400"
+                          }`}>
+                            {yearlyM.performancePercentage.toFixed(1)}% {translations.perfAbbr || "Perf"}
+                          </span>
+                        </div>
+                        <div className="mt-3 flex items-baseline space-x-1">
                           <strong className={`text-2xl font-mono font-bold ${themeClass.accentText}`}>{yearlyM.workHours.toFixed(2)}</strong>
                           <span className="text-[10px] font-medium text-gray-400">{translations.hoursSuffix || "hours"}</span>
+                        </div>
+                        <div className="mt-2 flex items-center justify-between text-[10px] text-neutral-400 font-mono">
+                          <span>{yearlyM.attendedDays}/{yearlyM.expectedDays} {translations.days || "days"}</span>
+                          <span>{yearlyM.lateCount} {translations.late || "late"}</span>
+                        </div>
+                      </div>
+
+                      {/* Cumulative All-Time Card */}
+                      <div className={`p-4 rounded-2xl border flex flex-col justify-between sm:col-span-2 lg:col-span-2 ${themeClass.innerBg} ${themeClass.accentBorder}`}>
+                        <div className="flex items-center justify-between">
+                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${themeClass.textMuted}`}>
+                            {translations.totalCumulativeHours || "Total Cumulative All-Time"}
+                          </span>
+                          <span className="text-[9px] font-mono px-2 py-0.5 rounded-md font-bold bg-cyan-500/10 text-cyan-400">
+                            {cumulativeM.performancePercentage.toFixed(1)}% {translations.perfAbbr || "Perf"}
+                          </span>
+                        </div>
+                        <div className="mt-3 flex items-baseline space-x-1">
+                          <strong className="text-2xl text-cyan-400 font-mono font-bold">{cumulativeM.workHours.toFixed(2)}</strong>
+                          <span className="text-[10px] font-medium text-gray-400">{translations.hoursSuffix || "hours"}</span>
+                        </div>
+                        <div className="mt-2 flex items-center justify-between text-[10px] text-neutral-400 font-mono">
+                          <span>{cumulativeM.attendedDays}/{cumulativeM.expectedDays} {translations.cumulativeDays || "lifetime expected days"}</span>
+                          <span>{cumulativeM.workHoursFormatted || "00:00:00"} {translations.totalDuration || "total duration"}</span>
                         </div>
                       </div>
                     </div>
@@ -2518,6 +3152,7 @@ export default function WorkerDashboard({
                   <CustomSelect 
                     value={exemptionReason} 
                     onChange={(val) => setExemptionReason(val as any)}
+                    theme={theme}
                     className={`w-full border rounded-xl py-3 px-4 text-sm outline-none focus:border-cyan-500 min-h-[44px] ${themeClass.inputBg}`}
                     options={[
                       { value: "Medical", label: translations.medicalLeaveLabel || "Medical Leave" },
@@ -2863,6 +3498,23 @@ export default function WorkerDashboard({
           </div>
         )}
       </AnimatePresence>
+
+      {/* Central Announcement Modal for Workers */}
+      <WorkerCentralAnnouncementModal
+        announcement={showAnnouncementModal ? activeAnnouncement : null}
+        workerId={user.id}
+        workerName={`${user.firstName} ${user.lastName}`}
+        workerEmail={user.email}
+        workerDepartment={user.department_id}
+        tenantId={tenant.id}
+        themeClass={themeClass}
+        translations={translations}
+        onDismiss={() => setShowAnnouncementModal(false)}
+        onSubmitted={() => {
+          setShowAnnouncementModal(false);
+          setActiveAnnouncement(null);
+        }}
+      />
 
     </div>
   );

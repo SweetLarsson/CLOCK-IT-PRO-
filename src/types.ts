@@ -59,6 +59,7 @@ export interface User {
   profilePhoto?: ThumbnailSet;
   status: "active" | "suspended";
   gender?: string;
+  password?: string;
   title?: string; // Team member / Team lead title
   createdAt: string;
   activityDays?: { [key: string]: boolean };
@@ -137,7 +138,7 @@ export interface Subscription {
   status: "trial" | "active" | "expired";
   startDate: string;
   endDate: string;
-  paymentMethod?: "opay" | "paystack" | "manual" | "admin_authorization";
+  paymentMethod?: "card" | "opay" | "paystack" | "manual" | "admin_authorization";
   verified: boolean;
 }
 
@@ -183,6 +184,8 @@ export interface TenantSettings {
   onlyShowTimeIn?: boolean;
   selectedIntervalDays?: number;
   companyLogoUrl?: string;
+  layout?: "top" | "side";
+  sideNavCollapsed?: boolean;
 }
 
 export interface ReportJob {
@@ -208,3 +211,45 @@ export interface VisitorLog {
   timestamp: string;
   passId: string;
 }
+
+export type AnnouncementType = "picture" | "text" | "form";
+
+export interface AnnouncementFormField {
+  id: string;
+  label: string;
+  type: "text" | "rating" | "textarea" | "select" | "choice";
+  options?: string[];
+  required?: boolean;
+}
+
+export interface AnnouncementFeedbackSubmission {
+  id: string;
+  worker_id: string;
+  worker_name: string;
+  worker_email?: string;
+  worker_department?: string;
+  rating?: number; // 1 to 5
+  feedback?: string;
+  formAnswers?: { [fieldId: string]: any };
+  submittedAt: string;
+}
+
+export interface CentralAnnouncement {
+  id: string;
+  tenant_id: string;
+  type: AnnouncementType;
+  title: string;
+  content: string;
+  imageUrl?: string;
+  isActive: boolean;
+  priority?: "normal" | "urgent" | "important";
+  enableRating?: boolean;
+  ratingPrompt?: string;
+  formFields?: AnnouncementFormField[];
+  feedbackSubmissions?: AnnouncementFeedbackSubmission[];
+  acknowledgedWorkerIds?: string[];
+  createdAt: string;
+  updatedAt?: string;
+  expiresAt?: string;
+}
+

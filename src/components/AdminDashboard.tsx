@@ -7,6 +7,7 @@ import React, { useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Users,
+  Mail,
   Clock,
   FileText,
   CheckCircle2,
@@ -36,6 +37,7 @@ import {
   ChevronUp,
   X,
   Building,
+  Phone,
   AlertTriangle,
   LayoutGrid,
   List,
@@ -48,17 +50,44 @@ import {
   Info,
   Award,
   Check,
+  Copy,
   Eye,
+  EyeOff,
+  Gauge,
+  FastForward,
+  CreditCard,
+  Maximize,
+  Minimize,
+  Megaphone,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Columns,
+  Sidebar,
+  Lock,
+  Unlock,
+  Edit3,
+  ClipboardCheck,
+  ShieldCheck,
 } from "lucide-react";
+import { AnimatedMenuIcon } from "./AnimatedMenuIcon.js";
+import { AnimatedQrCodeIcon } from "./AnimatedQrCodeIcon.js";
+import { AnimatedBellIcon } from "./AnimatedBellIcon.js";
+import { AnimatedFullscreenIcon } from "./AnimatedFullscreenIcon.js";
 import { AtAGlanceAttendanceOverlay } from "./AtAGlanceAttendanceOverlay.js";
+import { ApplicationCentralAnnouncementModal } from "./ApplicationCentralAnnouncementModal.js";
 import { AttendanceStatus, PermissionStatus, UserRole } from "../types.js";
 import { formatDateToCustomString, groupNotificationsByDate } from "../utils/dateFormatter.js";
 import { formatPhoneNumber } from "../utils/phoneFormatter.js";
 import { playCheckInSound } from "../utils/soundSynth.js";
+import { formatDurationHHMMSS, calculateShiftSeconds } from "../utils/timeFormatter.js";
+import { getAlternativeAttendanceCode } from "../utils/alternativeCode.js";
+import { useFullscreenShortcut } from "../utils/useFullscreenShortcut.js";
 import { Volume2 } from "lucide-react";
 import CustomSelect from "./CustomSelect";
+import { PwaInstallComponent } from "./PwaInstallButton.js";
 import CustomDatePicker from "./CustomDatePicker";
 import CustomTimePicker from "./CustomTimePicker";
+import CustomSortDropdown from "./CustomSortDropdown";
 import { useAdminViewModel } from "../viewmodels/useAdminViewModel.js";
 import { IMAGES } from "../assets/assets.js";
 
@@ -120,22 +149,100 @@ export default function AdminDashboard({
   onSubscriptionChange,
 }: AdminDashboardProps) {
   const [showSplash, setShowSplash] = React.useState(true);
+
   React.useEffect(() => {
-    const timer = setTimeout(() => setShowSplash(false), 1500);
+    const timer = setTimeout(() => setShowSplash(false), 800);
     return () => clearTimeout(timer);
   }, []);
+
+  const [currentTenant, setCurrentTenant] = React.useState(tenant);
+  const [companyProfileName, setCompanyProfileName] = React.useState(tenant?.name || "");
+  const [companyProfileEmail, setCompanyProfileEmail] = React.useState(tenant?.email || "");
+  const [companyProfilePhone, setCompanyProfilePhone] = React.useState(tenant?.phone || "");
+  const [isSavingCompanyProfile, setIsSavingCompanyProfile] = React.useState(false);
+  const [companyProfileSuccess, setCompanyProfileSuccess] = React.useState<string | null>(null);
+
+  // Brand Profile Field Lock States (Double-tap to unlock & edit)
+  const [isBrandNameLocked, setIsBrandNameLocked] = React.useState(true);
+  const [isBrandEmailLocked, setIsBrandEmailLocked] = React.useState(true);
+  const [isBrandNumberLocked, setIsBrandNumberLocked] = React.useState(true);
+  const lastTapRef = React.useRef<{ [key: string]: number }>({});
+
+  const handleFieldDoubleTap = (field: "name" | "email" | "phone") => {
+    if (field === "name") {
+      setIsBrandNameLocked(false);
+      setTimeout(() => document.getElementById("company_profile_name_input")?.focus(), 50);
+    } else if (field === "email") {
+      setIsBrandEmailLocked(false);
+      setTimeout(() => document.getElementById("company_profile_email_input")?.focus(), 50);
+    } else if (field === "phone") {
+      setIsBrandNumberLocked(false);
+      setTimeout(() => document.getElementById("company_profile_phone_input")?.focus(), 50);
+    }
+  };
+
+  const handleTouchTap = (field: "name" | "email" | "phone") => {
+    const now = Date.now();
+    const last = lastTapRef.current[field] || 0;
+    if (now - last < 350) {
+      handleFieldDoubleTap(field);
+    }
+    lastTapRef.current[field] = now;
+  };
+
+  const handleSaveCompanyProfile = async () => {
+    setIsSavingCompanyProfile(true);
+    setCompanyProfileSuccess(null);
+    try {
+      const res = await fetch("/api/admin/company-profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tenant_id: tenant?.id,
+          name: companyProfileName,
+          email: companyProfileEmail,
+          phone: companyProfilePhone,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to update company profile.");
+      }
+      setCompanyProfileSuccess("Company profile updated and synchronized successfully.");
+      onNotifyAdmin("Company Profile", "Company profile updated and synchronized successfully.");
+      setIsBrandNameLocked(true);
+      setIsBrandEmailLocked(true);
+      setIsBrandNumberLocked(true);
+      await syncAdminResources();
+      setTimeout(() => setCompanyProfileSuccess(null), 4000);
+    } catch (err: any) {
+      onNotifyAdmin("Profile Update Error", err.message || "Failed to save company profile.");
+    } finally {
+      setIsSavingCompanyProfile(false);
+    }
+  };
 
   const {
     activeTab,
     setActiveTab,
     workers,
+    setWorkers,
     attendanceRecords,
+    setAttendanceRecords,
     permissions,
+    setPermissions,
     departments,
+    setDepartments,
     leadHistory,
+    setLeadHistory,
     settings,
     setSettings,
     subscription,
+    setSubscription,
+    jobs,
+    setJobs,
+    visitorLogs,
+    setVisitorLogs,
     showSettingsMenu,
     setShowSettingsMenu,
     showConfirmLogout,
@@ -145,10 +252,12 @@ export default function AdminDashboard({
     isDeptManagementExpanded,
     setIsDeptManagementExpanded,
     adminPhotoUrl,
+    setAdminPhotoUrl,
     adminFileInputRef,
     handleAdminDpUpload,
     handleAdminDpDelete,
     companyLogoUrl,
+    setCompanyLogoUrl,
     companyLogoFileInputRef,
     handleCompanyLogoUpload,
     handleCompanyLogoDelete,
@@ -175,10 +284,13 @@ export default function AdminDashboard({
     gatewaySelected,
     setGatewaySelected,
     billingProgress,
+    setBillingProgress,
     reportFeedback,
+    setReportFeedback,
     showQrModal,
     setShowQrModal,
     qrDataUrl,
+    setQrDataUrl,
     notifications,
     handleMarkNotifRead,
     handleMarkAllNotifsRead,
@@ -194,8 +306,6 @@ export default function AdminDashboard({
     handleBillingRenewalSubmit,
     formatCompact,
     filteredLogsList,
-    visitorLogs,
-    setVisitorLogs,
     rankedLeaderboard,
     departmentAverages,
     isDark,
@@ -212,8 +322,310 @@ export default function AdminDashboard({
     onSubscriptionChange,
   });
 
+  // Update Attendance Feature States (Declared here AFTER useAdminViewModel)
+  const [showUpdateAttendanceModal, setShowUpdateAttendanceModal] = React.useState(false);
+  const [selectedAttendanceWorkerId, setSelectedAttendanceWorkerId] = React.useState<string>("");
+  const [attendanceWorkerSearch, setAttendanceWorkerSearch] = React.useState<string>("");
+  const [showAttendanceFormModal, setShowAttendanceFormModal] = React.useState(false);
+
+  const arrivalStatusDropdownOptions = React.useMemo(() => [
+    {
+      value: AttendanceStatus.PRESENT,
+      label: (
+        <div className="flex items-center space-x-2 py-0.5">
+          <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+          <span className="font-semibold text-xs">On Time</span>
+          <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+            Punctual
+          </span>
+        </div>
+      )
+    },
+    {
+      value: AttendanceStatus.LATE,
+      label: (
+        <div className="flex items-center space-x-2 py-0.5">
+          <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
+          <span className="font-semibold text-xs">Late Arrival</span>
+          <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-400 border border-amber-500/30">
+            Tardy
+          </span>
+        </div>
+      )
+    }
+  ], []);
+
+  const checkoutStatusDropdownOptions = React.useMemo(() => [
+    {
+      value: "Normal Checkout",
+      label: (
+        <div className="flex items-center space-x-2 py-0.5">
+          <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+          <span className="font-semibold text-xs">Normal Checkout</span>
+          <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+            Standard
+          </span>
+        </div>
+      )
+    },
+    {
+      value: "Overtime",
+      label: (
+        <div className="flex items-center space-x-2 py-0.5">
+          <Clock className="h-4 w-4 text-cyan-400 shrink-0" />
+          <span className="font-semibold text-xs">Overtime</span>
+          <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
+            Extra Hours
+          </span>
+        </div>
+      )
+    },
+    {
+      value: "Closing Time",
+      label: (
+        <div className="flex items-center space-x-2 py-0.5">
+          <ShieldCheck className="h-4 w-4 text-indigo-400 shrink-0" />
+          <span className="font-semibold text-xs">Closing Time</span>
+          <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+            Closing Window
+          </span>
+        </div>
+      )
+    },
+    {
+      value: "Early Departure",
+      label: (
+        <div className="flex items-center space-x-2 py-0.5">
+          <AlertTriangle className="h-4 w-4 text-rose-400 shrink-0" />
+          <span className="font-semibold text-xs">Early Departure</span>
+          <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider bg-rose-500/20 text-rose-400 border border-rose-500/30">
+            Early Exit
+          </span>
+        </div>
+      )
+    }
+  ], []);
+  const [attendanceFormMode, setAttendanceFormMode] = React.useState<"create" | "edit">("create");
+  const [attendanceFormRecordId, setAttendanceFormRecordId] = React.useState<string>("");
+  const [attendanceFormDate, setAttendanceFormDate] = React.useState<string>(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  });
+  const [attendanceFormTimeIn, setAttendanceFormTimeIn] = React.useState<string>("08:30:00");
+  const [attendanceFormStatusIn, setAttendanceFormStatusIn] = React.useState<AttendanceStatus>(AttendanceStatus.PRESENT);
+  const [attendanceFormTimeOut, setAttendanceFormTimeOut] = React.useState<string>("17:00:00");
+  const [attendanceFormStatusOut, setAttendanceFormStatusOut] = React.useState<string>("Normal Checkout");
+  const [attendanceFormHasCheckout, setAttendanceFormHasCheckout] = React.useState<boolean>(true);
+
+  // Confirmation modal state for Update Attendance actions
+  const [attendanceConfirmData, setAttendanceConfirmData] = React.useState<{
+    isOpen: boolean;
+    actionType: "create" | "update" | "delete";
+    workerId: string;
+    workerName: string;
+    recordId?: string;
+    date: string;
+    timeIn: string;
+    statusIn: AttendanceStatus;
+    timeOut?: string;
+    statusOut?: string;
+  } | null>(null);
+  const [isProcessingAttendanceAction, setIsProcessingAttendanceAction] = React.useState(false);
+  const [attendanceActionSuccess, setAttendanceActionSuccess] = React.useState<string | null>(null);
+
+  // Open Create Attendance modal for currently selected worker
+  const handleOpenCreateAttendance = () => {
+    if (!selectedAttendanceWorkerId && workers.length > 0) {
+      setSelectedAttendanceWorkerId(workers[0].id);
+    }
+    const d = new Date();
+    const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    setAttendanceFormMode("create");
+    setAttendanceFormRecordId("");
+    setAttendanceFormDate(todayStr);
+    setAttendanceFormTimeIn("08:30:00");
+    setAttendanceFormStatusIn(AttendanceStatus.PRESENT);
+    setAttendanceFormTimeOut("17:00:00");
+    setAttendanceFormStatusOut("Normal Checkout");
+    setAttendanceFormHasCheckout(false);
+    setShowAttendanceFormModal(true);
+  };
+
+  // Open Edit Attendance modal for a specific record
+  const handleOpenEditAttendance = (rec: any) => {
+    setAttendanceFormMode("edit");
+    setAttendanceFormRecordId(rec.id);
+    setAttendanceFormDate(rec.date);
+    setAttendanceFormTimeIn(rec.timeIn || "08:30:00");
+    setAttendanceFormStatusIn(rec.statusIn || AttendanceStatus.PRESENT);
+    setAttendanceFormTimeOut(rec.timeOut || "17:00:00");
+    setAttendanceFormStatusOut(rec.statusOut || "Normal Checkout");
+    setAttendanceFormHasCheckout(!!rec.timeOut);
+    setShowAttendanceFormModal(true);
+  };
+
+  // Trigger Confirmation Modal from the Create / Edit Form
+  const handlePromptAttendanceFormConfirm = (e: React.FormEvent) => {
+    e.preventDefault();
+    const targetWorkerId = selectedAttendanceWorkerId || workers[0]?.id;
+    const targetWorker = workers.find((w) => w.id === targetWorkerId);
+    const workerName = targetWorker ? `${targetWorker.firstName} ${targetWorker.lastName}` : "Selected Employee";
+
+    if (!attendanceFormDate) {
+      alert("Please specify a valid shift date.");
+      return;
+    }
+
+    const todayObj = new Date();
+    const todayStr = `${todayObj.getFullYear()}-${String(todayObj.getMonth() + 1).padStart(2, "0")}-${String(todayObj.getDate()).padStart(2, "0")}`;
+
+    if (attendanceFormDate > todayStr) {
+      alert("Future dates cannot be recorded or updated. Please select today or a past date.");
+      return;
+    }
+
+    // Check for duplicate attendance record on the same date for this employee
+    if (attendanceFormMode === "create") {
+      const isDuplicate = (attendanceRecords || []).some(
+        (r: any) => r.worker_id === targetWorkerId && r.date === attendanceFormDate
+      );
+      if (isDuplicate) {
+        alert(`An attendance record already exists for ${workerName} on ${attendanceFormDate}. Duplicate records for the same date are not allowed. Please edit the existing record instead.`);
+        return;
+      }
+    } else if (attendanceFormMode === "update") {
+      const isDuplicate = (attendanceRecords || []).some(
+        (r: any) => r.worker_id === targetWorkerId && r.date === attendanceFormDate && r.id !== attendanceFormRecordId
+      );
+      if (isDuplicate) {
+        alert(`Another attendance record already exists for ${workerName} on ${attendanceFormDate}. Duplicate records for the same date are not allowed.`);
+        return;
+      }
+    }
+
+    if (!attendanceFormTimeIn) {
+      alert("Please specify a valid check-in time.");
+      return;
+    }
+
+    setAttendanceConfirmData({
+      isOpen: true,
+      actionType: attendanceFormMode,
+      workerId: targetWorkerId,
+      workerName,
+      recordId: attendanceFormRecordId,
+      date: attendanceFormDate,
+      timeIn: attendanceFormTimeIn,
+      statusIn: attendanceFormStatusIn,
+      timeOut: attendanceFormHasCheckout ? attendanceFormTimeOut : undefined,
+      statusOut: attendanceFormHasCheckout ? attendanceFormStatusOut : undefined,
+    });
+  };
+
+  const handlePromptDeleteAttendanceConfirm = (rec: any) => {
+    const targetWorker = workers.find((w) => w.id === rec.worker_id);
+    const workerName = targetWorker ? `${targetWorker.firstName} ${targetWorker.lastName}` : "Employee";
+
+    setAttendanceConfirmData({
+      isOpen: true,
+      actionType: "delete",
+      workerId: rec.worker_id,
+      workerName,
+      recordId: rec.id,
+      date: rec.date,
+      timeIn: rec.timeIn,
+      statusIn: rec.statusIn,
+      timeOut: rec.timeOut,
+      statusOut: rec.statusOut,
+    });
+  };
+
+  // Execute the confirmed Attendance Action against the Backend API
+  const handleExecuteAttendanceAction = async () => {
+    if (!attendanceConfirmData) return;
+    setIsProcessingAttendanceAction(true);
+    try {
+      if (attendanceConfirmData.actionType === "create") {
+        const res = await fetch("/api/attendance/manual-create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tenant_id: tenant.id,
+            worker_id: attendanceConfirmData.workerId,
+            workerId: attendanceConfirmData.workerId,
+            date: attendanceConfirmData.date,
+            timeIn: attendanceConfirmData.timeIn,
+            statusIn: attendanceConfirmData.statusIn,
+            timeOut: attendanceConfirmData.timeOut || null,
+            statusOut: attendanceConfirmData.statusOut || null,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || "Failed to create attendance record.");
+        }
+        setAttendanceActionSuccess(`Shift record created successfully for ${attendanceConfirmData.workerName}.`);
+        onNotifyAdmin("Attendance Created", `Shift record created for ${attendanceConfirmData.workerName}.`);
+      } else if (attendanceConfirmData.actionType === "update") {
+        const res = await fetch("/api/attendance/manual-update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            record_id: attendanceConfirmData.recordId,
+            id: attendanceConfirmData.recordId,
+            recordId: attendanceConfirmData.recordId,
+            tenant_id: tenant.id,
+            worker_id: attendanceConfirmData.workerId,
+            workerId: attendanceConfirmData.workerId,
+            date: attendanceConfirmData.date,
+            timeIn: attendanceConfirmData.timeIn,
+            statusIn: attendanceConfirmData.statusIn,
+            timeOut: attendanceConfirmData.timeOut || null,
+            statusOut: attendanceConfirmData.statusOut || null,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || "Failed to update attendance record.");
+        }
+        setAttendanceActionSuccess(`Shift record updated successfully for ${attendanceConfirmData.workerName}.`);
+        onNotifyAdmin("Attendance Updated", `Shift record updated for ${attendanceConfirmData.workerName}.`);
+      } else if (attendanceConfirmData.actionType === "delete") {
+        const res = await fetch("/api/attendance/manual-delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            record_id: attendanceConfirmData.recordId,
+            id: attendanceConfirmData.recordId,
+            recordId: attendanceConfirmData.recordId,
+            tenant_id: tenant.id,
+            worker_id: attendanceConfirmData.workerId,
+            date: attendanceConfirmData.date,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || "Failed to delete attendance record.");
+        }
+        setAttendanceActionSuccess(`Shift record deleted successfully.`);
+        onNotifyAdmin("Attendance Deleted", "Shift record deleted successfully.");
+      }
+
+      // Synchronize Admin resources
+      await syncAdminResources();
+      setShowAttendanceFormModal(false);
+      setAttendanceConfirmData(null);
+      setTimeout(() => setAttendanceActionSuccess(null), 4000);
+    } catch (err: any) {
+      onNotifyAdmin("Attendance Action Error", err.message || "Failed to apply update.");
+    } finally {
+      setIsProcessingAttendanceAction(false);
+    }
+  };
+
   const [showAdminNotifDrawer, setShowAdminNotifDrawer] = React.useState(false);
   const [isAtAGlanceOpen, setIsAtAGlanceOpen] = React.useState(false);
+  const [isAnnouncementModalOpen, setIsAnnouncementModalOpen] = React.useState(false);
 
   const [expandedPhotoUrl, setExpandedPhotoUrl] = React.useState<string | null>(null);
 
@@ -226,6 +638,9 @@ export default function AdminDashboard({
   const [localSettings, setLocalSettings] = React.useState<any>(null);
   
   // Custom states for newly requested features
+  const [analyticsPeriodMode, setAnalyticsPeriodMode] = React.useState<"all" | "daily" | "weekly" | "monthly" | "yearly">("all");
+  const [selectedAnalyticsDay, setSelectedAnalyticsDay] = React.useState<string>("all");
+  const [selectedAnalyticsWeek, setSelectedAnalyticsWeek] = React.useState<string>("all");
   const [selectedAnalyticsMonth, setSelectedAnalyticsMonth] = React.useState<string>("all");
   const [selectedAnalyticsYear, setSelectedAnalyticsYear] = React.useState<string>("all");
 
@@ -248,6 +663,19 @@ export default function AdminDashboard({
   const [showEditWorkerModal, setShowEditWorkerModal] = React.useState<any | null>(null);
   const [activeSummaryTab, setActiveSummaryTab] = React.useState<"info" | "analytics" | "hours" | "history" | "actions">("info");
   const [isAdminShiftAssessmentExpanded, setIsAdminShiftAssessmentExpanded] = React.useState<boolean>(true);
+  const [isSummaryCardsExpanded, setIsSummaryCardsExpanded] = React.useState<boolean>(true);
+  const [isAttendanceLogExpanded, setIsAttendanceLogExpanded] = React.useState<boolean>(true);
+  const [isSearchFiltersExpanded, setIsSearchFiltersExpanded] = React.useState<boolean>(true);
+  const [isShiftRegisterExpanded, setIsShiftRegisterExpanded] = React.useState<boolean>(true);
+  const [isAnalyticsDeskExpanded, setIsAnalyticsDeskExpanded] = React.useState<boolean>(true);
+  const [isLeaderboardExpanded, setIsLeaderboardExpanded] = React.useState<boolean>(true);
+  const [isVerifyPermissionsExpanded, setIsVerifyPermissionsExpanded] = React.useState<boolean>(true);
+  const [isPermissionsListExpanded, setIsPermissionsListExpanded] = React.useState<boolean>(true);
+  const [isCorporateDirectoriesExpanded, setIsCorporateDirectoriesExpanded] = React.useState<boolean>(true);
+  const [isWorkerCollectionListExpanded, setIsWorkerCollectionListExpanded] = React.useState<boolean>(true);
+  const [isSideNavExpanded, setIsSideNavExpanded] = React.useState<boolean>(true);
+  const [showMobileSideDrawer, setShowMobileSideDrawer] = React.useState<boolean>(false);
+  const [isQrSecondaryOptionsExpanded, setIsQrSecondaryOptionsExpanded] = React.useState<boolean>(false);
   const [calendarViewYear, setCalendarViewYear] = React.useState(new Date().getFullYear());
   const [calendarViewMonth, setCalendarViewMonth] = React.useState(new Date().getMonth());
   const [selectedCalendarDay, setSelectedCalendarDay] = React.useState<any>(null);
@@ -312,8 +740,8 @@ export default function AdminDashboard({
   );
   const [hoveredIdx, setHoveredIdx] = React.useState<number | null>(null);
   
-  // Responsive chart sizing
-  const [chartDimensions, setChartDimensions] = React.useState({ width: 500, height: 290 });
+  // Responsive chart sizing (Scaled 0.5x, fits container for at-a-glance view)
+  const [chartDimensions, setChartDimensions] = React.useState({ width: 750, height: 290 });
   const chartContainerRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
@@ -322,7 +750,7 @@ export default function AdminDashboard({
       for (let entry of entries) {
         const { width, height } = entry.contentRect;
         setChartDimensions({
-          width: width || 500,
+          width: width || 750,
           height: height || 290,
         });
       }
@@ -362,6 +790,22 @@ export default function AdminDashboard({
   const [selectedLeaderboardWorker, setSelectedLeaderboardWorker] =
     React.useState<any | null>(null);
 
+  // Full-Screen Dashboard Shortcut (CTRL+F / ESC)
+  const { isFullscreen, toggleFullscreen } = useFullscreenShortcut();
+
+  // Card Payment Gateway Modal States
+  const [showCardModal, setShowCardModal] = React.useState(false);
+  const [cardHolderName, setCardHolderName] = React.useState("");
+  const [cardNumber, setCardNumber] = React.useState("");
+  const [cardExpiry, setCardExpiry] = React.useState("");
+  const [cardCvv, setCardCvv] = React.useState("");
+  const [cardError, setCardError] = React.useState<string | null>(null);
+  const [isProcessingCard, setIsProcessingCard] = React.useState(false);
+
+  // Alternative 6-character code copied and visibility states
+  const [copiedAltCode, setCopiedAltCode] = React.useState(false);
+  const [showAltCode, setShowAltCode] = React.useState(true);
+
   React.useEffect(() => {
     if (selectedLeaderboardWorker) {
       const fresh = workers.find((w: any) => w.id === selectedLeaderboardWorker.id);
@@ -385,6 +829,29 @@ export default function AdminDashboard({
   const [modalTimeframe, setModalTimeframe] = React.useState<
     "daily" | "weekly" | "monthly" | "yearly"
   >("daily");
+
+  // HR Worker Profiles Work Hours Audit Filter States
+  const [auditTimeframe, setAuditTimeframe] = React.useState<
+    "daily" | "weekly" | "monthly" | "yearly"
+  >("daily");
+  const [showAuditPickerModal, setShowAuditPickerModal] = React.useState<boolean>(false);
+  const [auditSelectedDay, setAuditSelectedDay] = React.useState<
+    "Monday" | "Tuesday" | "Wednesday" | "Thursday" | "Friday" | "Saturday" | "Sunday"
+  >(() => {
+    const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
+    return dayNames[new Date().getDay()] as any;
+  });
+  const [auditSelectedWeek, setAuditSelectedWeek] = React.useState<number>(() => {
+    // Current ISO week number (1-52)
+    const now = new Date();
+    const d = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.min(52, Math.max(1, Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7)));
+  });
+  const [auditSelectedMonth, setAuditSelectedMonth] = React.useState<number>(() => new Date().getMonth());
+  const [auditSelectedYear, setAuditSelectedYear] = React.useState<number>(() => new Date().getFullYear());
 
   const getPersonalWorkerMetrics = React.useCallback(
     (worker: any, tf: "daily" | "weekly" | "monthly" | "yearly" | "cumulative" = "monthly") => {
@@ -541,12 +1008,14 @@ export default function AdminDashboard({
         cur.setDate(cur.getDate() + 1);
       }
 
-      const denominator = elapsedExpectedDays > 0 ? elapsedExpectedDays : (expectedDays > 0 ? expectedDays : 1);
-
-      const performancePercentage = Math.min(100, Number(((attendedDays / denominator) * 100).toFixed(2)));
-      const attendancePercentage = Math.min(100, Number(((attendedDays / denominator) * 100).toFixed(2)));
-      const availabilityPercentage = (denominator + approvedPermissionDays) > 0 
-        ? Math.min(100, Number((((attendedDays + approvedPermissionDays) / (denominator + approvedPermissionDays)) * 100).toFixed(2))) 
+      const performancePercentage = expectedDays > 0 
+        ? Number(((attendedDays / expectedDays) * 100).toFixed(2)) 
+        : 0.00;
+      const attendancePercentage = expectedDays > 0 
+        ? Number(((attendedDays / expectedDays) * 100).toFixed(2)) 
+        : 0.00;
+      const availabilityPercentage = (expectedDays + approvedPermissionDays) > 0 
+        ? Math.min(100, Number((((attendedDays + approvedPermissionDays) / (expectedDays + approvedPermissionDays)) * 100).toFixed(2))) 
         : 100.00;
 
       const workHours = Number((totalCoveredSeconds / 3600).toFixed(2));
@@ -748,6 +1217,37 @@ export default function AdminDashboard({
     return Array.from(yearsSet).sort((a, b) => b.localeCompare(a));
   }, [attendanceRecords]);
 
+  const periodModeOptions = React.useMemo(() => [
+    { value: "all", label: "All Periods" },
+    { value: "daily", label: "Daily (Mon - Sun)" },
+    { value: "weekly", label: "Weekly (W1 - W52)" },
+    { value: "monthly", label: "Monthly Query" },
+    { value: "yearly", label: "Yearly Query" },
+  ], []);
+
+  const daySelectOptions = React.useMemo(() => [
+    { value: "all", label: "All Days (Mon - Sun)" },
+    { value: "1", label: "Monday" },
+    { value: "2", label: "Tuesday" },
+    { value: "3", label: "Wednesday" },
+    { value: "4", label: "Thursday" },
+    { value: "5", label: "Friday" },
+    { value: "6", label: "Saturday" },
+    { value: "0", label: "Sunday" },
+  ], []);
+
+  const weekSelectOptions = React.useMemo(() => [
+    { value: "all", label: "All Weeks (W01 - W52)" },
+    ...Array.from({ length: 52 }, (_, i) => {
+      const w = i + 1;
+      const val = String(w).padStart(2, "0");
+      return {
+        value: val,
+        label: `Week ${w} (W${val})`,
+      };
+    }),
+  ], []);
+
   const monthSelectOptions = React.useMemo(() => [
     { value: "all", label: "All Months" },
     { value: "01", label: "January" },
@@ -772,12 +1272,50 @@ export default function AdminDashboard({
     })),
   ], [availableYears]);
 
+  const getISOWeekRange = React.useCallback((yr: number, wk: number) => {
+    const simple = new Date(yr, 0, 1 + (wk - 1) * 7);
+    const dow = simple.getDay();
+    const ISOweekStart = new Date(simple);
+    if (dow <= 4) {
+      ISOweekStart.setDate(simple.getDate() - simple.getDay() + 1);
+    } else {
+      ISOweekStart.setDate(simple.getDate() + 8 - simple.getDay());
+    }
+    const ISOweekEnd = new Date(ISOweekStart);
+    ISOweekEnd.setDate(ISOweekStart.getDate() + 6);
+    return {
+      startStr: getLocalDateString(ISOweekStart),
+      endStr: getLocalDateString(ISOweekEnd),
+    };
+  }, []);
+
   const getQueriedPeriodLabel = React.useCallback(() => {
     const monthNames: { [key: string]: string } = {
       "01": "January", "02": "February", "03": "March", "04": "April",
       "05": "May", "06": "June", "07": "July", "08": "August",
       "09": "September", "10": "October", "11": "November", "12": "December"
     };
+    const dayNames: { [key: string]: string } = {
+      "1": "Monday", "2": "Tuesday", "3": "Wednesday", "4": "Thursday",
+      "5": "Friday", "6": "Saturday", "0": "Sunday"
+    };
+
+    if (analyticsPeriodMode === "daily") {
+      const dayLabel = selectedAnalyticsDay === "all" ? "Mon - Sun" : (dayNames[selectedAnalyticsDay] || "Day");
+      const yearLabel = selectedAnalyticsYear === "all" ? "" : ` ${selectedAnalyticsYear}`;
+      return `Daily: ${dayLabel}${yearLabel}`;
+    }
+
+    if (analyticsPeriodMode === "weekly") {
+      const weekLabel = selectedAnalyticsWeek === "all" ? "Weeks 1 - 52" : `Week ${parseInt(selectedAnalyticsWeek, 10)}`;
+      const yearLabel = selectedAnalyticsYear === "all" ? "" : ` ${selectedAnalyticsYear}`;
+      return `Weekly: ${weekLabel}${yearLabel}`;
+    }
+
+    if (analyticsPeriodMode === "yearly") {
+      return selectedAnalyticsYear === "all" ? "All Years" : `Year ${selectedAnalyticsYear}`;
+    }
+
     if (selectedAnalyticsMonth !== "all" && selectedAnalyticsYear !== "all") {
       return `${monthNames[selectedAnalyticsMonth] || selectedAnalyticsMonth} ${selectedAnalyticsYear}`;
     } else if (selectedAnalyticsMonth !== "all") {
@@ -786,31 +1324,46 @@ export default function AdminDashboard({
       return `${selectedAnalyticsYear}`;
     }
     return "All Records";
-  }, [selectedAnalyticsMonth, selectedAnalyticsYear]);
+  }, [analyticsPeriodMode, selectedAnalyticsDay, selectedAnalyticsWeek, selectedAnalyticsMonth, selectedAnalyticsYear]);
 
   const handleExportQueriedCsv = React.useCallback(() => {
     let records = attendanceRecords;
     if (selectedAnalyticsYear !== "all") {
       records = records.filter((r) => r.date.startsWith(selectedAnalyticsYear));
     }
-    if (selectedAnalyticsMonth !== "all") {
-      records = records.filter((r) => {
-        const parts = r.date.split("-");
-        return parts[1] === selectedAnalyticsMonth;
-      });
+
+    if (analyticsPeriodMode === "daily") {
+      if (selectedAnalyticsDay !== "all") {
+        const targetDay = parseInt(selectedAnalyticsDay, 10);
+        records = records.filter((r) => parseLocalDate(r.date).getDay() === targetDay);
+      }
+    } else if (analyticsPeriodMode === "weekly") {
+      if (selectedAnalyticsWeek !== "all") {
+        const targetWeek = parseInt(selectedAnalyticsWeek, 10);
+        const targetYear = parseInt(selectedAnalyticsYear !== "all" ? selectedAnalyticsYear : availableYears[0] || "2026", 10);
+        const { startStr, endStr } = getISOWeekRange(targetYear, targetWeek);
+        records = records.filter((r) => r.date >= startStr && r.date <= endStr);
+      }
+    } else if (analyticsPeriodMode === "monthly" || analyticsPeriodMode === "all") {
+      if (selectedAnalyticsMonth !== "all") {
+        records = records.filter((r) => {
+          const parts = r.date.split("-");
+          return parts[1] === selectedAnalyticsMonth;
+        });
+      }
     }
 
-    let csvContent = "S/N,Date,Worker,Time In,Arrival Status,Time Out,Departure Status,Covered Hours (hrs),Assigned Unit\n";
+    let csvContent = "S/N,Date,Worker,Time In,Arrival Status,Time Out,Departure Status,Shift Duration (HH:MM:SS),Assigned Unit\n";
     records.forEach((r, idx) => {
       const worker = workers.find((w) => w.id === r.worker_id);
       const name = worker ? `${worker.firstName} ${worker.lastName}` : "Unknown Worker";
       const deptObj = departments.find((d) => d.id === (r.department_id || worker?.department_id));
       const dept = deptObj?.name || "Unassigned";
-      const hr = r.coveredTime ? (r.coveredTime / 3600).toFixed(2) : "0.00";
-      csvContent += `${idx + 1},${r.date},"${name}",${r.timeIn},${r.statusIn},${r.timeOut || "-"},${r.statusOut || "-"},${hr},"${dept}"\n`;
+      const durationStr = formatDurationHHMMSS(r.coveredTime);
+      csvContent += `${idx + 1},${r.date},"${name}",${r.timeIn},${r.statusIn},${r.timeOut || "-"},${r.statusOut || "-"},${durationStr},"${dept}"\n`;
     });
 
-    const periodLabel = getQueriedPeriodLabel().replace(/\s+/g, "_");
+    const periodLabel = getQueriedPeriodLabel().replace(/[^a-zA-Z0-9_-]/g, "_");
     const filename = `ClockIt_Attendance_${periodLabel}.csv`;
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -822,7 +1375,7 @@ export default function AdminDashboard({
     document.body.removeChild(link);
 
     requestReportCompile("attendance", "csv");
-  }, [attendanceRecords, workers, departments, selectedAnalyticsMonth, selectedAnalyticsYear, getQueriedPeriodLabel, requestReportCompile]);
+  }, [attendanceRecords, workers, departments, analyticsPeriodMode, selectedAnalyticsDay, selectedAnalyticsWeek, selectedAnalyticsMonth, selectedAnalyticsYear, availableYears, getQueriedPeriodLabel, getISOWeekRange, requestReportCompile]);
 
   const formatGraphDateLabel = React.useCallback((dateStr: string): string => {
     if (!dateStr) return "";
@@ -847,17 +1400,99 @@ export default function AdminDashboard({
   }, []);
 
   const dateIntervals = React.useMemo(() => {
-    let intervals: { label: string; startDate: string; endDate: string; displayDate: string }[] = [];
+    let intervals: { label: string; startDate: string; endDate: string; displayDate: string; dayIndex?: number }[] = [];
 
-    // If a month or year query is active:
-    if (selectedAnalyticsMonth !== "all" || selectedAnalyticsYear !== "all") {
+    const targetYearStr = selectedAnalyticsYear !== "all" ? selectedAnalyticsYear : (availableYears[0] || "2026");
+    const targetYearNum = parseInt(targetYearStr, 10);
+
+    if (analyticsPeriodMode === "daily") {
+      const dayNames = [
+        { idx: 1, name: "Monday", short: "Mon" },
+        { idx: 2, name: "Tuesday", short: "Tue" },
+        { idx: 3, name: "Wednesday", short: "Wed" },
+        { idx: 4, name: "Thursday", short: "Thu" },
+        { idx: 5, name: "Friday", short: "Fri" },
+        { idx: 6, name: "Saturday", short: "Sat" },
+        { idx: 0, name: "Sunday", short: "Sun" },
+      ];
+
+      if (selectedAnalyticsDay === "all") {
+        // Monday through Sunday
+        dayNames.forEach(({ idx, name, short }) => {
+          intervals.push({
+            label: name,
+            startDate: `${targetYearStr}-01-01`,
+            endDate: `${targetYearStr}-12-31`,
+            displayDate: name,
+            dayIndex: idx,
+          });
+        });
+      } else {
+        // Specific day across past 7 occurrences or throughout year
+        const targetDay = parseInt(selectedAnalyticsDay, 10);
+        const dayItem = dayNames.find((d) => d.idx === targetDay);
+        const dayName = dayItem?.name || "Day";
+        const today = new Date();
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(today);
+          d.setDate(today.getDate() - i * 7);
+          while (d.getDay() !== targetDay) {
+            d.setDate(d.getDate() - 1);
+          }
+          const dStr = getLocalDateString(d);
+          intervals.push({
+            label: `${dayName} (${formatGraphDateLabel(dStr)})`,
+            startDate: dStr,
+            endDate: dStr,
+            displayDate: dStr,
+            dayIndex: targetDay,
+          });
+        }
+      }
+      return intervals;
+    }
+
+    if (analyticsPeriodMode === "weekly") {
+      if (selectedAnalyticsWeek === "all") {
+        // Week 1 to Week 52 of each year
+        for (let w = 1; w <= 52; w++) {
+          const { startStr, endStr } = getISOWeekRange(targetYearNum, w);
+          intervals.push({
+            label: `W${w}`,
+            startDate: startStr,
+            endDate: endStr,
+            displayDate: startStr,
+          });
+        }
+      } else {
+        // Specific week: Monday through Sunday
+        const targetWeek = parseInt(selectedAnalyticsWeek, 10);
+        const { startStr } = getISOWeekRange(targetYearNum, targetWeek);
+        const startDate = parseLocalDate(startStr);
+        const dayShorts = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+        for (let d = 0; d < 7; d++) {
+          const curD = new Date(startDate);
+          curD.setDate(startDate.getDate() + d);
+          const dStr = getLocalDateString(curD);
+          intervals.push({
+            label: `${dayShorts[d]} (${formatGraphDateLabel(dStr)})`,
+            startDate: dStr,
+            endDate: dStr,
+            displayDate: dStr,
+          });
+        }
+      }
+      return intervals;
+    }
+
+    // Monthly & Yearly logic
+    if (selectedAnalyticsMonth !== "all" || selectedAnalyticsYear !== "all" || analyticsPeriodMode === "monthly" || analyticsPeriodMode === "yearly") {
       const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
       if (selectedAnalyticsMonth !== "all" && selectedAnalyticsYear !== "all") {
         // Specific Month and Year (e.g., March 2026)
-        const yearNum = parseInt(selectedAnalyticsYear, 10);
         const monthNum = parseInt(selectedAnalyticsMonth, 10);
-        const daysInMonth = new Date(yearNum, monthNum, 0).getDate();
+        const daysInMonth = new Date(targetYearNum, monthNum, 0).getDate();
         const monthName = monthNames[monthNum - 1] || "Month";
 
         for (let day = 1; day <= daysInMonth; day++) {
@@ -871,16 +1506,14 @@ export default function AdminDashboard({
           });
         }
       } else if (selectedAnalyticsMonth !== "all" && selectedAnalyticsYear === "all") {
-        // Specific Month across available years (e.g. March)
-        const targetYear = availableYears[0] || "2026";
-        const yearNum = parseInt(targetYear, 10);
+        // Specific Month across available years
         const monthNum = parseInt(selectedAnalyticsMonth, 10);
-        const daysInMonth = new Date(yearNum, monthNum, 0).getDate();
+        const daysInMonth = new Date(targetYearNum, monthNum, 0).getDate();
         const monthName = monthNames[monthNum - 1] || "Month";
 
         for (let day = 1; day <= daysInMonth; day++) {
           const pDay = day < 10 ? `0${day}` : `${day}`;
-          const dateStr = `${targetYear}-${selectedAnalyticsMonth}-${pDay}`;
+          const dateStr = `${targetYearStr}-${selectedAnalyticsMonth}-${pDay}`;
           intervals.push({
             label: `${monthName} ${day}`,
             startDate: dateStr,
@@ -889,11 +1522,11 @@ export default function AdminDashboard({
           });
         }
       } else if (selectedAnalyticsMonth === "all" && selectedAnalyticsYear !== "all") {
-        // All Months in a specific year (e.g. 2026)
+        // All Months in a specific year
         for (let m = 1; m <= 12; m++) {
           const pM = m < 10 ? `0${m}` : `${m}`;
           const startStr = `${selectedAnalyticsYear}-${pM}-01`;
-          const daysInM = new Date(parseInt(selectedAnalyticsYear, 10), m, 0).getDate();
+          const daysInM = new Date(targetYearNum, m, 0).getDate();
           const pDays = daysInM < 10 ? `0${daysInM}` : `${daysInM}`;
           const endStr = `${selectedAnalyticsYear}-${pM}-${pDays}`;
           intervals.push({
@@ -913,7 +1546,6 @@ export default function AdminDashboard({
       (max, r) => (r.date > max ? r.date : max),
       "2026-06-29",
     );
-    // Ensure present-day value is always included as the calculation anchor
     const latestDateStr = todayStr > maxRecordDate ? todayStr : maxRecordDate;
     const latestDate = parseLocalDate(latestDateStr);
 
@@ -949,7 +1581,7 @@ export default function AdminDashboard({
       for (let i = 0; i < 6; i++) {
         const d = new Date(latestDate.getFullYear(), latestDate.getMonth() - (5 - i), 1);
         const startOfMonth = new Date(d.getFullYear(), d.getMonth(), 1);
-        const endOfMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0); // Last day of month
+        const endOfMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0);
         const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
         const monthLabel = `${monthNames[d.getMonth()]} ${d.getFullYear()}`;
         
@@ -964,7 +1596,7 @@ export default function AdminDashboard({
       for (let i = 0; i < 6; i++) {
         const yr = latestDate.getFullYear() - (5 - i);
         const startOfYear = `${yr}-01-01`;
-        const endOfYear = `${yr}-12-31`; // Last day of year
+        const endOfYear = `${yr}-12-31`;
         
         intervals.push({
           label: yr.toString(),
@@ -976,12 +1608,21 @@ export default function AdminDashboard({
     }
 
     return intervals;
-  }, [attendanceRecords, timeframe, selectedAnalyticsMonth, selectedAnalyticsYear, availableYears, formatGraphDateLabel]);
+  }, [attendanceRecords, timeframe, analyticsPeriodMode, selectedAnalyticsDay, selectedAnalyticsWeek, selectedAnalyticsMonth, selectedAnalyticsYear, availableYears, formatGraphDateLabel, getISOWeekRange]);
 
   const workerTrendData = React.useMemo(() => {
     return dateIntervals.map((interval) => {
       const records = attendanceRecords.filter((r) => {
-        if (selectedAnalyticsMonth !== "all" && selectedAnalyticsYear !== "all") {
+        if (selectedAnalyticsYear !== "all" && !r.date.startsWith(selectedAnalyticsYear)) {
+          return false;
+        }
+        if (analyticsPeriodMode === "daily" && interval.dayIndex !== undefined) {
+          if (selectedAnalyticsDay === "all") {
+            return parseLocalDate(r.date).getDay() === interval.dayIndex;
+          }
+          return r.date === interval.startDate;
+        }
+        if (selectedAnalyticsMonth !== "all" && selectedAnalyticsYear !== "all" && analyticsPeriodMode === "monthly") {
           return r.date === interval.startDate;
         }
         return r.date >= interval.startDate && r.date <= interval.endDate;
@@ -1005,12 +1646,21 @@ export default function AdminDashboard({
         perf: perf,
       };
     });
-  }, [dateIntervals, attendanceRecords, selectedAnalyticsMonth, selectedAnalyticsYear, formatGraphDateLabel]);
+  }, [dateIntervals, attendanceRecords, analyticsPeriodMode, selectedAnalyticsDay, selectedAnalyticsMonth, selectedAnalyticsYear, formatGraphDateLabel]);
 
   const deptTrendData = React.useMemo(() => {
     return dateIntervals.map((interval) => {
       const records = attendanceRecords.filter((r) => {
-        if (selectedAnalyticsMonth !== "all" && selectedAnalyticsYear !== "all") {
+        if (selectedAnalyticsYear !== "all" && !r.date.startsWith(selectedAnalyticsYear)) {
+          return false;
+        }
+        if (analyticsPeriodMode === "daily" && interval.dayIndex !== undefined) {
+          if (selectedAnalyticsDay === "all") {
+            return parseLocalDate(r.date).getDay() === interval.dayIndex;
+          }
+          return r.date === interval.startDate;
+        }
+        if (selectedAnalyticsMonth !== "all" && selectedAnalyticsYear !== "all" && analyticsPeriodMode === "monthly") {
           return r.date === interval.startDate;
         }
         return r.date >= interval.startDate && r.date <= interval.endDate;
@@ -1042,21 +1692,29 @@ export default function AdminDashboard({
         perf: perf,
       };
     });
-  }, [dateIntervals, attendanceRecords, workers, selectedAnalyticsMonth, selectedAnalyticsYear, formatGraphDateLabel]);
+  }, [dateIntervals, attendanceRecords, workers, analyticsPeriodMode, selectedAnalyticsDay, selectedAnalyticsMonth, selectedAnalyticsYear, formatGraphDateLabel]);
 
   const timeframeSummary = React.useMemo(() => {
     let records = attendanceRecords;
     if (selectedAnalyticsYear !== "all") {
       records = records.filter((r) => r.date.startsWith(selectedAnalyticsYear));
     }
-    if (selectedAnalyticsMonth !== "all") {
+    if (analyticsPeriodMode === "daily" && selectedAnalyticsDay !== "all") {
+      const targetDay = parseInt(selectedAnalyticsDay, 10);
+      records = records.filter((r) => parseLocalDate(r.date).getDay() === targetDay);
+    } else if (analyticsPeriodMode === "weekly" && selectedAnalyticsWeek !== "all") {
+      const targetWeek = parseInt(selectedAnalyticsWeek, 10);
+      const targetYear = parseInt(selectedAnalyticsYear !== "all" ? selectedAnalyticsYear : availableYears[0] || "2026", 10);
+      const { startStr, endStr } = getISOWeekRange(targetYear, targetWeek);
+      records = records.filter((r) => r.date >= startStr && r.date <= endStr);
+    } else if (selectedAnalyticsMonth !== "all") {
       records = records.filter((r) => {
         const parts = r.date.split("-");
         return parts[1] === selectedAnalyticsMonth;
       });
     }
 
-    if (selectedAnalyticsMonth === "all" && selectedAnalyticsYear === "all") {
+    if (analyticsPeriodMode === "all" && selectedAnalyticsMonth === "all" && selectedAnalyticsYear === "all") {
       records = records.filter((r) =>
         dateIntervals.some(
           (inv) => r.date >= inv.startDate && r.date <= inv.endDate
@@ -1075,7 +1733,7 @@ export default function AdminDashboard({
         .filter(Boolean)
     ).size;
     return { workerCount, deptCount };
-  }, [attendanceRecords, dateIntervals, workers, selectedAnalyticsMonth, selectedAnalyticsYear]);
+  }, [attendanceRecords, dateIntervals, workers, analyticsPeriodMode, selectedAnalyticsDay, selectedAnalyticsWeek, selectedAnalyticsMonth, selectedAnalyticsYear, availableYears, getISOWeekRange]);
 
   const filteredPermissions = React.useMemo(() => {
     const list = permissions.filter((p) => {
@@ -1199,22 +1857,67 @@ export default function AdminDashboard({
   const deptGraphContainerRef = useRef<HTMLDivElement>(null);
   const graphContainerRef = useRef<HTMLDivElement>(null);
 
-  // Shift Register Auto-Scroll logic
+  // Shift Register Auto-Scroll & Progressive Speed Control logic
   const [isShiftRegisterAutoScroll, setIsShiftRegisterAutoScroll] = React.useState<boolean>(false);
+  const [shiftRegisterScrollSpeed, setShiftRegisterScrollSpeed] = React.useState<number>(() => {
+    try {
+      const saved = localStorage.getItem("clockit_shift_register_scroll_speed");
+      if (saved) {
+        const parsed = parseFloat(saved);
+        if (!isNaN(parsed) && parsed >= 0.2 && parsed <= 5.0) {
+          return parsed;
+        }
+      }
+    } catch {}
+    return 1.0;
+  });
   const [isShiftRegisterHovered, setIsShiftRegisterHovered] = React.useState<boolean>(false);
   const isShiftRegisterResettingRef = React.useRef<boolean>(false);
+  const shiftRegisterScrollSpeedRef = React.useRef<number>(shiftRegisterScrollSpeed);
+  const isShiftRegisterHoveredRef = React.useRef<boolean>(isShiftRegisterHovered);
+  const activeTabRef = React.useRef(activeTab);
+
+  React.useEffect(() => {
+    shiftRegisterScrollSpeedRef.current = shiftRegisterScrollSpeed;
+  }, [shiftRegisterScrollSpeed]);
+
+  React.useEffect(() => {
+    isShiftRegisterHoveredRef.current = isShiftRegisterHovered;
+  }, [isShiftRegisterHovered]);
+
+  React.useEffect(() => {
+    activeTabRef.current = activeTab;
+    // Reset hover lock on tab switch so scrolling immediately applies to new tab
+    setIsShiftRegisterHovered(false);
+    isShiftRegisterHoveredRef.current = false;
+  }, [activeTab]);
 
   React.useEffect(() => {
     if (!isShiftRegisterAutoScroll) return;
 
-    const container = attendanceTableContainerRef.current;
-    if (!container) return;
-
     let animationFrameId: number;
     let resetTimeout: NodeJS.Timeout | null = null;
+    let lastTimestamp: number | null = null;
 
-    const scrollStep = () => {
-      if (container && !isShiftRegisterHovered && !isShiftRegisterResettingRef.current) {
+    const getActiveContainer = () => {
+      const currentTab = activeTabRef.current;
+      if (currentTab === "attendance") return attendanceTableContainerRef.current;
+      if (currentTab === "analytics") return leaderboardTableContainerRef.current;
+      if (currentTab === "permissions") return permissionsTableContainerRef.current;
+      if (currentTab === "profiles") return profilesTableContainerRef.current;
+      return attendanceTableContainerRef.current || leaderboardTableContainerRef.current || permissionsTableContainerRef.current || profilesTableContainerRef.current;
+    };
+
+    const scrollStep = (timestamp: number) => {
+      if (lastTimestamp === null) {
+        lastTimestamp = timestamp;
+      }
+      // Calculate elapsed time in seconds, clamped to 0.1s to avoid jumps on tab switch
+      const elapsedSeconds = Math.min((timestamp - lastTimestamp) / 1000, 0.1);
+      lastTimestamp = timestamp;
+
+      const container = getActiveContainer();
+      if (container && !isShiftRegisterHoveredRef.current && !isShiftRegisterResettingRef.current) {
         const isAtBottom =
           container.scrollTop + container.clientHeight >= container.scrollHeight - 3;
         if (isAtBottom) {
@@ -1222,9 +1925,12 @@ export default function AdminDashboard({
           container.scrollTo({ top: 0, behavior: "smooth" });
           resetTimeout = setTimeout(() => {
             isShiftRegisterResettingRef.current = false;
-          }, 1000);
+          }, 1200);
         } else {
-          container.scrollTop += 0.8;
+          // Base rate: 36 pixels per second at 1.0x speed multiplier
+          const currentSpeed = shiftRegisterScrollSpeedRef.current;
+          const deltaScroll = 36 * currentSpeed * elapsedSeconds;
+          container.scrollTop += deltaScroll;
         }
       }
       animationFrameId = requestAnimationFrame(scrollStep);
@@ -1236,7 +1942,7 @@ export default function AdminDashboard({
       cancelAnimationFrame(animationFrameId);
       if (resetTimeout) clearTimeout(resetTimeout);
     };
-  }, [isShiftRegisterAutoScroll, isShiftRegisterHovered]);
+  }, [isShiftRegisterAutoScroll]);
 
   const scrollContainer = (
     ref: React.RefObject<HTMLDivElement | null>,
@@ -1329,19 +2035,19 @@ export default function AdminDashboard({
       case "navy":
         return {
           bg: "bg-[#0B132B] text-[#E1E8F0]",
-          navBg: "bg-[#111A35]/90 border-[#1B2952]",
-          cardBg: "bg-[#111A31] border-[#1C2B54]",
+          navBg: "bg-[#111A35]/95 border-[#1E2D5A]",
+          cardBg: "bg-[#111A35] border-[#1E2D5A]",
           leadCardBg: "bg-gradient-to-br from-[#1A2A56] via-[#142044] to-[#0D152D] border-cyan-500/60 shadow-lg shadow-cyan-950/40 ring-1 ring-cyan-500/30",
-          innerBg: "bg-[#243361] border-[#233566]",
+          innerBg: "bg-[#182449] border-[#223363]",
           textTitle: "text-[#ECEFF4]",
           textMuted: "text-[#94A5C1]",
           accentText: "text-cyan-400",
-          accentBorder: "border-[#20315F]",
-          buttonSelected: "bg-[#243361] text-cyan-455 border border-[#34498C]",
-          tableRowHover: "hover:bg-[#152244]/50 border-[#1C2B54]",
-          tableRowDivider: "divide-[#1C2B54] border-[#1C2B54]",
+          accentBorder: "border-[#223363]",
+          buttonSelected: "bg-[#1E2D5A] text-cyan-400 border border-[#3A5096]",
+          tableRowHover: "hover:bg-[#182449]/70 border-[#1E2D5A]",
+          tableRowDivider: "divide-[#1E2D5A] border-[#1E2D5A]",
           inputBg:
-            "bg-[#111A31] focus:bg-[#162342] text-[#E1E8F0] border-[#1C2B54]",
+            "bg-[#0E162E] focus:bg-[#142042] text-[#E1E8F0] border-[#223363]",
         };
       case "dark":
         return {
@@ -1381,82 +2087,421 @@ export default function AdminDashboard({
     }
   }, [theme]);
 
+  const currentLayout = (localSettings?.layout || settings?.layout || "top") as "top" | "side";
+
   return (
     <div
-      className={`min-h-screen flex flex-col font-sans select-none pb-20 justify-start transition-colors duration-300 ${adminThemeClass.bg}`}
+      className={`min-h-screen flex ${
+        currentLayout === "side" ? "flex-col md:flex-row" : "flex-col"
+      } font-sans select-none pb-20 justify-start transition-colors duration-300 ${adminThemeClass.bg}`}
     >
-      {/* Upper Navigation Bar */}
-      <nav
-        className={`px-6 py-4 border-b backdrop-blur-md flex items-center justify-between sticky top-0 z-30 shadow-xl transition-colors duration-300 ${adminThemeClass.navBg}`}
-      >
-        <div className="flex items-center space-x-3 select-none min-w-0">
-          <div className="h-10 w-10 bg-gradient-to-r from-cyan-500 to-blue-600 rounded-xl flex items-center justify-center text-white overflow-hidden shadow-lg shadow-cyan-950/45 transition-all select-none shrink-0">
-            {companyLogoUrl ? (
-              <img
-                src={companyLogoUrl}
-                alt="Company Logo"
-                className="h-full w-full object-cover select-none pointer-events-none"
-              />
-            ) : (
-              <Shield className="h-5 w-5" />
-            )}
+      {/* ----------------- TOP NAV LAYOUT ----------------- */}
+      {currentLayout === "top" && (
+        <nav
+          className={`px-6 py-4 border-b backdrop-blur-md flex items-center justify-between sticky top-0 z-30 shadow-xl transition-colors duration-300 ${adminThemeClass.navBg}`}
+        >
+          <div className="flex items-center space-x-3 select-none min-w-0">
+            <div className="h-10 w-10 bg-gradient-to-r from-cyan-500 to-blue-600 rounded-xl flex items-center justify-center text-white overflow-hidden shadow-lg shadow-cyan-950/45 transition-transform duration-300 hover:scale-105 select-none shrink-0">
+              {companyLogoUrl ? (
+                <img
+                  src={companyLogoUrl}
+                  alt="Company Logo"
+                  className="h-full w-full object-cover select-none pointer-events-none"
+                />
+              ) : (
+                <Shield className="h-5 w-5" />
+              )}
+            </div>
+            <div className="min-w-0">
+              <h1
+                className={`font-display font-bold text-xs sm:text-sm md:text-base leading-tight whitespace-nowrap truncate max-w-[120px] sm:max-w-[200px] md:max-w-xs ${adminThemeClass.textTitle}`}
+                title={tenant.name}
+              >
+                {tenant.name}
+              </h1>
+              <p
+                className={`text-[9px] sm:text-[10px] font-mono tracking-wide whitespace-nowrap truncate max-w-[120px] sm:max-w-[200px] md:max-w-xs ${adminThemeClass.textMuted}`}
+              >
+                Admin Portal
+              </p>
+            </div>
           </div>
-          <div className="min-w-0">
-            <h1
-              className={`font-display font-bold text-xs sm:text-sm md:text-base leading-tight whitespace-nowrap truncate max-w-[120px] sm:max-w-[200px] md:max-w-xs ${adminThemeClass.textTitle}`}
-              title={tenant.name}
-            >
-              {tenant.name}
-            </h1>
-            <p
-              className={`text-[9px] sm:text-[10px] font-mono tracking-wide whitespace-nowrap truncate max-w-[120px] sm:max-w-[200px] md:max-w-xs ${adminThemeClass.textMuted}`}
-            >
-              Admin Portal
-            </p>
-          </div>
-        </div>
 
-        <div className="flex items-center space-x-3">
-          {/* Notification Broadcaster Button */}
-          <div className="relative">
+          <div className="flex items-center space-x-3">
+            {/* Notification Broadcaster Button */}
+            <div className="relative">
+              <button
+                id="admin_open_notifications"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowAdminNotifDrawer(!showAdminNotifDrawer);
+                }}
+                className={`group h-9 w-9 sm:h-10 sm:w-10 rounded-xl border flex items-center justify-center cursor-pointer transition-all duration-200 hover:scale-105 active:scale-95 relative ${adminThemeClass.inputBg}`}
+                title="System Notifications"
+              >
+                <AnimatedBellIcon className="h-4 w-4 text-cyan-400" />
+                {notifications.filter((n: any) => !n.read).length > 0 && (
+                  <span className="absolute -top-1 -right-1 h-3.5 w-3.5 rounded-full bg-cyan-500 text-black text-[8px] font-bold flex items-center justify-center shrink-0 animate-pulse">
+                    {notifications.filter((n: any) => !n.read).length}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {/* Fullscreen Mode Shortcut (CTRL+F / ESC) */}
             <button
-              id="admin_open_notifications"
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowAdminNotifDrawer(!showAdminNotifDrawer);
-              }}
-              className={`h-9 w-9 sm:h-10 sm:w-10 rounded-xl border flex items-center justify-center cursor-pointer transition-all relative ${adminThemeClass.inputBg}`}
-              title="System Notifications"
+              id="admin_fullscreen_toggle"
+              onClick={toggleFullscreen}
+              className={`group h-9 w-9 sm:h-10 sm:w-10 rounded-xl border flex items-center justify-center cursor-pointer transition-all duration-200 hover:scale-105 active:scale-95 ${adminThemeClass.inputBg}`}
+              title={isFullscreen ? "Exit Fullscreen (ESC)" : "Enter Fullscreen (CTRL+F)"}
             >
-              <Bell className="h-4 w-4 text-cyan-400" />
-              {notifications.filter((n: any) => !n.read).length > 0 && (
-                <span className="absolute -top-1 -right-1 h-3.5 w-3.5 rounded-full bg-cyan-500 text-black text-[8px] font-bold flex items-center justify-center shrink-0">
-                  {notifications.filter((n: any) => !n.read).length}
-                </span>
+              {isFullscreen ? (
+                <Minimize className="h-4 w-4 text-cyan-400 group-hover:scale-115 group-active:scale-95 transition-transform duration-300" />
+              ) : (
+                <Maximize className="h-4 w-4 text-cyan-400 group-hover:scale-115 group-active:scale-95 transition-transform duration-300" />
               )}
             </button>
+
+            {/* QR Code Action Button Beside Settings */}
+            <button
+              id="admin_open_qr"
+              onClick={() => setShowQrModal(true)}
+              className={`group h-9 w-9 sm:h-10 sm:w-10 rounded-xl border flex items-center justify-center cursor-pointer transition-all duration-200 hover:scale-105 active:scale-95 ${adminThemeClass.inputBg}`}
+              title="Terminal QR Code"
+            >
+              <AnimatedQrCodeIcon className="h-4 w-4 text-cyan-400" />
+            </button>
+
+            <button
+              id="admin_open_settings"
+              onClick={() => setShowSettingsMenu(!showSettingsMenu)}
+              className={`group h-9 w-9 sm:h-10 sm:w-10 rounded-xl flex items-center justify-center cursor-pointer border transition-colors duration-200 ${adminThemeClass.inputBg}`}
+              title={translations.settingsTitle}
+            >
+              <AnimatedMenuIcon className="h-4 w-4 text-cyan-400" />
+            </button>
           </div>
+        </nav>
+      )}
 
-          {/* QR Code Action Button Beside Settings */}
-          <button
-            id="admin_open_qr"
-            onClick={() => setShowQrModal(true)}
-            className={`h-9 w-9 sm:h-10 sm:w-10 rounded-xl border flex items-center justify-center cursor-pointer transition-all ${adminThemeClass.inputBg}`}
-            title="Terminal QR Code"
+      {/* ----------------- SIDE LAYOUT (DESKTOP ASIDE + MOBILE TOP BAR) ----------------- */}
+      {currentLayout === "side" && (
+        <>
+          {/* Mobile Top Navbar for Side Layout */}
+          <nav
+            className={`md:hidden px-4 py-3 border-b backdrop-blur-md flex items-center justify-between sticky top-0 z-30 shadow-xl transition-colors duration-300 ${adminThemeClass.navBg}`}
           >
-            <QrCode className="h-4 w-4 text-cyan-400" />
-          </button>
+            <div className="flex items-center space-x-2.5 min-w-0">
+              <div className="h-9 w-9 bg-gradient-to-r from-cyan-500 to-blue-600 rounded-xl flex items-center justify-center text-white overflow-hidden shadow-md shrink-0">
+                {companyLogoUrl ? (
+                  <img
+                    src={companyLogoUrl}
+                    alt="Company Logo"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <Shield className="h-4 w-4" />
+                )}
+              </div>
+              <div className="min-w-0">
+                <h1 className={`font-display font-bold text-xs leading-tight truncate ${adminThemeClass.textTitle}`}>
+                  {tenant.name}
+                </h1>
+                <p className={`text-[9px] font-mono tracking-wide truncate ${adminThemeClass.textMuted}`}>
+                  Admin Portal
+                </p>
+              </div>
+            </div>
 
-          <button
-            id="admin_open_settings"
-            onClick={() => setShowSettingsMenu(!showSettingsMenu)}
-            className={`h-9 w-9 sm:h-10 sm:w-10 rounded-xl flex items-center justify-center cursor-pointer border transition-all ${adminThemeClass.inputBg}`}
-            title={translations.settingsTitle}
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowAdminNotifDrawer(!showAdminNotifDrawer);
+                }}
+                className={`h-8 w-8 rounded-xl border flex items-center justify-center cursor-pointer relative ${adminThemeClass.inputBg}`}
+                title="System Notifications"
+              >
+                <AnimatedBellIcon className="h-3.5 w-3.5 text-cyan-400" />
+                {notifications.filter((n: any) => !n.read).length > 0 && (
+                  <span className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-cyan-500 text-black text-[7px] font-bold flex items-center justify-center">
+                    {notifications.filter((n: any) => !n.read).length}
+                  </span>
+                )}
+              </button>
+
+              <button
+                onClick={toggleFullscreen}
+                className={`h-8 w-8 rounded-xl border flex items-center justify-center cursor-pointer ${adminThemeClass.inputBg}`}
+                title="Fullscreen"
+              >
+                <AnimatedFullscreenIcon isFullscreen={isFullscreen} className="h-3.5 w-3.5 text-cyan-400" />
+              </button>
+
+              <button
+                onClick={() => setShowQrModal(true)}
+                className={`h-8 w-8 rounded-xl border flex items-center justify-center cursor-pointer ${adminThemeClass.inputBg}`}
+                title="Terminal QR Code"
+              >
+                <AnimatedQrCodeIcon className="h-3.5 w-3.5 text-cyan-400" />
+              </button>
+
+              <button
+                onClick={() => setShowSettingsMenu(!showSettingsMenu)}
+                className={`h-8 w-8 rounded-xl flex items-center justify-center cursor-pointer border ${adminThemeClass.inputBg}`}
+                title={translations.settingsTitle}
+              >
+                <AnimatedMenuIcon className="h-3.5 w-3.5 text-cyan-400" />
+              </button>
+            </div>
+          </nav>
+
+          {/* Desktop Left Side Navigation */}
+          <aside
+            style={{ width: isSideNavExpanded ? "17rem" : "5rem" }}
+            className={`hidden md:flex flex-col justify-between fixed left-0 top-0 bottom-0 h-screen z-40 border-r shadow-2xl backdrop-blur-md shrink-0 transition-all duration-300 group/sidebar ${adminThemeClass.navBg} ${adminThemeClass.accentBorder}`}
           >
-            <Menu className="h-4 w-4 text-cyan-400" />
-          </button>
-        </div>
-      </nav>
+            {/* Top Company Profile Header */}
+            <div className={`p-4 border-b flex items-center ${isSideNavExpanded ? "justify-between gap-2" : "justify-center relative"} overflow-hidden border-neutral-200/10 dark:border-neutral-800/40`}>
+              <div className={`flex items-center ${isSideNavExpanded ? "space-x-3 min-w-0 flex-1" : "justify-center"}`}>
+                <div className="h-10 w-10 bg-gradient-to-r from-cyan-500 to-blue-600 rounded-xl flex items-center justify-center text-white overflow-hidden shadow-lg shadow-cyan-950/45 select-none shrink-0">
+                  {companyLogoUrl ? (
+                    <img
+                      src={companyLogoUrl}
+                      alt="Company Logo"
+                      className="h-full w-full object-cover select-none pointer-events-none"
+                    />
+                  ) : (
+                    <Shield className="h-5 w-5 animate-pulse" />
+                  )}
+                </div>
+                {isSideNavExpanded && (
+                  <div className="min-w-0 flex-1">
+                    <h1
+                      className={`font-display font-bold text-xs sm:text-sm leading-tight truncate ${adminThemeClass.textTitle}`}
+                      title={companyProfileName || currentTenant.name || tenant.name}
+                    >
+                      {companyProfileName || currentTenant.name || tenant.name}
+                    </h1>
+                    <div className="flex flex-col space-y-0.5 mt-0.5">
+                      <p className={`text-[9px] font-mono tracking-wide truncate flex items-center gap-1 ${adminThemeClass.textMuted}`} title={companyProfileEmail || currentTenant.email || tenant.email}>
+                        <Mail className="h-2.5 w-2.5 shrink-0 opacity-70" />
+                        <span className="truncate">{companyProfileEmail || currentTenant.email || tenant.email || "No email linked"}</span>
+                      </p>
+                      <p className={`text-[9px] font-mono tracking-wide truncate flex items-center gap-1 ${adminThemeClass.textMuted}`} title={companyProfilePhone || currentTenant.phone || tenant.phone}>
+                        <Phone className="h-2.5 w-2.5 shrink-0 opacity-70" />
+                        <span className="truncate">{companyProfilePhone ? formatPhoneNumber(companyProfilePhone) : (currentTenant.phone ? formatPhoneNumber(currentTenant.phone) : (tenant.phone ? formatPhoneNumber(tenant.phone) : "No phone linked"))}</span>
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Middle Action Controls List */}
+            <div className="flex-1 p-3 space-y-2.5 overflow-y-auto scrollbar-none">
+              {isSideNavExpanded && (
+                <div className="px-3 pt-2 pb-1">
+                  <span className={`text-[9px] font-mono uppercase font-bold tracking-wider ${adminThemeClass.textMuted}`}>
+                    Quick Actions & Controls
+                  </span>
+                </div>
+              )}
+
+              {/* 1. System Notifications */}
+              <button
+                id="side_admin_open_notifications"
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowAdminNotifDrawer(!showAdminNotifDrawer);
+                }}
+                className={`group/btn w-full p-2 rounded-xl border flex items-center transition-all duration-300 cursor-pointer ${
+                  isSideNavExpanded ? "gap-3 px-3" : "justify-center px-1"
+                } ${
+                  showAdminNotifDrawer
+                    ? "bg-cyan-500/15 border-cyan-500 text-cyan-400 shadow-md"
+                    : `${adminThemeClass.inputBg} hover:border-cyan-500/40 hover:bg-neutral-500/5`
+                }`}
+                title="System Notifications"
+              >
+                <div className="relative w-10 h-10 rounded-xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center shrink-0 transition-colors duration-300 group-hover/btn:bg-cyan-500/20">
+                  <AnimatedBellIcon className="h-4.5 w-4.5" />
+                  {notifications.filter((n: any) => !n.read).length > 0 && (
+                    <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-cyan-500 text-black text-[8px] font-bold flex items-center justify-center shrink-0 shadow-sm animate-pulse">
+                      {notifications.filter((n: any) => !n.read).length}
+                    </span>
+                  )}
+                </div>
+                {isSideNavExpanded && (
+                  <div className="flex-1 text-left min-w-0 flex items-center justify-between">
+                    <div>
+                      <span className={`block font-semibold text-xs truncate ${adminThemeClass.textTitle}`}>
+                        Notifications
+                      </span>
+                      <span className={`block text-[10px] truncate ${adminThemeClass.textMuted}`}>
+                        {notifications.filter((n: any) => !n.read).length > 0
+                          ? `${notifications.filter((n: any) => !n.read).length} active alerts`
+                          : "Alert Broadcaster"}
+                      </span>
+                    </div>
+                    {notifications.filter((n: any) => !n.read).length > 0 && (
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-cyan-500 text-black font-mono">
+                        {notifications.filter((n: any) => !n.read).length}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </button>
+
+              {/* 2. Fullscreen Mode Shortcut */}
+              <button
+                id="side_admin_fullscreen_toggle"
+                type="button"
+                onClick={toggleFullscreen}
+                className={`group/btn w-full p-2 rounded-xl border flex items-center transition-all duration-300 cursor-pointer ${
+                  isSideNavExpanded ? "gap-3 px-3" : "justify-center px-1"
+                } ${adminThemeClass.inputBg} hover:border-cyan-500/40 hover:bg-neutral-500/5`}
+                title={isFullscreen ? "Exit Fullscreen (ESC)" : "Enter Fullscreen (CTRL+F)"}
+              >
+                <div className="relative w-10 h-10 rounded-xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center shrink-0 transition-colors duration-300 group-hover/btn:bg-cyan-500/20">
+                  {isFullscreen ? (
+                    <Minimize className="h-4.5 w-4.5 transition-transform duration-300 group-hover/btn:scale-115 group-hover/btn:-rotate-6" />
+                  ) : (
+                    <Maximize className="h-4.5 w-4.5 transition-transform duration-300 group-hover/btn:scale-115 group-hover/btn:rotate-6" />
+                  )}
+                </div>
+                {isSideNavExpanded && (
+                  <div className="flex-1 text-left min-w-0">
+                    <span className={`block font-semibold text-xs truncate ${adminThemeClass.textTitle}`}>
+                      {isFullscreen ? "Exit Fullscreen" : "Fullscreen Mode"}
+                    </span>
+                    <span className={`block text-[10px] truncate ${adminThemeClass.textMuted}`}>
+                      Toggle Display Mode
+                    </span>
+                  </div>
+                )}
+              </button>
+
+              {/* 3. Terminal QR Code */}
+              <button
+                id="side_admin_open_qr"
+                type="button"
+                onClick={() => setShowQrModal(true)}
+                className={`group/btn w-full p-2 rounded-xl border flex items-center transition-all duration-300 cursor-pointer ${
+                  isSideNavExpanded ? "gap-3 px-3" : "justify-center px-1"
+                } ${adminThemeClass.inputBg} hover:border-cyan-500/40 hover:bg-neutral-500/5`}
+                title="Terminal QR Code"
+              >
+                <div className="relative w-10 h-10 rounded-xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center shrink-0 transition-colors duration-300 group-hover/btn:bg-cyan-500/20">
+                  <AnimatedQrCodeIcon className="h-4.5 w-4.5" />
+                </div>
+                {isSideNavExpanded && (
+                  <div className="flex-1 text-left min-w-0">
+                    <span className={`block font-semibold text-xs truncate ${adminThemeClass.textTitle}`}>
+                      Terminal QR Code
+                    </span>
+                    <span className={`block text-[10px] truncate ${adminThemeClass.textMuted}`}>
+                      Mobile Check-In Terminal
+                    </span>
+                  </div>
+                )}
+              </button>
+
+              {/* 4. Menu Settings */}
+              <button
+                id="side_admin_open_settings"
+                type="button"
+                onClick={() => setShowSettingsMenu(!showSettingsMenu)}
+                className={`group/btn w-full p-2 rounded-xl border flex items-center transition-all duration-300 cursor-pointer ${
+                  isSideNavExpanded ? "gap-3 px-3" : "justify-center px-1"
+                } ${
+                  showSettingsMenu
+                    ? "bg-cyan-500/15 border-cyan-500 text-cyan-400 shadow-md"
+                    : `${adminThemeClass.inputBg} hover:border-cyan-500/40 hover:bg-neutral-500/5`
+                }`}
+                title={translations.settingsTitle || "Menu Settings"}
+              >
+                <div className="relative w-10 h-10 rounded-xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center shrink-0 transition-colors duration-300 group-hover/btn:bg-cyan-500/20">
+                  <AnimatedMenuIcon className="h-4.5 w-4.5" />
+                </div>
+                {isSideNavExpanded && (
+                  <div className="flex-1 text-left min-w-0">
+                    <span className={`block font-semibold text-xs truncate ${adminThemeClass.textTitle}`}>
+                      {translations.settingsTitle || "Menu Settings"}
+                    </span>
+                    <span className={`block text-[10px] truncate ${adminThemeClass.textMuted}`}>
+                      Layout, Themes & Options
+                    </span>
+                  </div>
+                )}
+              </button>
+            </div>
+
+            {/* Bottom Footer Area */}
+            <div className="p-3 border-t border-neutral-200/10 dark:border-neutral-800/40 space-y-2">
+              {/* Expand / Collapse Navigation Toggle Button */}
+              <button
+                id="side_admin_toggle_expand"
+                type="button"
+                onClick={() => setIsSideNavExpanded(!isSideNavExpanded)}
+                className={`group/btn w-full p-2 rounded-xl border flex items-center transition-all duration-300 cursor-pointer ${
+                  isSideNavExpanded ? "gap-3 px-3" : "justify-center px-1"
+                } ${adminThemeClass.inputBg} hover:border-cyan-500/40 hover:bg-neutral-500/5`}
+                title={isSideNavExpanded ? "Collapse Sidebar" : "Expand Sidebar"}
+              >
+                <div className="relative w-10 h-10 rounded-xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center shrink-0 transition-colors duration-300 group-hover/btn:bg-cyan-500/20">
+                  {isSideNavExpanded ? (
+                    <PanelLeftClose className="h-4.5 w-4.5 transition-transform duration-300 group-hover/btn:scale-115 group-hover/btn:-rotate-12" />
+                  ) : (
+                    <PanelLeftOpen className="h-4.5 w-4.5 transition-transform duration-300 group-hover/btn:scale-115 group-hover/btn:rotate-12" />
+                  )}
+                </div>
+                {isSideNavExpanded && (
+                  <div className="flex-1 text-left min-w-0">
+                    <span className={`block font-semibold text-xs truncate ${adminThemeClass.textTitle}`}>
+                      Collapse Navigation
+                    </span>
+                    <span className={`block text-[10px] truncate ${adminThemeClass.textMuted}`}>
+                      Compact icon view
+                    </span>
+                  </div>
+                )}
+              </button>
+
+              {/* Sign-out button */}
+              <button
+                type="button"
+                onClick={() => setShowConfirmLogout(true)}
+                className={`group/btn w-full p-2 rounded-xl border border-red-500/20 bg-red-500/5 hover:bg-red-500/10 text-red-500 flex items-center transition-all duration-300 cursor-pointer ${
+                  isSideNavExpanded ? "gap-3 px-3" : "justify-center px-1"
+                }`}
+                title="Log Out"
+              >
+                <div className="relative w-10 h-10 rounded-xl bg-red-500/10 text-red-500 flex items-center justify-center shrink-0 transition-colors duration-300 group-hover/btn:bg-red-500/20">
+                  <LogOut className="h-4.5 w-4.5 transition-transform duration-300 group-hover/btn:scale-115 group-hover/btn:translate-x-0.5" />
+                </div>
+                {isSideNavExpanded && (
+                  <span className="font-bold text-xs truncate">
+                    {translations.logout || "Log Out"}
+                  </span>
+                )}
+              </button>
+            </div>
+          </aside>
+        </>
+      )}
+
+      {/* Main Content Area Wrapper */}
+      <div
+        className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ${
+          currentLayout === "side"
+            ? isSideNavExpanded
+              ? "md:ml-68"
+              : "md:ml-20"
+            : ""
+        }`}
+      >
 
       <AnimatePresence>
         {showAdminNotifDrawer && (
@@ -1635,7 +2680,7 @@ export default function AdminDashboard({
         {subscription?.status === "trial" && (
           <div className="bg-amber-500 text-white px-5 py-4 rounded-2xl text-xs sm:text-sm font-semibold flex items-center justify-between shadow-xs select-none">
             <span className="flex items-center space-x-1.5">
-              <span>⚠️</span>
+              <span></span>
               <span>{translations.trialRemaining}</span>
             </span>
             <button
@@ -1649,91 +2694,129 @@ export default function AdminDashboard({
 
         {reportFeedback && (
           <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-4 rounded-xl text-xs font-bold font-mono">
-            🖨️ {reportFeedback}
+             {reportFeedback}
           </div>
         )}
 
-        {/* Dynamic Summary Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Dynamic Summary Cards Collapsible Container */}
+        <div className={`rounded-3xl border shadow-md overflow-hidden transition-all duration-300 ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}>
           <div
-            className={`p-6 rounded-3xl border shadow-xl hover:brightness-110 active:brightness-95 transition-all ${adminThemeClass.cardBg}`}
+            onClick={() => setIsSummaryCardsExpanded((prev) => !prev)}
+            className={`p-4 sm:p-5 flex items-center justify-between gap-3 cursor-pointer select-none transition-colors hover:bg-neutral-500/5 ${
+              isSummaryCardsExpanded ? "border-b border-neutral-200/10" : ""
+            }`}
+            title={isSummaryCardsExpanded ? "Click to collapse summary metrics" : "Click to expand summary metrics"}
           >
-            <span
-              className={`text-[10px] uppercase font-bold tracking-wide flex items-center space-x-1 ${adminThemeClass.textMuted}`}
-            >
-              <Clock className="h-3.5 w-3.5 text-cyan-600 dark:text-cyan-400" />
-              <span>{translations.totCheckins}</span>
-            </span>
-            <h3
-              className={`text-3xl font-display font-bold mt-2 ${adminThemeClass.textTitle}`}
-            >
-              {formatCompact(attendanceRecords.length)}
-            </h3>
+            <div className="flex items-center space-x-3 min-w-0">
+              <div className={`p-2 rounded-xl border flex items-center justify-center shrink-0 transition-all ${
+                isSummaryCardsExpanded ? "bg-cyan-500/10 text-cyan-500 border-cyan-500/20" : `${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`
+              }`}>
+                {isSummaryCardsExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </div>
+              <h3 className={`font-display font-semibold text-base sm:text-lg ${adminThemeClass.textTitle}`}>
+                Executive Summary Metrics
+              </h3>
+            </div>
+            <div className="flex items-center space-x-2 shrink-0">
+              <span className={`text-[10px] font-mono font-bold uppercase tracking-wider hidden sm:inline-block ${adminThemeClass.textMuted}`}>
+                {isSummaryCardsExpanded ? "Click to Collapse" : "Click to Expand"}
+              </span>
+            </div>
           </div>
 
-          <div
-            className={`p-6 rounded-3xl border shadow-xl hover:brightness-110 active:brightness-95 transition-all ${adminThemeClass.cardBg}`}
-          >
-            <span
-              className={`text-[10px] uppercase font-bold tracking-wide flex items-center space-x-1 ${adminThemeClass.textMuted}`}
-            >
-              <Users className="h-3.5 w-3.5 text-teal-600 dark:text-teal-400" />
-              <span>{translations.activeToday}</span>
-            </span>
-            <h3
-              className={`text-3xl font-display font-bold mt-2 ${adminThemeClass.textTitle}`}
-            >
-              {
-                attendanceRecords.filter(
-                  (a) => a.date === getLocalDateString(),
-                ).length
-              }
-            </h3>
-          </div>
+          <AnimatePresence initial={false}>
+            {isSummaryCardsExpanded && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.25, ease: "easeInOut" }}
+                className="overflow-hidden p-4 sm:p-5"
+              >
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div
+                    className={`p-6 rounded-3xl border shadow-xl hover:brightness-110 active:brightness-95 transition-all ${adminThemeClass.cardBg}`}
+                  >
+                    <span
+                      className={`text-[10px] uppercase font-bold tracking-wide flex items-center space-x-1 ${adminThemeClass.textMuted}`}
+                    >
+                      <Clock className="h-3.5 w-3.5 text-cyan-600 dark:text-cyan-400" />
+                      <span>{translations.totCheckins}</span>
+                    </span>
+                    <h3
+                      className={`text-3xl font-display font-bold mt-2 ${adminThemeClass.textTitle}`}
+                    >
+                      {formatCompact(attendanceRecords.length)}
+                    </h3>
+                  </div>
 
-          <div
-            className={`p-6 rounded-3xl border shadow-xl hover:brightness-110 active:brightness-95 transition-all ${adminThemeClass.cardBg}`}
-          >
-            <span
-              className={`text-[10px] uppercase font-bold tracking-wide flex items-center space-x-1 ${adminThemeClass.textMuted}`}
-            >
-              <Layers className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
-              <span>{translations.deptRatio}</span>
-            </span>
-            <h3
-              className={`text-3xl font-display font-bold mt-2 ${adminThemeClass.textTitle}`}
-            >
-              {(() => {
-                const todayStr2 = getLocalDateString();
-                const activeDeptsToday = new Set(
-                  attendanceRecords
-                    .filter((a) => a.date === todayStr2)
-                    .map((a) => a.department_id)
-                    .filter(Boolean),
-                );
-                return `${activeDeptsToday.size}/${departments.length}`;
-              })()}
-            </h3>
-          </div>
+                  <div
+                    className={`p-6 rounded-3xl border shadow-xl hover:brightness-110 active:brightness-95 transition-all ${adminThemeClass.cardBg}`}
+                  >
+                    <span
+                      className={`text-[10px] uppercase font-bold tracking-wide flex items-center space-x-1 ${adminThemeClass.textMuted}`}
+                    >
+                      <Users className="h-3.5 w-3.5 text-teal-600 dark:text-teal-400" />
+                      <span>{translations.activeToday}</span>
+                    </span>
+                    <h3
+                      className={`text-3xl font-display font-bold mt-2 ${adminThemeClass.textTitle}`}
+                    >
+                      {
+                        attendanceRecords.filter(
+                          (a) => a.date === getLocalDateString(),
+                        ).length
+                      }
+                    </h3>
+                  </div>
 
-          <div
-            className={`p-6 rounded-3xl border shadow-xl hover:brightness-110 active:brightness-95 transition-all ${adminThemeClass.cardBg}`}
-          >
-            <span
-              className={`text-[10px] uppercase font-bold tracking-wide flex items-center space-x-1 ${adminThemeClass.textMuted}`}
-            >
-              <FileText className="h-3.5 w-3.5 text-red-500 dark:text-red-400" />
-              <span>{translations.permRequests}</span>
-            </span>
-            <h3
-              className={`text-3xl font-display font-bold mt-2 ${adminThemeClass.textTitle}`}
-            >
-              {
-                permissions.filter((p) => p.status === PermissionStatus.PENDING)
-                  .length
-              }
-            </h3>
-          </div>
+                  <div
+                    className={`p-6 rounded-3xl border shadow-xl hover:brightness-110 active:brightness-95 transition-all ${adminThemeClass.cardBg}`}
+                  >
+                    <span
+                      className={`text-[10px] uppercase font-bold tracking-wide flex items-center space-x-1 ${adminThemeClass.textMuted}`}
+                    >
+                      <Layers className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+                      <span>{translations.deptRatio}</span>
+                    </span>
+                    <h3
+                      className={`text-3xl font-display font-bold mt-2 ${adminThemeClass.textTitle}`}
+                    >
+                      {(() => {
+                        const todayStr2 = getLocalDateString();
+                        const activeDeptsToday = new Set(
+                          attendanceRecords
+                            .filter((a) => a.date === todayStr2)
+                            .map((a) => a.department_id)
+                            .filter(Boolean),
+                        );
+                        return `${activeDeptsToday.size}/${departments.length}`;
+                      })()}
+                    </h3>
+                  </div>
+
+                  <div
+                    className={`p-6 rounded-3xl border shadow-xl hover:brightness-110 active:brightness-95 transition-all ${adminThemeClass.cardBg}`}
+                  >
+                    <span
+                      className={`text-[10px] uppercase font-bold tracking-wide flex items-center space-x-1 ${adminThemeClass.textMuted}`}
+                    >
+                      <FileText className="h-3.5 w-3.5 text-red-500 dark:text-red-400" />
+                      <span>{translations.permRequests}</span>
+                    </span>
+                    <h3
+                      className={`text-3xl font-display font-bold mt-2 ${adminThemeClass.textTitle}`}
+                    >
+                      {
+                        permissions.filter((p) => p.status === PermissionStatus.PENDING)
+                          .length
+                      }
+                    </h3>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* Segment Tabs Navigation Card */}
@@ -1817,171 +2900,233 @@ export default function AdminDashboard({
         {/* -------------------- TAB AREA: ATTENDANCE LOGS -------------------- */}
         {activeTab === "attendance" && (
           <div className="space-y-6">
-            {/* Filter Drawer */}
+            {/* Filter Drawer - Expandable and Collapsible */}
             <div
-              className={`p-6 rounded-3xl border shadow-xl space-y-4 ${adminThemeClass.cardBg}`}
+              className={`rounded-3xl border shadow-xl overflow-hidden transition-all duration-300 ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
             >
               <div
-                className={`flex items-center justify-between border-b pb-3 mb-2 ${adminThemeClass.accentBorder}`}
+                onClick={() => setIsSearchFiltersExpanded((prev) => !prev)}
+                className={`p-4 sm:p-5 flex items-center justify-between gap-3 cursor-pointer select-none transition-colors hover:bg-neutral-500/5 ${
+                  isSearchFiltersExpanded ? "border-b border-neutral-200/10" : ""
+                }`}
+                title={isSearchFiltersExpanded ? "Click to collapse search filters" : "Click to expand search filters"}
               >
-                <h4
-                  className={`font-semibold text-xs uppercase tracking-wider flex items-center space-x-1 ${adminThemeClass.textTitle}`}
-                >
-                  <Filter className="h-4 w-4 text-cyan-600 dark:text-cyan-400" />
-                  <span>Interactive Search Filters</span>
-                </h4>
+                <div className="flex items-center space-x-3 min-w-0">
+                  <div className={`p-2 rounded-xl border flex items-center justify-center shrink-0 transition-all ${
+                    isSearchFiltersExpanded ? "bg-cyan-500/10 text-cyan-500 border-cyan-500/20" : `${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`
+                  }`}>
+                    {isSearchFiltersExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Filter className="h-4 w-4 text-cyan-600 dark:text-cyan-400" />
+                    <h4
+                      className={`font-display font-semibold text-base sm:text-lg ${adminThemeClass.textTitle}`}
+                    >
+                      Interactive Search Filters
+                    </h4>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-2 shrink-0">
+                  {(filterName || filterDept !== "all" || filterStatus !== "all" || filterDateStart || filterDateEnd) && (
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/10 text-cyan-500 border border-cyan-500/20">
+                      Active Filters
+                    </span>
+                  )}
+                  <span className={`text-[10px] font-mono font-bold uppercase tracking-wider hidden sm:inline-block ${adminThemeClass.textMuted}`}>
+                    {isSearchFiltersExpanded ? "Click to Collapse" : "Click to Expand"}
+                  </span>
+                </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="flex flex-col space-y-1">
-                  <label
-                    className={`text-[10px] font-bold uppercase ${adminThemeClass.textMuted}`}
+              <AnimatePresence initial={false}>
+                {isSearchFiltersExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                    className="overflow-hidden p-6 space-y-4"
                   >
-                    Search Employee
-                  </label>
-                  <div className="relative w-full">
-                    <input
-                      type="text"
-                      placeholder="Search by worker name..."
-                      value={filterName}
-                      onChange={(e) => setFilterName(e.target.value)}
-                      className="w-full border border-neutral-300 rounded-xl pl-4 pr-10 py-2.5 text-xs outline-none focus:border-cyan-500 min-h-[44px] bg-white text-neutral-900 placeholder-neutral-400 caret-neutral-900 cursor-text shadow-xs"
-                    />
-                    {filterName && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                      <div className="flex flex-col space-y-1">
+                        <label
+                          className={`text-[10px] font-bold uppercase ${adminThemeClass.textMuted}`}
+                        >
+                          Search Employee
+                        </label>
+                        <div className="relative w-full">
+                          <input
+                            type="text"
+                            placeholder="Search by worker name..."
+                            value={filterName}
+                            onChange={(e) => setFilterName(e.target.value)}
+                            className="w-full border border-neutral-300 rounded-xl pl-4 pr-10 py-2.5 text-xs outline-none focus:border-cyan-500 min-h-[44px] bg-white text-neutral-900 placeholder-neutral-400 caret-neutral-900 cursor-text shadow-xs"
+                          />
+                          {filterName && (
+                            <button
+                              type="button"
+                              onClick={() => setFilterName("")}
+                              className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-900 p-1 hover:bg-neutral-100 rounded-full transition-colors cursor-pointer"
+                              title="Clear Search"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col space-y-1">
+                        <label
+                          className={`text-[10px] font-bold uppercase ${adminThemeClass.textMuted}`}
+                        >
+                          Department
+                        </label>
+                        <CustomSelect
+                          value={filterDept}
+                          onChange={(val) => setFilterDept(val)}
+                          className={`border rounded-xl px-4 py-2.5 text-xs outline-none focus:border-cyan-500 min-h-[44px] ${adminThemeClass.inputBg}`}
+                          options={[
+                            { value: "all", label: "All Departments" },
+                            ...departments.map((d) => ({
+                              value: d.id,
+                              label: d.name,
+                            })),
+                          ]}
+                          theme={theme}
+                        />
+                      </div>
+
+                      <div className="flex flex-col space-y-1">
+                        <label
+                          className={`text-[10px] font-bold uppercase ${adminThemeClass.textMuted}`}
+                        >
+                          Arrival Flag
+                        </label>
+                        <CustomSelect
+                          value={filterStatus}
+                          onChange={(val) => setFilterStatus(val)}
+                          className={`border rounded-xl px-4 py-2.5 text-xs outline-none focus:border-cyan-500 min-h-[44px] ${adminThemeClass.inputBg}`}
+                          options={[
+                            { value: "all", label: "Any Status Flag" },
+                            { value: AttendanceStatus.PRESENT, label: "On Time" },
+                            { value: AttendanceStatus.LATE, label: "Late Arrivals" },
+                          ]}
+                          theme={theme}
+                        />
+                      </div>
+
+                      <div className="flex flex-col space-y-1">
+                        <label
+                          className={`text-[10px] font-bold uppercase ${adminThemeClass.textMuted}`}
+                        >
+                          Date Bounds
+                        </label>
+                        <div className="flex space-x-2">
+                          <div className="w-1/2">
+                            <CustomDatePicker
+                              value={filterDateStart}
+                              onChange={setFilterDateStart}
+                              className={`border ${adminThemeClass.inputBg}`}
+                              placeholder="Start Date"
+                              theme={theme}
+                            />
+                          </div>
+                          <div className="w-1/2">
+                            <CustomDatePicker
+                              value={filterDateEnd}
+                              onChange={setFilterDateEnd}
+                              className={`border ${adminThemeClass.inputBg}`}
+                              placeholder="End Date"
+                              alignRight={true}
+                              theme={theme}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Exports triggers */}
+                    <div
+                      className={`flex justify-end pt-2 border-t mt-2 space-x-3 ${adminThemeClass.accentBorder}`}
+                    >
                       <button
-                        type="button"
-                        onClick={() => setFilterName("")}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-900 p-1 hover:bg-neutral-100 rounded-full transition-colors cursor-pointer"
-                        title="Clear Search"
+                        onClick={() => requestReportCompile("attendance", "csv")}
+                        className={`px-4 py-2 border rounded-xl text-xs font-semibold flex items-center space-x-1 transition-all min-h-[44px] cursor-pointer ${adminThemeClass.inputBg}`}
                       >
-                        <X className="h-3.5 w-3.5" />
+                        <Download className="h-3.5 w-3.5" />
+                        <span>{translations.exportCsv}</span>
                       </button>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex flex-col space-y-1">
-                  <label
-                    className={`text-[10px] font-bold uppercase ${adminThemeClass.textMuted}`}
-                  >
-                    Department
-                  </label>
-                  <CustomSelect
-                    value={filterDept}
-                    onChange={(val) => setFilterDept(val)}
-                    className={`border rounded-xl px-4 py-2.5 text-xs outline-none focus:border-cyan-500 min-h-[44px] ${adminThemeClass.inputBg}`}
-                    options={[
-                      { value: "all", label: "All Departments" },
-                      ...departments.map((d) => ({
-                        value: d.id,
-                        label: d.name,
-                      })),
-                    ]}
-                    theme={theme}
-                  />
-                </div>
-
-                <div className="flex flex-col space-y-1">
-                  <label
-                    className={`text-[10px] font-bold uppercase ${adminThemeClass.textMuted}`}
-                  >
-                    Arrival Flag
-                  </label>
-                  <CustomSelect
-                    value={filterStatus}
-                    onChange={(val) => setFilterStatus(val)}
-                    className={`border rounded-xl px-4 py-2.5 text-xs outline-none focus:border-cyan-500 min-h-[44px] ${adminThemeClass.inputBg}`}
-                    options={[
-                      { value: "all", label: "Any Status Flag" },
-                      { value: AttendanceStatus.PRESENT, label: "On Time" },
-                      { value: AttendanceStatus.LATE, label: "Late Arrivals" },
-                    ]}
-                    theme={theme}
-                  />
-                </div>
-
-                <div className="flex flex-col space-y-1">
-                  <label
-                    className={`text-[10px] font-bold uppercase ${adminThemeClass.textMuted}`}
-                  >
-                    Date Bounds
-                  </label>
-                  <div className="flex space-x-2">
-                    <div className="w-1/2">
-                      <CustomDatePicker
-                        value={filterDateStart}
-                        onChange={setFilterDateStart}
-                        className={`border ${adminThemeClass.inputBg}`}
-                        placeholder="Start Date"
-                        theme={theme}
-                      />
+                      <button
+                        onClick={() => requestReportCompile("attendance", "pdf")}
+                        className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white rounded-xl text-xs font-semibold flex items-center space-x-1 transition-all shadow-md min-h-[44px] cursor-pointer"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        <span>{translations.exportPdf}</span>
+                      </button>
                     </div>
-                    <div className="w-1/2">
-                      <CustomDatePicker
-                        value={filterDateEnd}
-                        onChange={setFilterDateEnd}
-                        className={`border ${adminThemeClass.inputBg}`}
-                        placeholder="End Date"
-                        alignRight={true}
-                        theme={theme}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Exports triggers */}
-              <div
-                className={`flex justify-end pt-2 border-t mt-2 space-x-3 ${adminThemeClass.accentBorder}`}
-              >
-                <button
-                  onClick={() => requestReportCompile("attendance", "csv")}
-                  className={`px-4 py-2 border rounded-xl text-xs font-semibold flex items-center space-x-1 transition-all min-h-[44px] cursor-pointer ${adminThemeClass.inputBg}`}
-                >
-                  <Download className="h-3.5 w-3.5" />
-                  <span>{translations.exportCsv}</span>
-                </button>
-                <button
-                  onClick={() => requestReportCompile("attendance", "pdf")}
-                  className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white rounded-xl text-xs font-semibold flex items-center space-x-1 transition-all shadow-md min-h-[44px] cursor-pointer"
-                >
-                  <Download className="h-3.5 w-3.5" />
-                  <span>{translations.exportPdf}</span>
-                </button>
-              </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
             {/* Attendance Double Tables: Check-In/Check-Out list */}
             <div
-              className={`rounded-3xl border overflow-hidden shadow-xl ${adminThemeClass.cardBg}`}
+              className={`rounded-3xl border overflow-hidden shadow-xl transition-all duration-300 ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
             >
-              <div className={`px-6 py-4 border-b flex items-center justify-between gap-3 ${adminThemeClass.innerBg}`}>
-                <span
-                  className={`font-bold text-xs uppercase tracking-wider ${adminThemeClass.textTitle}`}
-                >
-                  Shift Register
-                </span>
+              <div
+                onClick={() => setIsShiftRegisterExpanded((prev) => !prev)}
+                className={`px-4 sm:px-6 py-3.5 sm:py-4 flex flex-wrap items-center justify-between gap-3 cursor-pointer select-none transition-colors hover:bg-neutral-500/5 ${adminThemeClass.innerBg} ${
+                  isShiftRegisterExpanded ? "border-b border-neutral-200/10" : ""
+                }`}
+                title={isShiftRegisterExpanded ? "Click to collapse shift register" : "Click to expand shift register"}
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-xl border flex items-center justify-center shrink-0 transition-all ${
+                    isShiftRegisterExpanded ? "bg-cyan-500/10 text-cyan-500 border-cyan-500/20" : `${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`
+                  }`}>
+                    {isShiftRegisterExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  </div>
+                  <span
+                    className={`font-black text-sm sm:text-base uppercase tracking-wider ${adminThemeClass.textTitle}`}
+                  >
+                    Shift Register
+                  </span>
+                  {isShiftRegisterAutoScroll && (
+                    <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse mr-1.5" />
+                      Auto-Scrolling ({shiftRegisterScrollSpeed.toFixed(1)}x)
+                    </span>
+                  )}
+                </div>
 
-                <div className="flex items-center space-x-3">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3" onClick={(e) => e.stopPropagation()}>
                   {/* Auto-Scroll Switch Button */}
                   <div
+                    id="shift_register_auto_scroll_toggle"
                     className={`flex items-center space-x-2 px-3 py-1.5 rounded-xl border select-none cursor-pointer transition-all ${
                       isShiftRegisterAutoScroll
-                        ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-500"
-                        : "bg-neutral-500/10 border-neutral-500/20 text-neutral-400 hover:border-neutral-500/40"
+                        ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-600 dark:text-emerald-400 shadow-sm"
+                        : "bg-neutral-500/10 border-neutral-500/20 text-neutral-500 dark:text-neutral-400 hover:border-neutral-500/40"
                     }`}
-                    onClick={() => setIsShiftRegisterAutoScroll((prev) => !prev)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsShiftRegisterAutoScroll((prev) => !prev);
+                    }}
                     title="Toggle Auto-Scrolling for Shift Register"
                   >
-                    <span className="text-xs font-semibold">
+                    <span className="text-xs font-semibold whitespace-nowrap">
                       Auto-Scroll
                     </span>
                     <button
                       type="button"
                       role="switch"
                       aria-checked={isShiftRegisterAutoScroll}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsShiftRegisterAutoScroll((prev) => !prev);
+                      }}
                       className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                        isShiftRegisterAutoScroll ? "bg-emerald-500" : "bg-neutral-600 dark:bg-neutral-700"
+                        isShiftRegisterAutoScroll ? "bg-emerald-500" : "bg-neutral-400 dark:bg-neutral-700"
                       }`}
                     >
                       <span
@@ -1992,10 +3137,105 @@ export default function AdminDashboard({
                     </button>
                   </div>
 
+                  {/* Progressive Linear Speed-Control Bar */}
+                  <AnimatePresence>
+                    {isShiftRegisterAutoScroll && (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.95, y: -2 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95, y: -2 }}
+                        transition={{ duration: 0.18 }}
+                        id="shift_register_speed_control_bar"
+                        className={`flex items-center space-x-2 px-2.5 sm:px-3 py-1 rounded-xl border select-none transition-all shadow-xs ${
+                          theme === "light"
+                            ? "bg-white border-neutral-200 text-slate-700"
+                            : theme === "navy"
+                            ? "bg-[#162344] border-[#253766] text-[#ECEFF4]"
+                            : theme === "army"
+                            ? "bg-[#1E2E18] border-[#374C2E] text-[#E6F4DE]"
+                            : "bg-[#141414] border-[#262626] text-neutral-200"
+                        }`}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="flex items-center space-x-1 shrink-0 text-emerald-500">
+                          <Sliders className="w-3.5 h-3.5" />
+                          <span className="text-[10px] sm:text-[11px] font-semibold tracking-wide uppercase">
+                            Speed
+                          </span>
+                        </div>
+
+                        {/* Linear Progressive Slider Track */}
+                        <div className="flex items-center space-x-1 sm:space-x-1.5">
+                          <span className="text-[9px] sm:text-[10px] text-neutral-400 font-mono hidden xs:inline">
+                            0.2x
+                          </span>
+                          <div className="relative flex items-center w-16 sm:w-24 md:w-32">
+                            <input
+                              id="shift_register_speed_slider"
+                              type="range"
+                              min={0.2}
+                              max={5.0}
+                              step={0.1}
+                              value={shiftRegisterScrollSpeed}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value);
+                                setShiftRegisterScrollSpeed(val);
+                                localStorage.setItem("clockit_shift_register_scroll_speed", String(val));
+                              }}
+                              aria-label="Shift Register Auto-Scroll Speed"
+                              className="w-full h-1.5 rounded-lg appearance-none cursor-pointer accent-emerald-500 bg-neutral-250 dark:bg-neutral-700 focus:outline-none"
+                              style={{
+                                background: `linear-gradient(to right, #10b981 0%, #10b981 ${((shiftRegisterScrollSpeed - 0.2) / (5.0 - 0.2)) * 100}%, ${
+                                  theme === "light" ? "#e2e8f0" : "#2d3748"
+                                } ${((shiftRegisterScrollSpeed - 0.2) / (5.0 - 0.2)) * 100}%, ${
+                                  theme === "light" ? "#e2e8f0" : "#2d3748"
+                                } 100%)`,
+                              }}
+                            />
+                          </div>
+                          <span className="text-[9px] sm:text-[10px] text-neutral-400 font-mono hidden xs:inline">
+                            5.0x
+                          </span>
+                        </div>
+
+                        {/* Dynamic Speed Value Pill */}
+                        <span className="text-[10px] sm:text-[11px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 shrink-0 min-w-[34px] text-center">
+                          {shiftRegisterScrollSpeed.toFixed(1)}x
+                        </span>
+
+                        {/* Quick Preset Buttons on tablet & desktop */}
+                        <div className="hidden lg:flex items-center space-x-1 pl-1 border-l border-neutral-500/20">
+                          {[0.5, 1.0, 2.0, 4.0].map((preset) => (
+                            <button
+                              key={preset}
+                              type="button"
+                              id={`shift_register_preset_${preset}x`}
+                              onClick={() => {
+                                setShiftRegisterScrollSpeed(preset);
+                                localStorage.setItem("clockit_shift_register_scroll_speed", String(preset));
+                              }}
+                              className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold transition-all ${
+                                Math.abs(shiftRegisterScrollSpeed - preset) < 0.05
+                                  ? "bg-emerald-500 text-white shadow-xs"
+                                  : "text-neutral-400 hover:text-emerald-500 hover:bg-neutral-500/10"
+                              }`}
+                              title={`Set speed to ${preset}x`}
+                            >
+                              {preset}x
+                            </button>
+                          ))}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
                   <button
                     type="button"
                     id="at_a_glance_attendance_btn"
-                    onClick={() => setIsAtAGlanceOpen(!isAtAGlanceOpen)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsAtAGlanceOpen(!isAtAGlanceOpen);
+                    }}
                     className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold border transition-all shadow-sm ${
                       isAtAGlanceOpen
                         ? "bg-emerald-500 text-white border-emerald-500 shadow-emerald-500/20"
@@ -2004,12 +3244,25 @@ export default function AdminDashboard({
                     title="A Glance Attendance Overlay"
                   >
                     <Eye className="w-4 h-4 shrink-0" />
-                    <span>A Glance Attendance</span>
+                    <span>A Glance</span>
                   </button>
+
+                  <span className={`text-[10px] font-mono font-bold uppercase tracking-wider hidden sm:inline-block ${adminThemeClass.textMuted}`}>
+                    {isShiftRegisterExpanded ? "Click to Collapse" : "Click to Expand"}
+                  </span>
                 </div>
               </div>
 
-              <div className="relative group/scroll w-full">
+              <AnimatePresence initial={false}>
+                {isShiftRegisterExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                    className="overflow-hidden"
+                  >
+                    <div className="relative group/scroll w-full">
                 {/* Top-center invisible down arrow button */}
                 <button
                   type="button"
@@ -2045,24 +3298,24 @@ export default function AdminDashboard({
                   onTouchEnd={() => setIsShiftRegisterHovered(false)}
                   className="max-h-[600px] overflow-auto scrollbar-none"
                 >
-                  <table className="w-full text-left text-xs">
-                    <thead>
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead className={`sticky top-0 z-20 ${adminThemeClass.innerBg} shadow-xs`}>
                       <tr
-                        className={`border-b font-bold uppercase tracking-wider select-none text-[10px] ${adminThemeClass.innerBg} ${adminThemeClass.textMuted}`}
+                        className={`border-b font-bold uppercase tracking-wider select-none text-[10px] ${adminThemeClass.innerBg} ${adminThemeClass.textMuted} ${adminThemeClass.accentBorder}`}
                       >
-                        <th className="p-4">{translations.sn}</th>
-                        <th className="p-4">{translations.colDate}</th>
-                        <th className="p-4">{translations.colWorker}</th>
-                        <th className="p-4">{translations.colIn}</th>
-                        <th className="p-4">{translations.colStatusIn}</th>
+                        <th className={`p-4 ${adminThemeClass.innerBg}`}>{translations.sn}</th>
+                        <th className={`p-4 ${adminThemeClass.innerBg}`}>{translations.colDate}</th>
+                        <th className={`p-4 ${adminThemeClass.innerBg}`}>{translations.colWorker}</th>
+                        <th className={`p-4 ${adminThemeClass.innerBg}`}>{translations.colIn}</th>
+                        <th className={`p-4 ${adminThemeClass.innerBg}`}>{translations.colStatusIn}</th>
                         {settings.onlyShowTimeIn === false && (
                           <>
-                            <th className="p-4">{translations.colOut}</th>
-                            <th className="p-4">{translations.colStatusOut}</th>
-                            <th className="p-4">Shift Hours</th>
+                            <th className={`p-4 ${adminThemeClass.innerBg}`}>{translations.colOut}</th>
+                            <th className={`p-4 ${adminThemeClass.innerBg}`}>{translations.colStatusOut}</th>
+                            <th className={`p-4 ${adminThemeClass.innerBg}`}>Shift Hours</th>
                           </>
                         )}
-                        <th className="p-4">{translations.colDept}</th>
+                        <th className={`p-4 ${adminThemeClass.innerBg}`}>{translations.colDept}</th>
                       </tr>
                     </thead>
                     <tbody
@@ -2089,7 +3342,7 @@ export default function AdminDashboard({
 
                           return (
                             <React.Fragment key={group.date}>
-                              <tr className={`border-t border-b ${isGroupOffDay ? "bg-neutral-200 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400" : adminThemeClass.innerBg}`}>
+                              <tr className={`border-t border-b ${adminThemeClass.accentBorder} ${isGroupOffDay ? "bg-neutral-200 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400" : adminThemeClass.innerBg}`}>
                                 <td
                                   colSpan={settings.onlyShowTimeIn !== false ? 6 : 9}
                                   className={`px-4 py-3 font-bold font-mono text-[10px] uppercase tracking-wider ${isGroupOffDay ? "text-neutral-600 dark:text-neutral-400" : adminThemeClass.accentText}`}
@@ -2122,7 +3375,7 @@ export default function AdminDashboard({
                                 return (
                                   <tr
                                     key={`${r.date}-${r.worker_id}-${idx}`}
-                                    className={`transition-colors duration-100 border-b ${
+                                    className={`transition-colors duration-100 border-b ${adminThemeClass.accentBorder} ${
                                       hasApprovedLeave
                                         ? "bg-amber-500/15 dark:bg-amber-950/40 border-amber-500/40 text-amber-900 dark:text-amber-200 hover:bg-amber-500/25"
                                         : isWorkerOffDay
@@ -2211,10 +3464,7 @@ export default function AdminDashboard({
                                       <td
                                         className={`p-4 font-mono font-bold ${adminThemeClass.accentText}`}
                                       >
-                                        {r.coveredTime
-                                          ? (r.coveredTime / 3600).toFixed(2)
-                                          : "0.00"}{" "}
-                                        hrs
+                                        {formatDurationHHMMSS(r.coveredTime)}
                                       </td>
                                     </>
                                   )}
@@ -2268,6 +3518,9 @@ export default function AdminDashboard({
                 Records pagination active: Showing up to 200 records per
                 dashboard requirement bounds.
               </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
         )}
@@ -2275,50 +3528,125 @@ export default function AdminDashboard({
         {/* -------------------- TAB AREA: ANALYTICS DESK -------------------- */}
         {activeTab === "analytics" && (
           <div className="space-y-8 select-none">
-            {/* Exports triggers & Month/Year Query Desk */}
+            {/* Analytics Desk: Executive Summary Metrics & Visual Graphs Container */}
             <div
-              className={`flex flex-col lg:flex-row lg:items-center lg:justify-between p-4 sm:p-5 border rounded-3xl gap-4 shadow-sm ${adminThemeClass.cardBg}`}
+              className={`rounded-3xl border shadow-xl overflow-hidden transition-all duration-300 ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
             >
-              <div className="flex items-center space-x-3">
-                <div className="p-2.5 sm:p-3 bg-cyan-50 dark:bg-cyan-950/20 rounded-2xl border border-cyan-100 dark:border-cyan-900/30">
-                  <BarChart3 className="h-5 w-5 text-cyan-600 dark:text-cyan-400" />
+              <div
+                onClick={() => setIsAnalyticsDeskExpanded((prev) => !prev)}
+                className={`p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 cursor-pointer select-none transition-colors hover:bg-neutral-500/5 ${adminThemeClass.innerBg} ${
+                  isAnalyticsDeskExpanded ? "border-b border-neutral-200/10" : ""
+                }`}
+                title={isAnalyticsDeskExpanded ? "Click to collapse analytics desk" : "Click to expand analytics desk"}
+              >
+                <div className="flex items-center space-x-3">
+                  <div className={`p-2 rounded-xl border flex items-center justify-center shrink-0 transition-all ${
+                    isAnalyticsDeskExpanded ? "bg-cyan-500/10 text-cyan-500 border-cyan-500/20" : `${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`
+                  }`}>
+                    {isAnalyticsDeskExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  </div>
+                  <div className="p-2.5 sm:p-3 bg-cyan-50 dark:bg-cyan-950/20 rounded-2xl border border-cyan-100 dark:border-cyan-900/30 shrink-0">
+                    <BarChart3 className="h-5 w-5 text-cyan-600 dark:text-cyan-400" />
+                  </div>
+                  <div>
+                    <h4
+                      className={`font-bold text-sm ${adminThemeClass.textTitle}`}
+                    >
+                      {translations.tabAnalytics || "Analytics Desk"}
+                    </h4>
+                    <p className={`text-[11px] ${adminThemeClass.textMuted}`}>
+                      {translations.precomputedMetrics ||
+                        "Precomputed workspace metrics & query attendance graphs"}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h4
-                    className={`font-bold text-sm ${adminThemeClass.textTitle}`}
-                  >
-                    {translations.tabAnalytics || "Analytics Desk"}
-                  </h4>
-                  <p className={`text-[11px] ${adminThemeClass.textMuted}`}>
-                    {translations.precomputedMetrics ||
-                      "Precomputed workspace metrics & query attendance graphs"}
-                  </p>
+
+                <div className="flex items-center space-x-2 shrink-0 self-end lg:self-center" onClick={(e) => e.stopPropagation()}>
+                  <span className={`text-[10px] font-mono font-bold uppercase tracking-wider hidden sm:inline-block ${adminThemeClass.textMuted}`}>
+                    {isAnalyticsDeskExpanded ? "Click to Collapse" : "Click to Expand"}
+                  </span>
                 </div>
               </div>
 
-              {/* Month & Year Query Controls */}
+              <AnimatePresence initial={false}>
+                {isAnalyticsDeskExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                    className="overflow-hidden p-4 sm:p-6 space-y-6"
+                  >
+
+              {/* Month, Week, Day & Year Query Controls */}
               <div className="flex flex-wrap items-center gap-3">
                 <div
-                  className={`flex flex-wrap items-center gap-2 px-3.5 py-2 border rounded-2xl shadow-xs ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                  className={`flex flex-wrap items-center gap-2.5 px-3.5 py-2 border rounded-2xl shadow-xs ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
                 >
                   <Calendar className="h-4 w-4 text-cyan-600 dark:text-cyan-400 shrink-0" />
                   <span className={`text-xs font-bold whitespace-nowrap ${adminThemeClass.textTitle}`}>
-                    Query Period:
+                    Queries Period:
                   </span>
                   
-                  {/* Custom Month Dropdown Modal */}
-                  <div className="w-36">
+                  {/* Period Mode Selector */}
+                  <div className="w-38 sm:w-44">
                     <CustomSelect
-                      value={selectedAnalyticsMonth}
-                      onChange={(val) => setSelectedAnalyticsMonth(val)}
-                      options={monthSelectOptions}
+                      value={analyticsPeriodMode}
+                      onChange={(val: any) => {
+                        setAnalyticsPeriodMode(val);
+                        if (val === "daily") {
+                          setSelectedAnalyticsDay("all");
+                        } else if (val === "weekly") {
+                          setSelectedAnalyticsWeek("all");
+                        } else if (val === "monthly") {
+                          if (selectedAnalyticsMonth === "all") setSelectedAnalyticsMonth("01");
+                        }
+                      }}
+                      options={periodModeOptions}
                       theme={theme}
                       className={`text-xs font-bold rounded-2xl px-3 py-1.5 border outline-none cursor-pointer transition-all shadow-xs min-h-[38px] ${adminThemeClass.inputBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle}`}
                     />
                   </div>
 
+                  {/* Dynamic Sub-query Dropdowns based on Period Mode */}
+                  {analyticsPeriodMode === "daily" && (
+                    <div className="w-36 sm:w-40">
+                      <CustomSelect
+                        value={selectedAnalyticsDay}
+                        onChange={(val) => setSelectedAnalyticsDay(val)}
+                        options={daySelectOptions}
+                        theme={theme}
+                        className={`text-xs font-bold rounded-2xl px-3 py-1.5 border outline-none cursor-pointer transition-all shadow-xs min-h-[38px] ${adminThemeClass.inputBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle}`}
+                      />
+                    </div>
+                  )}
+
+                  {analyticsPeriodMode === "weekly" && (
+                    <div className="w-38 sm:w-44">
+                      <CustomSelect
+                        value={selectedAnalyticsWeek}
+                        onChange={(val) => setSelectedAnalyticsWeek(val)}
+                        options={weekSelectOptions}
+                        theme={theme}
+                        className={`text-xs font-bold rounded-2xl px-3 py-1.5 border outline-none cursor-pointer transition-all shadow-xs min-h-[38px] ${adminThemeClass.inputBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle}`}
+                      />
+                    </div>
+                  )}
+
+                  {(analyticsPeriodMode === "all" || analyticsPeriodMode === "monthly") && (
+                    <div className="w-32 sm:w-36">
+                      <CustomSelect
+                        value={selectedAnalyticsMonth}
+                        onChange={(val) => setSelectedAnalyticsMonth(val)}
+                        options={monthSelectOptions}
+                        theme={theme}
+                        className={`text-xs font-bold rounded-2xl px-3 py-1.5 border outline-none cursor-pointer transition-all shadow-xs min-h-[38px] ${adminThemeClass.inputBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle}`}
+                      />
+                    </div>
+                  )}
+
                   {/* Custom Year Dropdown Modal */}
-                  <div className="w-28">
+                  <div className="w-28 sm:w-32">
                     <CustomSelect
                       value={selectedAnalyticsYear}
                       onChange={(val) => setSelectedAnalyticsYear(val)}
@@ -2328,14 +3656,17 @@ export default function AdminDashboard({
                     />
                   </div>
 
-                  {(selectedAnalyticsMonth !== "all" || selectedAnalyticsYear !== "all") && (
+                  {(analyticsPeriodMode !== "all" || selectedAnalyticsMonth !== "all" || selectedAnalyticsYear !== "all" || selectedAnalyticsDay !== "all" || selectedAnalyticsWeek !== "all") && (
                     <button
                       type="button"
                       onClick={() => {
+                        setAnalyticsPeriodMode("all");
+                        setSelectedAnalyticsDay("all");
+                        setSelectedAnalyticsWeek("all");
                         setSelectedAnalyticsMonth("all");
                         setSelectedAnalyticsYear("all");
                       }}
-                      className="text-[11px] font-extrabold text-cyan-600 dark:text-cyan-400 hover:underline px-1 cursor-pointer"
+                      className="text-[11px] font-extrabold text-cyan-600 dark:text-cyan-400 hover:underline px-1.5 py-1 cursor-pointer"
                       title="Reset Query filter to All Records"
                     >
                       Reset
@@ -2350,13 +3681,12 @@ export default function AdminDashboard({
                 >
                   <Download className="h-4 w-4" />
                   <span>
-                    {selectedAnalyticsMonth !== "all" || selectedAnalyticsYear !== "all"
+                    {analyticsPeriodMode !== "all" || selectedAnalyticsMonth !== "all" || selectedAnalyticsYear !== "all"
                       ? `Export CSV (${getQueriedPeriodLabel()})`
                       : (translations.downloadCsv || "Download CSV Compiles")}
                   </span>
                 </button>
               </div>
-            </div>
 
             {/* Custom SVG Charts of Workers Compare & Department Trends (Consolidated) */}
             <div
@@ -2459,48 +3789,38 @@ export default function AdminDashboard({
               </div>
 
               {/* Chart Visual Section */}
-              <div className="relative group/scroll w-full overflow-visible">
-                {/* Left Scroll Chevron */}
-                <button
-                  type="button"
-                  onClick={() => scrollContainer(graphContainerRef, "left")}
-                  className="absolute left-2 top-1/2 -translate-y-1/2 z-20 p-2 rounded-full bg-white/70 dark:bg-black/70 border border-neutral-200 dark:border-neutral-800 backdrop-blur-md opacity-85 md:opacity-0 md:group-hover/scroll:opacity-100 transition-all duration-200 cursor-pointer text-slate-700 dark:text-neutral-300 hover:scale-110 active:scale-95 shadow-sm"
-                  title="Scroll Left"
-                >
-                  <ChevronLeft className="h-4.5 w-4.5" />
-                </button>
-
-                {/* Graph Scrollable Viewport */}
+              <div className="relative w-full overflow-hidden">
+                {/* Graph Viewport (Scaled 0.5x, fits container for at-a-glance viewing) */}
                 <div
                   ref={graphContainerRef}
-                  className={`overflow-x-auto scrollbar-none w-full rounded-3xl p-4 sm:p-5 border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                  className={`w-full rounded-3xl p-3 sm:p-5 border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
                 >
                   <div className="w-full h-[380px] flex flex-col justify-between select-none relative overflow-visible">
                     {/* The Chart SVG container */}
-                    <div className="w-full flex-1 flex flex-col justify-between relative mt-2 overflow-visible">
+                    <div className="w-full flex-1 flex flex-col justify-between relative mt-1 overflow-visible">
                       <div
                         ref={chartContainerRef}
-                        className="w-full h-[320px] flex items-end justify-start relative pb-1 overflow-hidden animate-fade-in"
+                        className="w-full h-[310px] flex items-end justify-start relative pb-1 overflow-hidden animate-fade-in"
                       >
                         {(() => {
                           const trendData = analyticsViewTab === "workers" ? workerTrendData : deptTrendData;
                           
-                          // Fluid responsiveness: SVG width always matches 100% of the container width
-                          const containerW = Math.max(chartDimensions.width, 280);
+                          // Fluid responsiveness: fills 100% of container width
+                          const containerW = Math.max(chartDimensions.width, 320);
                           const height = Math.max(chartDimensions.height || 290, 200);
 
                           const width = containerW;
                           const axisLeft = 40;
-                          const axisRightPadding = 28;
+                          const axisRightPadding = 20;
                           const axisRight = width - axisRightPadding;
-                          const axisTop = 18;
-                          const axisBottom = height - 30;
-                          const plotWidth = Math.max(axisRight - axisLeft, 50);
-                          const plotHeight = Math.max(axisBottom - axisTop, 50);
+                          const axisTop = 16;
+                          const axisBottom = height - 26;
+                          const plotWidth = Math.max(axisRight - axisLeft, 60);
+                          const plotHeight = Math.max(axisBottom - axisTop, 40);
 
                           const isLine = chartViewMode === "line";
 
-                          const barWidth = Math.min(36, Math.max(10, plotWidth / (trendData.length * 2.2)));
+                          const barWidth = Math.min(36, Math.max(10, plotWidth / (trendData.length * 1.8)));
                           const barStart = axisLeft + barWidth / 2 + 4;
                           const barEnd = axisRight - barWidth / 2 - 4;
                           const barRange = Math.max(barEnd - barStart, 10);
@@ -2542,6 +3862,7 @@ export default function AdminDashboard({
                               <svg
                                 className="w-full h-full overflow-visible"
                                 viewBox={`0 0 ${width} ${height}`}
+                                preserveAspectRatio="none"
                               >
                                 <defs>
                                   <linearGradient
@@ -2554,7 +3875,7 @@ export default function AdminDashboard({
                                     <stop
                                       offset="0%"
                                       stopColor={analyticsViewTab === "workers" ? "#06b6d4" : "#14b8a6"}
-                                      stopOpacity="0.4"
+                                      stopOpacity="0.45"
                                     />
                                     <stop
                                       offset="100%"
@@ -2582,7 +3903,7 @@ export default function AdminDashboard({
                                       x2={axisRight}
                                       y2={tick.y}
                                       stroke="#888888"
-                                      strokeOpacity="0.12"
+                                      strokeOpacity="0.15"
                                       strokeDasharray="4 3"
                                     />
                                     {/* Text Label */}
@@ -2590,7 +3911,7 @@ export default function AdminDashboard({
                                       x={axisLeft - 6}
                                       y={tick.y + 3.5}
                                       textAnchor="end"
-                                      className="text-[10px] font-semibold fill-slate-500 dark:fill-neutral-400 font-sans"
+                                      className="text-[10px] sm:text-xs font-semibold fill-slate-500 dark:fill-neutral-400 font-sans"
                                       style={{ fontFamily: 'Montserrat, sans-serif' }}
                                     >
                                       {tick.label}
@@ -2605,7 +3926,7 @@ export default function AdminDashboard({
                                   x2={axisLeft}
                                   y2={axisBottom}
                                   stroke="#888888"
-                                  strokeOpacity="0.25"
+                                  strokeOpacity="0.3"
                                   strokeWidth="1.2"
                                 />
                                 <line
@@ -2614,7 +3935,7 @@ export default function AdminDashboard({
                                   x2={axisRight}
                                   y2={axisBottom}
                                   stroke="#888888"
-                                  strokeOpacity="0.25"
+                                  strokeOpacity="0.3"
                                   strokeWidth="1.2"
                                 />
 
@@ -2630,7 +3951,7 @@ export default function AdminDashboard({
                                       y={y}
                                       width={barWidth}
                                       height={Math.max(rectHeight, 2)}
-                                      rx="5"
+                                      rx="4"
                                       fill={analyticsViewTab === "workers" ? "url(#workerBarGrad)" : "url(#deptBarGrad)"}
                                       className="transition-all duration-300 hover:brightness-110 cursor-pointer"
                                       onMouseEnter={() => setHoveredIdx(idx)}
@@ -2673,9 +3994,9 @@ export default function AdminDashboard({
                                         x2={x}
                                         y2={y}
                                         stroke={analyticsViewTab === "workers" ? "#06b6d4" : "#14b8a6"}
-                                        strokeOpacity="0.3"
+                                        strokeOpacity="0.35"
                                         strokeDasharray="3 3"
-                                        strokeWidth="1"
+                                        strokeWidth="1.0"
                                       />
                                       {/* Vertical dashed tracer */}
                                       <line
@@ -2684,9 +4005,9 @@ export default function AdminDashboard({
                                         x2={x}
                                         y2={y}
                                         stroke={analyticsViewTab === "workers" ? "#06b6d4" : "#14b8a6"}
-                                        strokeOpacity="0.3"
+                                        strokeOpacity="0.35"
                                         strokeDasharray="3 3"
-                                        strokeWidth="1"
+                                        strokeWidth="1.0"
                                       />
                                     </g>
                                   );
@@ -2697,8 +4018,8 @@ export default function AdminDashboard({
                                   const x = getX(idx);
                                   const y = getY(d.workerCount);
                                   const isHovered = hoveredIdx === idx;
-                                  const size = isHovered ? 5.5 : 3.5;
-                                  const strokeWidth = isHovered ? 2.8 : 1.8;
+                                  const size = isHovered ? 5.0 : 3.0;
+                                  const strokeWidth = isHovered ? 2.2 : 1.5;
                                   const strokeColor = analyticsViewTab === "workers" ? "#06b6d4" : "#14b8a6";
                                   return (
                                     <g
@@ -2711,7 +4032,7 @@ export default function AdminDashboard({
                                       <circle
                                         cx={x}
                                         cy={y}
-                                        r="22"
+                                        r="20"
                                         fill="transparent"
                                         className="cursor-pointer"
                                       />
@@ -2726,7 +4047,7 @@ export default function AdminDashboard({
                                             x2={x + size}
                                             y2={y + size}
                                             stroke="#ffffff"
-                                            strokeWidth={strokeWidth + 1.5}
+                                            strokeWidth={strokeWidth + 1.2}
                                             strokeLinecap="round"
                                           />
                                           <line
@@ -2735,7 +4056,7 @@ export default function AdminDashboard({
                                             x2={x + size}
                                             y2={y - size}
                                             stroke="#ffffff"
-                                            strokeWidth={strokeWidth + 1.5}
+                                            strokeWidth={strokeWidth + 1.2}
                                             strokeLinecap="round"
                                           />
                                           {/* Main colored stroke line */}
@@ -2787,8 +4108,8 @@ export default function AdminDashboard({
                                   const formattedLabels = trendData.map((d) => getFormattedLabel(d.dateLabel));
                                   const maxCharLen = Math.max(...formattedLabels.map((s) => s.length), 3);
                                   
-                                  // Estimate pixel width required for each label (approx 6.5px per char + 16px safety padding)
-                                  const minNeededSpace = Math.max(36, maxCharLen * 6.5 + 16);
+                                  // Estimate pixel width required for each label (approx 6px per char + 12px safety padding)
+                                  const minNeededSpace = Math.max(30, maxCharLen * 6 + 12);
 
                                   // Dynamically calculate step so labels NEVER collide regardless of container width
                                   let calcStep = Math.max(1, Math.ceil(minNeededSpace / Math.max(pointInterval, 1)));
@@ -2823,7 +4144,7 @@ export default function AdminDashboard({
                                         x={labelX}
                                         y={axisBottom + 16}
                                         textAnchor={textAnchor}
-                                        className="text-[10px] font-medium fill-slate-500 dark:fill-neutral-400 font-sans select-none"
+                                        className="text-[9px] sm:text-[11px] font-medium fill-slate-500 dark:fill-neutral-400 font-sans select-none"
                                         style={{ fontFamily: 'Montserrat, sans-serif' }}
                                       >
                                         {labelText}
@@ -2833,7 +4154,7 @@ export default function AdminDashboard({
                                 })()}
                               </svg>
 
-                              {/* 6. FLOATING TOOLTIP ACCURATELY POSITIONED WITHIN EXACT COORDINATE SYSTEM */}
+                              {/* 6. FLOATING TOOLTIP ACCURATELY POSITIONED DIRECTLY ABOVE HOVER POINT */}
                               {hoveredIdx !== null && hoveredPoint && (() => {
                                 const x = getX(hoveredIdx);
                                 const y = getY(hoveredPoint.workerCount);
@@ -2841,8 +4162,10 @@ export default function AdminDashboard({
                                 const leftPercent = (x / width) * 100;
                                 const topPercent = (y / height) * 100;
 
-                                const xTranslate = hoveredIdx === 0 ? "0%" : hoveredIdx === trendData.length - 1 ? "-100%" : "-50%";
-                                const transformStyle = `translate(${xTranslate}, -105%)`;
+                                const isNearTop = topPercent < 20;
+                                const xTranslate = hoveredIdx === 0 ? "8%" : hoveredIdx === trendData.length - 1 ? "-108%" : "-50%";
+                                const yTranslate = isNearTop ? "10px" : "-108%";
+                                const transformStyle = `translate(${xTranslate}, ${yTranslate})`;
 
                                 return (
                                   <div
@@ -2853,9 +4176,9 @@ export default function AdminDashboard({
                                       transform: transformStyle,
                                     }}
                                   >
-                                    <div className="bg-slate-950/95 dark:bg-neutral-900/95 text-white border border-slate-700/60 dark:border-neutral-850 rounded-2xl p-3.5 shadow-2xl flex flex-col space-y-1.5 min-w-[150px] backdrop-blur-lg animate-fade-in">
+                                    <div className="bg-slate-950/95 dark:bg-neutral-900/95 text-white border border-slate-700/60 dark:border-neutral-850 rounded-2xl p-2.5 sm:p-3 shadow-2xl flex flex-col space-y-1 min-w-[135px] backdrop-blur-lg animate-fade-in">
                                       {/* Header/Date */}
-                                      <div className="text-[11px] font-bold text-slate-200 dark:text-neutral-300 border-b border-slate-800 dark:border-neutral-850 pb-1.5 flex items-center justify-between">
+                                      <div className="text-[10px] font-bold text-slate-200 dark:text-neutral-300 border-b border-slate-800 dark:border-neutral-850 pb-1 flex items-center justify-between">
                                         <span className="font-sans" style={{ fontFamily: 'Montserrat, sans-serif' }}>
                                           {hoveredPoint.dateLabel}
                                         </span>
@@ -2864,7 +4187,7 @@ export default function AdminDashboard({
                                         </span>
                                       </div>
                                       {/* Detail Rows */}
-                                      <div className="flex items-center justify-between space-x-4 text-[11px] pt-1">
+                                      <div className="flex items-center justify-between space-x-3 text-[10px] pt-0.5">
                                         <span className="text-neutral-400 font-sans" style={{ fontFamily: 'Montserrat, sans-serif' }}>
                                           {analyticsViewTab === "workers" ? "Active Workers" : "Active Teams"}
                                         </span>
@@ -2872,12 +4195,12 @@ export default function AdminDashboard({
                                           {hoveredPoint.workerCount}
                                         </span>
                                       </div>
-                                      <div className="flex items-center justify-between space-x-4 text-[11px]">
+                                      <div className="flex items-center justify-between space-x-3 text-[10px]">
                                         <span className="text-neutral-400 font-sans" style={{ fontFamily: 'Montserrat, sans-serif' }}>
                                           Perf Rate
                                         </span>
                                         <span
-                                          className={`font-extrabold text-xs font-sans ${analyticsViewTab === "workers" ? "text-cyan-400" : "text-teal-400"}`}
+                                          className={`font-extrabold text-[11px] font-sans ${analyticsViewTab === "workers" ? "text-cyan-400" : "text-teal-400"}`}
                                           style={{ fontFamily: 'Montserrat, sans-serif' }}
                                         >
                                           {hoveredPoint.perf}%
@@ -2894,7 +4217,7 @@ export default function AdminDashboard({
                     </div>
 
                     <div
-                      className={`text-[9px] flex justify-between font-mono shrink-0 select-none mt-4 border-t pt-2 ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted}`}
+                      className={`text-[9px] flex justify-between font-mono shrink-0 select-none mt-2 border-t pt-1.5 ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted}`}
                     >
                       <span className="font-sans" style={{ fontFamily: 'Montserrat, sans-serif' }}>
                         {analyticsViewTab === "workers"
@@ -2909,17 +4232,11 @@ export default function AdminDashboard({
                     </div>
                   </div>
                 </div>
-
-                {/* Right Scroll Chevron */}
-                <button
-                  type="button"
-                  onClick={() => scrollContainer(graphContainerRef, "right")}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 z-20 p-2 rounded-full bg-white/70 dark:bg-black/70 border border-neutral-200 dark:border-neutral-800 backdrop-blur-md opacity-85 md:opacity-0 md:group-hover/scroll:opacity-100 transition-all duration-200 cursor-pointer text-slate-700 dark:text-neutral-300 hover:scale-110 active:scale-95 shadow-sm"
-                  title="Scroll Right"
-                >
-                  <ChevronRight className="h-4.5 w-4.5" />
-                </button>
               </div>
+            </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
             {/* Timeframe Selector Button Row */}
@@ -2959,19 +4276,30 @@ export default function AdminDashboard({
 
             {/* Leaderboard Table Desk */}
             <div
-              className={`rounded-3xl border overflow-hidden shadow-xl relative ${adminThemeClass.cardBg}`}
+              className={`rounded-3xl border overflow-hidden shadow-xl relative transition-all duration-300 ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
             >
               <div
-                className={`p-5 border-b flex items-center justify-between flex-wrap gap-4 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                onClick={() => setIsLeaderboardExpanded((prev) => !prev)}
+                className={`p-4 sm:p-5 flex items-center justify-between flex-wrap gap-4 cursor-pointer select-none transition-colors hover:bg-neutral-500/5 ${adminThemeClass.innerBg} ${
+                  isLeaderboardExpanded ? "border-b border-neutral-200/10" : ""
+                }`}
+                title={isLeaderboardExpanded ? "Click to collapse leaderboard" : "Click to expand leaderboard"}
               >
-                <span
-                  className={`font-bold text-xs uppercase tracking-wider flex items-center space-x-1 ${adminThemeClass.textTitle}`}
-                >
-                  <TrendingUp className="h-4.5 w-4.5 text-cyan-600 dark:text-cyan-400" />
-                  <span>
-                    {translations.leaderboard || "Leaderboard - Top Performers"}
+                <div className="flex items-center space-x-3">
+                  <div className={`p-2 rounded-xl border flex items-center justify-center shrink-0 transition-all ${
+                    isLeaderboardExpanded ? "bg-cyan-500/10 text-cyan-500 border-cyan-500/20" : `${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`
+                  }`}>
+                    {isLeaderboardExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  </div>
+                  <span
+                    className={`font-bold text-xs uppercase tracking-wider flex items-center space-x-1.5 ${adminThemeClass.textTitle}`}
+                  >
+                    <TrendingUp className="h-4.5 w-4.5 text-cyan-600 dark:text-cyan-400" />
+                    <span>
+                      {translations.leaderboard || "Leaderboard - Top Performers"}
+                    </span>
                   </span>
-                </span>
+                </div>
 
                 <div className="flex items-center gap-3 flex-wrap w-full sm:w-auto">
                   {/* Search Field */}
@@ -3023,10 +4351,22 @@ export default function AdminDashboard({
                       Departments view
                     </button>
                   </div>
+                  <span className={`text-[10px] font-mono font-bold uppercase tracking-wider hidden sm:inline-block ${adminThemeClass.textMuted}`}>
+                    {isLeaderboardExpanded ? "Click to Collapse" : "Click to Expand"}
+                  </span>
                 </div>
               </div>
 
-              <div className="relative group/scroll w-full">
+              <AnimatePresence initial={false}>
+                {isLeaderboardExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                    className="overflow-hidden"
+                  >
+                    <div className="relative group/scroll w-full">
                 {/* Top-center invisible down arrow button */}
                 <button
                   type="button"
@@ -3056,36 +4396,40 @@ export default function AdminDashboard({
 
                 <div
                   ref={leaderboardTableContainerRef}
+                  onMouseEnter={() => setIsShiftRegisterHovered(true)}
+                  onMouseLeave={() => setIsShiftRegisterHovered(false)}
+                  onTouchStart={() => setIsShiftRegisterHovered(true)}
+                  onTouchEnd={() => setIsShiftRegisterHovered(false)}
                   className="max-h-[600px] overflow-auto scrollbar-none"
                 >
                   {leaderboardView === "worker" ? (
-                    <table className="w-full text-left text-xs">
-                      <thead>
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className={`sticky top-0 z-20 ${adminThemeClass.innerBg} shadow-xs`}>
                         <tr
                           className={`border-b font-bold uppercase tracking-wider select-none text-[10px] ${adminThemeClass.innerBg} ${adminThemeClass.textMuted}`}
                         >
-                          <th className="p-4 w-20">
+                          <th className={`p-4 w-20 ${adminThemeClass.innerBg}`}>
                             {translations.rankCol || "Rank"}
                           </th>
-                          <th className="p-4">
+                          <th className={`p-4 ${adminThemeClass.innerBg}`}>
                             {translations.employeeCol || "Employee"}
                           </th>
-                          <th className="p-4">
+                          <th className={`p-4 ${adminThemeClass.innerBg}`}>
                             {translations.colDept || "Assigned Unit"}
                           </th>
-                          <th className="p-4">
+                          <th className={`p-4 ${adminThemeClass.innerBg}`}>
                             {translations.verifiedCheckinsCol ||
                               "Verified Check-ins"}
                           </th>
-                          <th className="p-4">
+                          <th className={`p-4 ${adminThemeClass.innerBg}`}>
                             {translations.arrivalStatusCol ||
                               "Arrival status Flag"}
                           </th>
-                          <th className="p-4">
+                          <th className={`p-4 ${adminThemeClass.innerBg}`}>
                             {translations.activeExemptionCol ||
                               "Active Exemption"}
                           </th>
-                          <th className="p-4">
+                          <th className={`p-4 ${adminThemeClass.innerBg}`}>
                             {translations.attendanceRateCol ||
                               "Attendance Performance Rate"}
                           </th>
@@ -3178,16 +4522,16 @@ export default function AdminDashboard({
                       </tbody>
                     </table>
                   ) : (
-                    <table className="w-full text-left text-xs">
-                      <thead>
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className={`sticky top-0 z-20 ${adminThemeClass.innerBg} shadow-xs`}>
                         <tr
                           className={`border-b font-bold uppercase tracking-wider select-none text-[10px] ${adminThemeClass.innerBg} ${adminThemeClass.textMuted}`}
                         >
-                          <th className="p-4 w-20">Rank</th>
-                          <th className="p-4">Department Unit</th>
-                          <th className="p-4">Department Lead</th>
-                          <th className="p-4">Personnel Count</th>
-                          <th className="p-4">Average Performance Rate</th>
+                          <th className={`p-4 w-20 ${adminThemeClass.innerBg}`}>Rank</th>
+                          <th className={`p-4 ${adminThemeClass.innerBg}`}>Department Unit</th>
+                          <th className={`p-4 ${adminThemeClass.innerBg}`}>Department Lead</th>
+                          <th className={`p-4 ${adminThemeClass.innerBg}`}>Personnel Count</th>
+                          <th className={`p-4 ${adminThemeClass.innerBg}`}>Average Performance Rate</th>
                         </tr>
                       </thead>
                       <tbody
@@ -3274,122 +4618,127 @@ export default function AdminDashboard({
                   <ChevronUp className="h-5 w-5" />
                 </button>
               </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
         )}
         {/* -------------------- TAB AREA: PERMISSIONS DESK -------------------- */}
         {activeTab === "permissions" && (
           <div className="space-y-6 select-none font-sans">
+            {/* Verify Active Permission Exemption Requests Container */}
             <div
-              className={`p-6 rounded-3xl border shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4 ${adminThemeClass.cardBg}`}
+              className={`rounded-3xl border shadow-xl overflow-hidden transition-all duration-300 ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
             >
-              <div>
-                <h3
-                  className={`font-semibold text-lg mb-1 ${adminThemeClass.textTitle}`}
-                >
-                  {translations.verifyPermissionsTitle ||
-                    "Verify Active Permission Exemption Requests"}
-                </h3>
-                <p className={`text-xs font-light ${adminThemeClass.textMuted}`}>
-                  {translations.verifyPermissionsDesc ||
-                    "Confirming approved permission flags automatically deducts standard workday ratios without penalty calculations."}
-                </p>
+              <div
+                onClick={() => setIsVerifyPermissionsExpanded((prev) => !prev)}
+                className={`p-5 sm:p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer select-none transition-colors hover:bg-neutral-500/5 ${adminThemeClass.innerBg} ${
+                  isVerifyPermissionsExpanded ? "border-b border-neutral-200/10" : ""
+                }`}
+                title={isVerifyPermissionsExpanded ? "Click to collapse verification panel" : "Click to expand verification panel"}
+              >
+                <div className="flex items-center space-x-3">
+                  <div className={`p-2 rounded-xl border flex items-center justify-center shrink-0 transition-all ${
+                    isVerifyPermissionsExpanded ? "bg-cyan-500/10 text-cyan-500 border-cyan-500/20" : `${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`
+                  }`}>
+                    {isVerifyPermissionsExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  </div>
+                  <div>
+                    <h3
+                      className={`font-semibold text-base sm:text-lg ${adminThemeClass.textTitle}`}
+                    >
+                      {translations.verifyPermissionsTitle ||
+                        "Verify Active Permission Exemption Requests"}
+                    </h3>
+                    <p className={`text-xs font-light ${adminThemeClass.textMuted}`}>
+                      {translations.verifyPermissionsDesc ||
+                        "Confirming approved permission flags automatically deducts standard workday ratios without penalty calculations."}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-2 shrink-0 self-end md:self-center">
+                  <span className={`text-[10px] font-mono font-bold uppercase tracking-wider hidden sm:inline-block ${adminThemeClass.textMuted}`}>
+                    {isVerifyPermissionsExpanded ? "Click to Collapse" : "Click to Expand"}
+                  </span>
+                </div>
               </div>
+
+              <AnimatePresence initial={false}>
+                {isVerifyPermissionsExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                    className="overflow-hidden p-5 sm:p-6"
+                  >
 
               {/* Sorting Button at the end of container */}
               <div className="relative flex items-center space-x-1.5 shrink-0 z-20">
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setIsPermissionsSortDropdownOpen((prev) => !prev)}
-                    className={`px-3.5 py-2 rounded-xl border flex items-center space-x-2 cursor-pointer transition-all shadow-sm ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle} hover:border-cyan-500 min-h-[38px]`}
-                  >
-                    <ArrowUpDown className="h-3.5 w-3.5 text-cyan-500 shrink-0" />
-                    <span className="text-[11px] font-semibold text-neutral-400 hidden sm:inline whitespace-nowrap">
-                      Sort:
-                    </span>
-                    <span className="text-xs font-bold whitespace-nowrap">
-                      {permissionsSortField === "name" && "Name (Alphabetical)"}
-                      {permissionsSortField === "reason" && "Reason / Remarks"}
-                      {permissionsSortField === "department" && "Department / Unit"}
-                    </span>
-                    <ChevronDown className={`h-3.5 w-3.5 text-neutral-400 transition-transform duration-200 ${isPermissionsSortDropdownOpen ? "rotate-180" : ""}`} />
-                  </button>
-
-                  {/* Dropdown List Modal */}
-                  <AnimatePresence>
-                    {isPermissionsSortDropdownOpen && (
-                      <>
-                        <div
-                          className="fixed inset-0 z-30"
-                          onClick={() => setIsPermissionsSortDropdownOpen(false)}
-                        />
-
-                        <motion.div
-                          initial={{ opacity: 0, y: -8, scale: 0.96 }}
-                          animate={{ opacity: 1, y: 0, scale: 1 }}
-                          exit={{ opacity: 0, y: -8, scale: 0.96 }}
-                          transition={{ duration: 0.15, ease: "easeOut" }}
-                          className={`absolute right-0 top-full mt-2 w-64 rounded-2xl border p-2 shadow-2xl z-40 backdrop-blur-xl ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
-                        >
-                          <div className="px-3 py-1.5 border-b border-white/5 mb-1 flex items-center justify-between">
-                            <span className={`text-[10px] font-bold uppercase tracking-wider ${adminThemeClass.textMuted}`}>
-                              Sort Permissions By
-                            </span>
-                            <span className="text-[10px] font-mono text-cyan-400">
-                              {permissionsSortOrder === "asc" ? "A → Z" : "Z → A"}
-                            </span>
-                          </div>
-
-                          <div className="space-y-1">
-                            {[
-                              { id: "name", label: "Name (Alphabetical)", desc: "Sort workers by first & last name" },
-                              { id: "reason", label: "Reason / Remarks", desc: "Sort permissions by reason or remarks" },
-                              { id: "department", label: "Department / Unit", desc: "Group requests by department" },
-                            ].map((opt) => {
-                              const isSelected = permissionsSortField === opt.id;
-                              return (
-                                <button
-                                  key={opt.id}
-                                  type="button"
-                                  onClick={() => {
-                                    setPermissionsSortField(opt.id as any);
-                                    setIsPermissionsSortDropdownOpen(false);
-                                  }}
-                                  className={`w-full text-left px-3 py-2 rounded-xl transition-all flex items-center justify-between cursor-pointer ${
-                                    isSelected
-                                      ? "bg-cyan-500/15 border border-cyan-500/40 text-cyan-300 font-bold"
-                                      : `${adminThemeClass.textTitle} hover:bg-white/5 hover:translate-x-0.5`
-                                  }`}
-                                >
-                                  <div>
-                                    <div className="text-xs font-semibold">{opt.label}</div>
-                                    <div className={`text-[10px] ${adminThemeClass.textMuted}`}>{opt.desc}</div>
-                                  </div>
-                                  {isSelected && <Check className="h-4 w-4 text-cyan-400 shrink-0 ml-2" />}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </motion.div>
-                      </>
-                    )}
-                  </AnimatePresence>
-                </div>
-
-                {/* Order Toggle */}
-                <button
-                  type="button"
-                  onClick={() => setPermissionsSortOrder((prev) => (prev === "asc" ? "desc" : "asc"))}
-                  title={permissionsSortOrder === "asc" ? "Sort Ascending (A → Z)" : "Sort Descending (Z → A)"}
-                  className={`px-3 py-2 rounded-xl border flex items-center justify-center space-x-1 cursor-pointer transition-all ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle} hover:border-cyan-500 min-h-[38px] shadow-sm`}
-                >
-                  <span className="text-[11px] font-bold tracking-wider">{permissionsSortOrder === "asc" ? "A-Z" : "Z-A"}</span>
-                  <span className="text-cyan-400 font-bold text-xs">{permissionsSortOrder === "asc" ? "↑" : "↓"}</span>
-                </button>
-              </div>
+                <CustomSortDropdown
+                  value={permissionsSortField}
+                  onChange={(val) => setPermissionsSortField(val as any)}
+                  sortOrder={permissionsSortOrder}
+                  onToggleSortOrder={() => setPermissionsSortOrder((prev) => (prev === "asc" ? "desc" : "asc"))}
+                  options={[
+                    { id: "name", label: "Name (Alphabetical)", desc: "Sort workers by first & last name" },
+                    { id: "reason", label: "Reason / Remarks", desc: "Sort permissions by reason or remarks" },
+                    { id: "department", label: "Department / Unit", desc: "Group requests by department" },
+                  ]}
+                  title="Sort Permissions By"
+                  theme={theme}
+                />
+              </div>                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
+            {/* Permission List Container with Collapse/Expand */}
+            <div
+              className={`rounded-3xl border shadow-xl overflow-hidden transition-all duration-300 ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+            >
+              <div
+                onClick={() => setIsPermissionsListExpanded((prev) => !prev)}
+                className={`p-4 sm:p-5 flex items-center justify-between gap-3 cursor-pointer select-none transition-colors hover:bg-neutral-500/5 ${adminThemeClass.innerBg} ${
+                  isPermissionsListExpanded ? "border-b border-neutral-200/10" : ""
+                }`}
+                title={isPermissionsListExpanded ? "Click to collapse permission list" : "Click to expand permission list"}
+              >
+                <div className="flex items-center space-x-3 min-w-0">
+                  <div className={`p-2 rounded-xl border flex items-center justify-center shrink-0 transition-all ${
+                    isPermissionsListExpanded ? "bg-cyan-500/10 text-cyan-500 border-cyan-500/20" : `${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`
+                  }`}>
+                    {isPermissionsListExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <FileText className="h-4 w-4 text-cyan-600 dark:text-cyan-400" />
+                    <h4 className={`font-display font-semibold text-base sm:text-lg ${adminThemeClass.textTitle}`}>
+                      Permission Requests & Records
+                    </h4>
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-2 shrink-0">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/10 text-cyan-500 border border-cyan-500/20">
+                    {filteredPermissions.length} Requests
+                  </span>
+                  <span className={`text-[10px] font-mono font-bold uppercase tracking-wider hidden sm:inline-block ${adminThemeClass.textMuted}`}>
+                    {isPermissionsListExpanded ? "Click to Collapse" : "Click to Expand"}
+                  </span>
+                </div>
+              </div>
+
+              <AnimatePresence initial={false}>
+                {isPermissionsListExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                    className="overflow-hidden p-4 sm:p-6 space-y-6"
+                  >
             {/* Filter controls row */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
               {/* Search Bar */}
@@ -3508,6 +4857,10 @@ export default function AdminDashboard({
 
               <div
                 ref={permissionsTableContainerRef}
+                onMouseEnter={() => setIsShiftRegisterHovered(true)}
+                onMouseLeave={() => setIsShiftRegisterHovered(false)}
+                onTouchStart={() => setIsShiftRegisterHovered(true)}
+                onTouchEnd={() => setIsShiftRegisterHovered(false)}
                 className="max-h-[600px] overflow-auto scrollbar-none"
               >
                 {permissionsViewMode === "card" ? (
@@ -3651,7 +5004,14 @@ export default function AdminDashboard({
               </div>
             ) : (
               /* High-Quality List / Table View for Permissions */
-              <div className={`overflow-x-auto rounded-3xl border shadow-xl ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}>
+              <div
+                ref={permissionsTableContainerRef}
+                onMouseEnter={() => setIsShiftRegisterHovered(true)}
+                onMouseLeave={() => setIsShiftRegisterHovered(false)}
+                onTouchStart={() => setIsShiftRegisterHovered(true)}
+                onTouchEnd={() => setIsShiftRegisterHovered(false)}
+                className={`overflow-x-auto max-h-[600px] overflow-y-auto scrollbar-none rounded-3xl border shadow-xl ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+              >
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
                     <tr className={`border-b ${adminThemeClass.accentBorder} bg-black/10`}>
@@ -3774,30 +5134,66 @@ export default function AdminDashboard({
             >
               <ChevronUp className="h-5 w-5" />
             </button>
+            </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
-        </div>
         )}
         {/* -------------------- TAB AREA: WORKER PROFILES -------------------- */}
         {/* -------------------- TAB AREA: WORKER PROFILES -------------------- */}
         {activeTab === "profiles" && (
           <div className="space-y-6 select-none font-sans">
+            {/* Corporate Directories Roster Container */}
             <div
-              className={`p-6 rounded-3xl border shadow-xl flex items-center justify-between flex-wrap gap-4 ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+              className={`rounded-3xl border shadow-xl overflow-hidden transition-all duration-300 ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
             >
-              <div>
-                <h3
-                  className={`font-semibold text-lg mb-1 ${adminThemeClass.textTitle}`}
-                >
-                  {translations.corporateDirectories ||
-                    "Corporate Directories roster"}
-                </h3>
-                <p
-                  className={`text-xs font-light ${adminThemeClass.textMuted}`}
-                >
-                  {translations.exploreDirectoriesDesc ||
-                    "Explore lists, filter roles, and inspect historical profiles."}
-                </p>
+              <div
+                onClick={() => setIsCorporateDirectoriesExpanded((prev) => !prev)}
+                className={`p-5 sm:p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer select-none transition-colors hover:bg-neutral-500/5 ${adminThemeClass.innerBg} ${
+                  isCorporateDirectoriesExpanded ? "border-b border-neutral-200/10" : ""
+                }`}
+                title={isCorporateDirectoriesExpanded ? "Click to collapse corporate directories roster" : "Click to expand corporate directories roster"}
+              >
+                <div className="flex items-center space-x-3">
+                  <div className={`p-2 rounded-xl border flex items-center justify-center shrink-0 transition-all ${
+                    isCorporateDirectoriesExpanded ? "bg-cyan-500/10 text-cyan-500 border-cyan-500/20" : `${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`
+                  }`}>
+                    {isCorporateDirectoriesExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  </div>
+                  <div>
+                    <h3
+                      className={`font-semibold text-base sm:text-lg ${adminThemeClass.textTitle}`}
+                    >
+                      {translations.corporateDirectories ||
+                        "Corporate Directories roster"}
+                    </h3>
+                    <p
+                      className={`text-xs font-light ${adminThemeClass.textMuted}`}
+                    >
+                      {translations.exploreDirectoriesDesc ||
+                        "Explore lists, filter roles, and inspect historical profiles."}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-2 shrink-0 self-end md:self-center">
+                  <span className={`text-[10px] font-mono font-bold uppercase tracking-wider hidden sm:inline-block ${adminThemeClass.textMuted}`}>
+                    {isCorporateDirectoriesExpanded ? "Click to Collapse" : "Click to Expand"}
+                  </span>
+                </div>
               </div>
+
+              <AnimatePresence initial={false}>
+                {isCorporateDirectoriesExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                    className="overflow-hidden p-5 sm:p-6"
+                  >
 
               {/* Action Suite: Search, Create Employee & Grid/List toggles */}
               <div className="flex items-center gap-3.5 flex-wrap w-full md:w-auto">
@@ -3852,100 +5248,21 @@ export default function AdminDashboard({
 
                 {/* Sorting Options Custom Themed Dropdown Modal & Order Toggle */}
                 <div className="relative flex items-center space-x-1.5 z-20">
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => setIsSortDropdownOpen((prev) => !prev)}
-                      className={`px-3 py-2 rounded-xl border flex items-center space-x-2 cursor-pointer transition-all shadow-sm ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle} hover:border-cyan-500 min-h-[38px]`}
-                    >
-                      <ArrowUpDown className="h-3.5 w-3.5 text-cyan-500 shrink-0" />
-                      <span className="text-[11px] font-semibold text-neutral-400 hidden sm:inline whitespace-nowrap">
-                        Sort:
-                      </span>
-                      <span className="text-xs font-bold whitespace-nowrap">
-                        {profilesSortField === "name" && "Name"}
-                        {profilesSortField === "worker_status" && "Workers' Status"}
-                        {profilesSortField === "title_role" && "Role"}
-                        {profilesSortField === "department" && "Department"}
-                        {profilesSortField === "phone" && "Number"}
-                      </span>
-                      <ChevronDown className={`h-3.5 w-3.5 text-neutral-400 transition-transform duration-200 ${isSortDropdownOpen ? "rotate-180" : ""}`} />
-                    </button>
-
-                    {/* Dropdown List Modal */}
-                    <AnimatePresence>
-                      {isSortDropdownOpen && (
-                        <>
-                          {/* Backdrop overlay to close on click outside */}
-                          <div
-                            className="fixed inset-0 z-30"
-                            onClick={() => setIsSortDropdownOpen(false)}
-                          />
-
-                          <motion.div
-                            initial={{ opacity: 0, y: -8, scale: 0.96 }}
-                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                            exit={{ opacity: 0, y: -8, scale: 0.96 }}
-                            transition={{ duration: 0.15, ease: "easeOut" }}
-                            className={`absolute right-0 sm:left-0 top-full mt-2 w-64 rounded-2xl border p-2 shadow-2xl z-40 backdrop-blur-xl ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
-                          >
-                            <div className="px-3 py-1.5 border-b border-white/5 mb-1 flex items-center justify-between">
-                              <span className={`text-[10px] font-bold uppercase tracking-wider ${adminThemeClass.textMuted}`}>
-                                Sort Profiles By
-                              </span>
-                              <span className="text-[10px] font-mono text-cyan-400">
-                                {profilesSortOrder === "asc" ? "A → Z" : "Z → A"}
-                              </span>
-                            </div>
-
-                            <div className="space-y-1">
-                              {[
-                                { id: "name", label: "Name", desc: "Sort workers by first & last name" },
-                                { id: "worker_status", label: "Workers' Status", desc: "Sort by Team Lead and Team Member status" },
-                                { id: "title_role", label: "Role", desc: "Sort workers by designation" },
-                                { id: "department", label: "Department", desc: "Group workers by department" },
-                                { id: "phone", label: "Number", desc: "Sort workers by contact number" },
-                              ].map((opt) => {
-                                const isSelected = profilesSortField === opt.id;
-                                return (
-                                  <button
-                                    key={opt.id}
-                                    type="button"
-                                    onClick={() => {
-                                      setProfilesSortField(opt.id as any);
-                                      setIsSortDropdownOpen(false);
-                                    }}
-                                    className={`w-full text-left px-3 py-2 rounded-xl transition-all flex items-center justify-between cursor-pointer ${
-                                      isSelected
-                                        ? "bg-cyan-500/15 border border-cyan-500/40 text-cyan-300 font-bold"
-                                        : `${adminThemeClass.textTitle} hover:bg-white/5 hover:translate-x-0.5`
-                                    }`}
-                                  >
-                                    <div>
-                                      <div className="text-xs font-semibold">{opt.label}</div>
-                                      <div className={`text-[10px] ${adminThemeClass.textMuted}`}>{opt.desc}</div>
-                                    </div>
-                                    {isSelected && <Check className="h-4 w-4 text-cyan-400 shrink-0 ml-2" />}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </motion.div>
-                        </>
-                      )}
-                    </AnimatePresence>
-                  </div>
-
-                  {/* Order Toggle (Ascending / Descending) */}
-                  <button
-                    type="button"
-                    onClick={() => setProfilesSortOrder((prev) => (prev === "asc" ? "desc" : "asc"))}
-                    title={profilesSortOrder === "asc" ? "Sort Ascending (A → Z / 0 → 9)" : "Sort Descending (Z → A / 9 → 0)"}
-                    className={`px-3 py-2 rounded-xl border flex items-center justify-center space-x-1 cursor-pointer transition-all ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle} hover:border-cyan-500 min-h-[38px] shadow-sm`}
-                  >
-                    <span className="text-[11px] font-bold tracking-wider">{profilesSortOrder === "asc" ? "A-Z" : "Z-A"}</span>
-                    <span className="text-cyan-400 font-bold text-xs">{profilesSortOrder === "asc" ? "↑" : "↓"}</span>
-                  </button>
+                  <CustomSortDropdown
+                    value={profilesSortField}
+                    onChange={(val) => setProfilesSortField(val as any)}
+                    sortOrder={profilesSortOrder}
+                    onToggleSortOrder={() => setProfilesSortOrder((prev) => (prev === "asc" ? "desc" : "asc"))}
+                    options={[
+                      { id: "name", label: "Name", desc: "Sort workers by first & last name" },
+                      { id: "worker_status", label: "Workers' Status", desc: "Sort by Team Lead and Team Member status" },
+                      { id: "title_role", label: "Role", desc: "Sort workers by designation" },
+                      { id: "department", label: "Department", desc: "Group workers by department" },
+                      { id: "phone", label: "Number", desc: "Sort workers by contact number" },
+                    ]}
+                    title="Sort Profiles By"
+                    theme={theme}
+                  />
                 </div>
 
                 {/* Manage Department Button */}
@@ -3989,9 +5306,56 @@ export default function AdminDashboard({
                   <span>Register Employee</span>
                 </button>
               </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
-            {/* Render Grid / List layouts */}
+            {/* Personnel Directory Collection List Container with Collapse/Expand */}
+            <div
+              className={`rounded-3xl border shadow-xl overflow-hidden transition-all duration-300 ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+            >
+              <div
+                onClick={() => setIsWorkerCollectionListExpanded((prev) => !prev)}
+                className={`p-4 sm:p-5 flex items-center justify-between gap-3 cursor-pointer select-none transition-colors hover:bg-neutral-500/5 ${adminThemeClass.innerBg} ${
+                  isWorkerCollectionListExpanded ? "border-b border-neutral-200/10" : ""
+                }`}
+                title={isWorkerCollectionListExpanded ? "Click to collapse worker collection list" : "Click to expand worker collection list"}
+              >
+                <div className="flex items-center space-x-3 min-w-0">
+                  <div className={`p-2 rounded-xl border flex items-center justify-center shrink-0 transition-all ${
+                    isWorkerCollectionListExpanded ? "bg-cyan-500/10 text-cyan-500 border-cyan-500/20" : `${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`
+                  }`}>
+                    {isWorkerCollectionListExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Users className="h-4 w-4 text-cyan-600 dark:text-cyan-400" />
+                    <h4 className={`font-display font-semibold text-base sm:text-lg ${adminThemeClass.textTitle}`}>
+                      Personnel Directory Collection
+                    </h4>
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-2 shrink-0">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/10 text-cyan-500 border border-cyan-500/20">
+                    {filteredWorkersForProfiles.length} Members
+                  </span>
+                  <span className={`text-[10px] font-mono font-bold uppercase tracking-wider hidden sm:inline-block ${adminThemeClass.textMuted}`}>
+                    {isWorkerCollectionListExpanded ? "Click to Collapse" : "Click to Expand"}
+                  </span>
+                </div>
+              </div>
+
+              <AnimatePresence initial={false}>
+                {isWorkerCollectionListExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                    className="overflow-hidden p-4 sm:p-6"
+                  >
+                    {/* Render Grid / List layouts */}
             <div className="relative group/scroll w-full">
               {/* Top-center invisible down arrow button */}
               <button
@@ -4010,6 +5374,10 @@ export default function AdminDashboard({
 
               <div
                 ref={profilesTableContainerRef}
+                onMouseEnter={() => setIsShiftRegisterHovered(true)}
+                onMouseLeave={() => setIsShiftRegisterHovered(false)}
+                onTouchStart={() => setIsShiftRegisterHovered(true)}
+                onTouchEnd={() => setIsShiftRegisterHovered(false)}
                 className="max-h-[600px] overflow-auto scrollbar-none"
               >
                 {profilesViewMode === "card" ? (
@@ -4083,7 +5451,7 @@ export default function AdminDashboard({
                         <span
                           className={`text-[10px] font-sans font-bold hover:underline ${adminThemeClass.accentText}`}
                         >
-                          {translations.viewMetricsBtn || "View Metrics →"}
+                          {translations.viewMetricsBtn || "View Metrics ->"}
                         </span>
                       </div>
                     </div>
@@ -4171,7 +5539,7 @@ export default function AdminDashboard({
                           {/* Details */}
                           <td className="p-4 text-right">
                             <span className={`text-[10px] font-sans font-bold hover:underline ${adminThemeClass.accentText}`}>
-                              {translations.viewMetricsBtn || "View Metrics →"}
+                              {translations.viewMetricsBtn || "View Metrics ->"}
                             </span>
                           </td>
                         </tr>
@@ -4197,8 +5565,12 @@ export default function AdminDashboard({
             >
               <ChevronUp className="h-5 w-5" />
             </button>
+            </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
-        </div>
         )}
 
         {/* -------------------- TAB AREA: BILLING & SUBSCRIPTION -------------------- */}
@@ -4253,7 +5625,7 @@ export default function AdminDashboard({
                   }`}
                 >
                   {isGatewayWorkspaceSelected
-                    ? "✓ Workspace Connected"
+                    ? "Check Workspace Connected"
                     : "Select Gateway Workspace"}
                 </button>
               </div>
@@ -4294,7 +5666,7 @@ export default function AdminDashboard({
                         <h4
                           className={`text-2xl font-bold mt-1 ${adminThemeClass.textTitle}`}
                         >
-                          ₦10,000
+                          NGN 10,000
                         </h4>
                         <span
                           className={`text-xs block pb-4 mb-4 border-b ${adminThemeClass.textMuted} ${adminThemeClass.accentBorder}`}
@@ -4314,7 +5686,7 @@ export default function AdminDashboard({
                         className={`w-full py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all ${selectedPlanCode === "starter" ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/45" : `${adminThemeClass.innerBg} border ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`}`}
                       >
                         {selectedPlanCode === "starter"
-                          ? "✓ Selected"
+                          ? "Check Selected"
                           : translations.selectPlanBtn || "Select Plan"}
                       </button>
                     </div>
@@ -4332,7 +5704,7 @@ export default function AdminDashboard({
                         <h4
                           className={`text-2xl font-bold mt-1 ${adminThemeClass.textTitle}`}
                         >
-                          ₦30,000
+                          NGN 30,000
                         </h4>
                         <span
                           className={`text-xs block pb-4 mb-4 border-b ${adminThemeClass.textMuted} ${adminThemeClass.accentBorder}`}
@@ -4352,7 +5724,7 @@ export default function AdminDashboard({
                         className={`w-full py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all ${selectedPlanCode === "business" ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/45" : `${adminThemeClass.innerBg} border ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`}`}
                       >
                         {selectedPlanCode === "business"
-                          ? "✓ Selected"
+                          ? "Check Selected"
                           : translations.selectPlanBtn || "Select Plan"}
                       </button>
                     </div>
@@ -4370,7 +5742,7 @@ export default function AdminDashboard({
                         <h4
                           className={`text-2xl font-bold mt-1 ${adminThemeClass.textTitle}`}
                         >
-                          ₦50,050
+                          NGN 50,050
                         </h4>
                         <span
                           className={`text-xs block pb-4 mb-4 border-b ${adminThemeClass.textMuted} ${adminThemeClass.accentBorder}`}
@@ -4390,7 +5762,7 @@ export default function AdminDashboard({
                         className={`w-full py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all ${selectedPlanCode === "growth" ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/45" : `${adminThemeClass.innerBg} border ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`}`}
                       >
                         {selectedPlanCode === "growth"
-                          ? "✓ Selected"
+                          ? "Check Selected"
                           : translations.selectPlanBtn || "Select Plan"}
                       </button>
                     </div>
@@ -4408,7 +5780,7 @@ export default function AdminDashboard({
                         <h4
                           className={`text-2xl font-bold mt-1 ${adminThemeClass.textTitle}`}
                         >
-                          ₦150,000
+                          NGN 150,000
                         </h4>
                         <span
                           className={`text-xs block pb-4 mb-4 border-b ${adminThemeClass.textMuted} ${adminThemeClass.accentBorder}`}
@@ -4428,7 +5800,7 @@ export default function AdminDashboard({
                         className={`w-full py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all ${selectedPlanCode === "enterprise" ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/45" : `${adminThemeClass.innerBg} border ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`}`}
                       >
                         {selectedPlanCode === "enterprise"
-                          ? "✓ Selected"
+                          ? "Check Selected"
                           : translations.selectPlanBtn || "Select Plan"}
                       </button>
                     </div>
@@ -4477,7 +5849,7 @@ export default function AdminDashboard({
                   )}
 
                   {/* Gateway selections - open for interaction */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-md">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl">
                     <button
                       id="gateway_opay"
                       onClick={() => setGatewaySelected("opay")}
@@ -4516,6 +5888,27 @@ export default function AdminDashboard({
                         PAYSTACK
                       </strong>
                     </button>
+
+                    <button
+                      id="gateway_card"
+                      onClick={() => {
+                        setGatewaySelected("card");
+                        setCardError(null);
+                      }}
+                      className={`p-4 rounded-2xl border text-left flex items-center justify-between cursor-pointer transition-all duration-150 ${gatewaySelected === "card" ? "border-cyan-500 bg-cyan-50/70 dark:bg-cyan-950/20 text-cyan-850 dark:text-cyan-300 shadow-md transform scale-[1.01]" : `text-slate-650 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`}`}
+                    >
+                      <div>
+                        <strong className="block text-sm">
+                          Card Payment Gateway
+                        </strong>
+                        <span className="text-[10px] font-medium opacity-75">
+                          Direct Card & Debit Checkout
+                        </span>
+                      </div>
+                      <strong className="text-xs font-extrabold tracking-widest text-cyan-600 dark:text-cyan-400">
+                        CARD
+                      </strong>
+                    </button>
                   </div>
 
                   {/* Verify / Submission Controls */}
@@ -4535,19 +5928,30 @@ export default function AdminDashboard({
                           <span
                             className={`block text-[11px] ${adminThemeClass.textMuted}`}
                           >
-                            Click below to dispatch renewal simulation webhook.
+                            {gatewaySelected === "card" 
+                              ? "Click below to input card information and authorize billing." 
+                              : "Click below to dispatch renewal simulation webhook."}
                           </span>
                         </div>
                         <button
-                          onClick={handleBillingRenewalSubmit}
+                          id="verify_billing_btn"
+                          onClick={() => {
+                            if (gatewaySelected === "card") {
+                              setShowCardModal(true);
+                            } else {
+                              handleBillingRenewalSubmit();
+                            }
+                          }}
                           className="px-8 py-3.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-cyan-950/45 active:scale-95 cursor-pointer max-w-xs"
                         >
-                          {translations.verifyOnGateway
-                            ? translations.verifyOnGateway.replace(
-                                "{gateway}",
-                                gatewaySelected.toUpperCase(),
-                              )
-                            : `Verify checkout on ${gatewaySelected.toUpperCase()} Gateway`}
+                          {gatewaySelected === "card"
+                            ? "Enter Card Details & Pay"
+                            : (translations.verifyOnGateway
+                                ? translations.verifyOnGateway.replace(
+                                    "{gateway}",
+                                    gatewaySelected.toUpperCase(),
+                                  )
+                                : `Verify checkout on ${gatewaySelected.toUpperCase()} Gateway`)}
                         </button>
                       </motion.div>
                     </div>
@@ -4558,6 +5962,7 @@ export default function AdminDashboard({
           </div>
         )}
       </main>
+      </div>
 
       {/* -------------------- MODAL AREA: MENU SETTINGS -------------------- */}
       <AnimatePresence>
@@ -4622,6 +6027,69 @@ export default function AdminDashboard({
                         >
                           &times;
                         </button>
+                      </div>
+
+                      {/* PWA INSTALLATION & STANDALONE APP SECTION */}
+                      <div className="space-y-2">
+                        <span className={`text-[10px] uppercase font-bold tracking-wider font-mono ${adminThemeClass.textMuted}`}>
+                          PWA Mobile & Desktop Application
+                        </span>
+                        <PwaInstallComponent
+                          role="admin"
+                          tenantName={tenant?.companyName || tenant?.name}
+                          theme={currentSettings.theme || "dark"}
+                          variant="menu-item"
+                        />
+                      </div>
+
+                      {/* LAYOUT SETTING */}
+                      <div className="space-y-2">
+                        <span className={`text-[10px] uppercase font-bold tracking-wider font-mono ${adminThemeClass.textMuted}`}>
+                          Layout
+                        </span>
+                        <div
+                          className={`grid grid-cols-2 gap-1.5 p-1 rounded-xl border ${adminThemeClass.innerBg}`}
+                        >
+                          <button
+                            type="button"
+                            id="layout_top"
+                            onClick={() => {
+                              const newSObj = {
+                                ...currentSettings,
+                                layout: "top" as const,
+                              };
+                              setLocalSettings(newSObj);
+                            }}
+                            className={`py-2 text-xs font-semibold rounded-lg text-center cursor-pointer transition-all flex items-center justify-center space-x-1.5 ${
+                              (currentSettings.layout || "top") === "top"
+                                ? "bg-white dark:bg-zinc-800 text-cyan-600 dark:text-cyan-400 shadow-xs font-bold border border-neutral-200 dark:border-neutral-700"
+                                : "text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white"
+                            }`}
+                          >
+                            <LayoutGrid className="h-3.5 w-3.5 group-hover:scale-110 transition-transform" />
+                            <span>Top Nav Layout</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            id="layout_side"
+                            onClick={() => {
+                              const newSObj = {
+                                ...currentSettings,
+                                layout: "side" as const,
+                              };
+                              setLocalSettings(newSObj);
+                            }}
+                            className={`py-2 text-xs font-semibold rounded-lg text-center cursor-pointer transition-all flex items-center justify-center space-x-1.5 ${
+                              currentSettings.layout === "side"
+                                ? "bg-white dark:bg-zinc-800 text-cyan-600 dark:text-cyan-400 shadow-xs font-bold border border-neutral-200 dark:border-neutral-700"
+                                : "text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white"
+                            }`}
+                          >
+                            <Columns className="h-3.5 w-3.5 group-hover:scale-110 transition-transform" />
+                            <span>Side Layout</span>
+                          </button>
+                        </div>
                       </div>
 
                       {/* THEME TOGGLE (With theme state update) */}
@@ -4713,7 +6181,7 @@ export default function AdminDashboard({
                               value: "en",
                               label: "English (Centralized Suite)",
                             },
-                            { value: "fr", label: "French (Suite localisée)" },
+                            { value: "fr", label: "French (Suite localisee)" },
                             {
                               value: "es",
                               label: "Spanish (Panel de Ajustes)",
@@ -4723,76 +6191,343 @@ export default function AdminDashboard({
                         />
                       </div>
 
-                      {/* Brand Customization: Company Logo */}
+                      {/* Company Profile & Brand Identity */}
                       <div
-                        className={`p-4 rounded-2xl border space-y-3 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                        className={`p-4 sm:p-5 rounded-2xl border space-y-4 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
                       >
-                        <span
-                          className={`text-[10px] uppercase font-bold tracking-wider font-mono block ${adminThemeClass.textTitle}`}
-                        >
-                          {translations.updateCompanyLogo ||
-                            "Update Company Logo"}
-                        </span>
-
-                        <div className="flex items-center space-x-4">
-                          <div
-                            className={`h-16 w-16 rounded-2xl border shadow-sm shrink-0 flex items-center justify-center overflow-hidden ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
-                          >
-                            {companyLogoUrl ? (
-                              <img
-                                src={companyLogoUrl}
-                                alt="Company Logo Preview"
-                                className="h-full w-full object-cover select-none pointer-events-none"
-                              />
-                            ) : (
-                              <Shield
-                                className={`h-7 w-7 ${adminThemeClass.textMuted}`}
-                              />
-                            )}
-                          </div>
-                          <div className="flex flex-col space-y-1.5 flex-1 block">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-2">
+                            <Building className="h-4 w-4 text-cyan-400" />
                             <span
-                              className={`text-xs font-medium ${adminThemeClass.textMuted}`}
+                              className={`text-xs uppercase font-bold tracking-wider font-mono block ${adminThemeClass.textTitle}`}
                             >
-                              {translations.uploadLogoDesc ||
-                                "Upload your official brand logo. This replaces the default shield icon and represents your portal identity globally."}
+                              Company Profile & Identity
                             </span>
-                            <div className="flex items-center space-x-2">
+                          </div>
+                          {companyProfileSuccess && (
+                            <span className="text-[11px] font-semibold text-emerald-400 animate-fade-in flex items-center gap-1">
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              {companyProfileSuccess}
+                            </span>
+                          )}
+                        </div>
+
+                        <p className={`text-xs ${adminThemeClass.textMuted}`}>
+                          Manage your official company legal name, contact email, phone number, and brand identity displayed across employee check-in portals and corporate attendance logs.
+                        </p>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
+                          {/* Brand Name */}
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className={`block text-[11px] font-semibold ${adminThemeClass.textTitle}`}>
+                                Brand Name
+                              </label>
+                              <div className="flex items-center space-x-1">
+                                {isBrandNameLocked ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleFieldDoubleTap("name")}
+                                    className="text-[9px] font-semibold text-cyan-400 hover:underline flex items-center gap-0.5 cursor-pointer"
+                                    title="Double-tap or click to edit"
+                                  >
+                                    <Lock className="h-2.5 w-2.5" />
+                                    <span>Double-tap to edit</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setIsBrandNameLocked(true)}
+                                    className="text-[9px] font-semibold text-emerald-400 hover:underline flex items-center gap-0.5 cursor-pointer"
+                                    title="Lock field"
+                                  >
+                                    <Unlock className="h-2.5 w-2.5" />
+                                    <span>Unlocked</span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                            <div
+                              className="relative"
+                              onDoubleClick={() => handleFieldDoubleTap("name")}
+                              onTouchEnd={() => handleTouchTap("name")}
+                            >
+                              <Building className={`absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 ${adminThemeClass.textMuted}`} />
                               <input
-                                type="file"
-                                ref={companyLogoFileInputRef}
-                                accept="image/*"
-                                onChange={(e) => {
-                                  const file = e.target.files?.[0];
-                                  if (file) {
-                                    setSelectedLogoFile(file);
-                                    setShowUploadLogoConfirm(true);
-                                  }
-                                  e.target.value = "";
-                                }}
-                                className="hidden"
+                                id="company_profile_name_input"
+                                type="text"
+                                readOnly={isBrandNameLocked}
+                                value={companyProfileName}
+                                onChange={(e) => setCompanyProfileName(e.target.value)}
+                                placeholder="e.g. Acme Global Logistics Ltd"
+                                className={`w-full pl-9 pr-8 py-2 text-xs rounded-xl border outline-none font-medium transition-all ${
+                                  isBrandNameLocked
+                                    ? `opacity-75 cursor-not-allowed ${adminThemeClass.innerBg} border-dashed`
+                                    : `focus:ring-2 focus:ring-cyan-500/30 ${adminThemeClass.inputBg}`
+                                }`}
                               />
                               <button
                                 type="button"
-                                onClick={() =>
-                                  companyLogoFileInputRef.current?.click()
-                                }
-                                className="px-3.5 py-2 text-[11px] font-bold text-white bg-gradient-to-r from-cyan-500 to-blue-600 hover:brightness-110 rounded-xl cursor-pointer transition-all active:scale-95 flex items-center space-x-1"
+                                onClick={() => isBrandNameLocked ? handleFieldDoubleTap("name") : setIsBrandNameLocked(true)}
+                                className={`absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-md transition-colors ${
+                                  isBrandNameLocked ? "text-neutral-400 hover:text-cyan-400" : "text-emerald-400"
+                                }`}
+                                title={isBrandNameLocked ? "Double-tap or click to unlock" : "Click to lock"}
                               >
-                                {translations.uploadLogo || "Upload Logo"}
+                                {isBrandNameLocked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
                               </button>
-                              {companyLogoUrl && (
-                                <button
-                                  type="button"
-                                  onClick={() => setShowResetLogoConfirm(true)}
-                                  className={`px-3.5 py-2 text-[11px] font-bold border rounded-xl cursor-pointer transition-all active:scale-95 ${adminThemeClass.accentBorder} ${adminThemeClass.accentText} bg-transparent hover:bg-neutral-500/5`}
-                                >
-                                  {translations.resetBtn || "Reset"}
-                                </button>
-                              )}
+                            </div>
+                          </div>
+
+                          {/* Brand Email */}
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className={`block text-[11px] font-semibold ${adminThemeClass.textTitle}`}>
+                                Brand Email
+                              </label>
+                              <div className="flex items-center space-x-1">
+                                {isBrandEmailLocked ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleFieldDoubleTap("email")}
+                                    className="text-[9px] font-semibold text-cyan-400 hover:underline flex items-center gap-0.5 cursor-pointer"
+                                    title="Double-tap or click to edit"
+                                  >
+                                    <Lock className="h-2.5 w-2.5" />
+                                    <span>Double-tap to edit</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setIsBrandEmailLocked(true)}
+                                    className="text-[9px] font-semibold text-emerald-400 hover:underline flex items-center gap-0.5 cursor-pointer"
+                                    title="Lock field"
+                                  >
+                                    <Unlock className="h-2.5 w-2.5" />
+                                    <span>Unlocked</span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                            <div
+                              className="relative"
+                              onDoubleClick={() => handleFieldDoubleTap("email")}
+                              onTouchEnd={() => handleTouchTap("email")}
+                            >
+                              <Mail className={`absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 ${adminThemeClass.textMuted}`} />
+                              <input
+                                id="company_profile_email_input"
+                                type="email"
+                                readOnly={isBrandEmailLocked}
+                                value={companyProfileEmail}
+                                onChange={(e) => setCompanyProfileEmail(e.target.value)}
+                                placeholder="e.g. contact@acmeglobal.com"
+                                className={`w-full pl-9 pr-8 py-2 text-xs rounded-xl border outline-none font-medium transition-all ${
+                                  isBrandEmailLocked
+                                    ? `opacity-75 cursor-not-allowed ${adminThemeClass.innerBg} border-dashed`
+                                    : `focus:ring-2 focus:ring-cyan-500/30 ${adminThemeClass.inputBg}`
+                                }`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => isBrandEmailLocked ? handleFieldDoubleTap("email") : setIsBrandEmailLocked(true)}
+                                className={`absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-md transition-colors ${
+                                  isBrandEmailLocked ? "text-neutral-400 hover:text-cyan-400" : "text-emerald-400"
+                                }`}
+                                title={isBrandEmailLocked ? "Double-tap or click to unlock" : "Click to lock"}
+                              >
+                                {isBrandEmailLocked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Brand Number */}
+                          <div className="sm:col-span-2">
+                            <div className="flex items-center justify-between mb-1">
+                              <label className={`block text-[11px] font-semibold ${adminThemeClass.textTitle}`}>
+                                Brand Number
+                              </label>
+                              <div className="flex items-center space-x-1">
+                                {isBrandNumberLocked ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleFieldDoubleTap("phone")}
+                                    className="text-[9px] font-semibold text-cyan-400 hover:underline flex items-center gap-0.5 cursor-pointer"
+                                    title="Double-tap or click to edit"
+                                  >
+                                    <Lock className="h-2.5 w-2.5" />
+                                    <span>Double-tap to edit</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setIsBrandNumberLocked(true)}
+                                    className="text-[9px] font-semibold text-emerald-400 hover:underline flex items-center gap-0.5 cursor-pointer"
+                                    title="Lock field"
+                                  >
+                                    <Unlock className="h-2.5 w-2.5" />
+                                    <span>Unlocked</span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                            <div
+                              className="relative"
+                              onDoubleClick={() => handleFieldDoubleTap("phone")}
+                              onTouchEnd={() => handleTouchTap("phone")}
+                            >
+                              <Phone className={`absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 ${adminThemeClass.textMuted}`} />
+                              <input
+                                id="company_profile_phone_input"
+                                type="tel"
+                                readOnly={isBrandNumberLocked}
+                                value={companyProfilePhone}
+                                onChange={(e) => setCompanyProfilePhone(e.target.value)}
+                                placeholder="e.g. +1 555-0199 or +234 801 234 5678"
+                                className={`w-full pl-9 pr-8 py-2 text-xs rounded-xl border outline-none font-medium font-mono transition-all ${
+                                  isBrandNumberLocked
+                                    ? `opacity-75 cursor-not-allowed ${adminThemeClass.innerBg} border-dashed`
+                                    : `focus:ring-2 focus:ring-cyan-500/30 ${adminThemeClass.inputBg}`
+                                }`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => isBrandNumberLocked ? handleFieldDoubleTap("phone") : setIsBrandNumberLocked(true)}
+                                className={`absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-md transition-colors ${
+                                  isBrandNumberLocked ? "text-neutral-400 hover:text-cyan-400" : "text-emerald-400"
+                                }`}
+                                title={isBrandNumberLocked ? "Double-tap or click to unlock" : "Click to lock"}
+                              >
+                                {isBrandNumberLocked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
+                              </button>
                             </div>
                           </div>
                         </div>
+
+                        {/* Brand Logo Upload */}
+                        <div className="pt-2 border-t border-dashed border-neutral-500/20">
+                          <label className={`block text-[11px] font-semibold mb-2 ${adminThemeClass.textTitle}`}>
+                            {translations.updateCompanyLogo || "Company Brand Logo"}
+                          </label>
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                            <div
+                              className={`h-16 w-16 rounded-2xl border shadow-sm shrink-0 flex items-center justify-center overflow-hidden ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+                            >
+                              {companyLogoUrl ? (
+                                <img
+                                  src={companyLogoUrl}
+                                  alt="Company Logo Preview"
+                                  className="h-full w-full object-cover select-none pointer-events-none"
+                                />
+                              ) : (
+                                <Shield
+                                  className={`h-7 w-7 ${adminThemeClass.textMuted}`}
+                                />
+                              )}
+                            </div>
+                            <div className="flex flex-col space-y-1.5 flex-1 block">
+                              <span
+                                className={`text-xs font-medium ${adminThemeClass.textMuted}`}
+                              >
+                                {translations.uploadLogoDesc ||
+                                  "Upload your official brand logo. This replaces the default shield icon and represents your portal identity globally."}
+                              </span>
+                              <div className="flex items-center space-x-2">
+                                <input
+                                  type="file"
+                                  ref={companyLogoFileInputRef}
+                                  accept="image/*"
+                                  onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) {
+                                      setSelectedLogoFile(file);
+                                      setShowUploadLogoConfirm(true);
+                                    }
+                                    e.target.value = "";
+                                  }}
+                                  className="hidden"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    companyLogoFileInputRef.current?.click()
+                                  }
+                                  className="px-3.5 py-2 text-[11px] font-bold text-white bg-gradient-to-r from-cyan-500 to-blue-600 hover:brightness-110 rounded-xl cursor-pointer transition-all active:scale-95 flex items-center space-x-1"
+                                >
+                                  {translations.uploadLogo || "Upload Logo"}
+                                </button>
+                                {companyLogoUrl && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowResetLogoConfirm(true)}
+                                    className={`px-3.5 py-2 text-[11px] font-bold border rounded-xl cursor-pointer transition-all active:scale-95 ${adminThemeClass.accentBorder} ${adminThemeClass.accentText} bg-transparent hover:bg-neutral-500/5`}
+                                  >
+                                    {translations.resetBtn || "Reset Logo"}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Save Company Profile Button - Spreads Wide Across Container */}
+                        <div className="pt-3 w-full">
+                          <button
+                            id="save_company_profile_btn"
+                            type="button"
+                            disabled={isSavingCompanyProfile}
+                            onClick={handleSaveCompanyProfile}
+                            className="w-full py-3.5 px-6 bg-gradient-to-r from-cyan-500 via-cyan-600 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-cyan-950/45 cursor-pointer disabled:opacity-50 flex items-center justify-center space-x-2 active:scale-[0.99]"
+                          >
+                            {isSavingCompanyProfile ? (
+                              <>
+                                <RefreshCw className="h-4 w-4 animate-spin" />
+                                <span>Synchronizing Profile...</span>
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle2 className="h-4 w-4" />
+                                <span>Save & Synchronize Company Profile</span>
+                              </>
+                            )}
+                          </button>
+                        </div>{/* Update Attendance Setting Card */}
+                      <div
+                        id="setting_update_attendance_card"
+                        className={`p-4 sm:p-5 rounded-2xl border space-y-3 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-2">
+                            <ClipboardCheck className="h-4 w-4 text-cyan-400" />
+                            <span
+                              className={`text-xs uppercase font-bold tracking-wider font-mono block ${adminThemeClass.textTitle}`}
+                            >
+                              Shift Attendance Ledger
+                            </span>
+                          </div>
+                          <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                            Enterprise Audit
+                          </span>
+                        </div>
+                        <p className={`text-xs ${adminThemeClass.textMuted}`}>
+                          Directly create, modify, or delete official employee shift attendance records with two-step confirmation safeguards.
+                        </p>
+                        <button
+                          id="btn_open_update_attendance_modal"
+                          type="button"
+                          onClick={() => {
+                            setShowUpdateAttendanceModal(true);
+                            if (workers.length > 0 && !selectedAttendanceWorkerId) {
+                              setSelectedAttendanceWorkerId(workers[0].id);
+                            }
+                          }}
+                          className="w-full py-3 px-5 bg-gradient-to-r from-cyan-600 via-cyan-500 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-cyan-950/45 cursor-pointer flex items-center justify-center space-x-2 active:scale-[0.99]"
+                        >
+                          <Edit3 className="h-4 w-4" />
+                          <span>Update Attendance</span>
+                        </button>
+                      </div>
+
                       </div>
 
                       {/* Check-In Lateness Grace settings with switch and custom preset panel + time wheel */}
@@ -4884,7 +6619,7 @@ export default function AdminDashboard({
                                     : `${adminThemeClass.innerBg} ${adminThemeClass.textMuted}`
                                 }`}
                               >
-                                <span>⚙️ {[5,10,15,20,30,45].includes(currentSettings.checkIn?.latenessThreshold || 10) ? "Set Custom Interval Wheel" : `Custom: ${currentSettings.checkIn?.latenessThreshold || 10} min`}</span>
+                                <span> {[5,10,15,20,30,45].includes(currentSettings.checkIn?.latenessThreshold || 10) ? "Set Custom Interval Wheel" : `Custom: ${currentSettings.checkIn?.latenessThreshold || 10} min`}</span>
                               </button>
                             </div>
 
@@ -5046,7 +6781,7 @@ export default function AdminDashboard({
                                     }}
                                     className="absolute -top-1 -right-1 opacity-0 group-hover:opacity-100 bg-neutral-800 hover:bg-neutral-700 text-white p-0.5 rounded-full text-[8px] border border-neutral-700 transition-all cursor-pointer"
                                   >
-                                    ▶️
+                                    
                                   </button>
                                 )}
                               </div>
@@ -5169,7 +6904,7 @@ export default function AdminDashboard({
                               }}
                               className="w-full py-2 bg-neutral-850 hover:bg-neutral-700 text-white font-bold rounded-xl text-[10px] uppercase cursor-pointer"
                             >
-                              📍 Capture Current Admin GPS Coordinates
+                               Capture Current Admin GPS Coordinates
                             </button>
 
                             {/* Proximity Radius Slider */}
@@ -5274,7 +7009,7 @@ export default function AdminDashboard({
                                   {radarResult ? (
                                     <div className="text-[10px] space-y-0.5">
                                       <div className={`font-bold flex items-center space-x-1 ${radarResult.success ? 'text-emerald-400' : 'text-red-400'}`}>
-                                        <span>{radarResult.success ? '● VERIFIED ON-PREMISES' : '● OUT OF BOUNDS'}</span>
+                                        <span>{radarResult.success ? '* VERIFIED ON-PREMISES' : '* OUT OF BOUNDS'}</span>
                                       </div>
                                       <p className="text-[9px] text-gray-500 font-mono">
                                         Dist: {radarResult.distance}m (Bound: {currentSettings.locationTracking?.radius || 100}m) | Accuracy: +/- {radarResult.accuracy}m
@@ -5599,6 +7334,624 @@ export default function AdminDashboard({
                   className="flex-1 py-4 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold rounded-xl text-xs uppercase tracking-wider text-center cursor-pointer active:scale-95 transition-all font-bold shadow-md"
                 >
                   {translations.saveChanges || "Save Changes"}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* -------------------- MODAL AREA: UPDATE ATTENDANCE MANAGEMENT -------------------- */}
+      <AnimatePresence>
+        {showUpdateAttendanceModal && (
+          <div
+            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
+            onClick={() => setShowUpdateAttendanceModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.96, opacity: 0, y: 16 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.96, opacity: 0, y: 16 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              onClick={(e) => e.stopPropagation()}
+              className={`w-full max-w-5xl max-h-[92vh] flex flex-col rounded-3xl border shadow-2xl overflow-hidden select-none ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+            >
+              {/* Modal Header */}
+              <div className={`p-5 sm:p-6 border-b flex items-center justify-between ${adminThemeClass.accentBorder} ${adminThemeClass.innerBg}`}>
+                <div className="flex items-center space-x-3">
+                  <div className="h-10 w-10 rounded-2xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 flex items-center justify-center">
+                    <ClipboardCheck className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className={`text-base sm:text-lg font-display font-bold ${adminThemeClass.textTitle}`}>
+                      Update Attendance
+                    </h3>
+                    <p className={`text-xs ${adminThemeClass.textMuted}`}>
+                      Create, modify, and delete employee shift logs with two-step confirmation safeguards.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={handleOpenCreateAttendance}
+                    className="px-3.5 py-2 text-xs font-bold text-white bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 rounded-xl shadow-sm flex items-center space-x-1.5 cursor-pointer transition-all active:scale-95"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>Create Record</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowUpdateAttendanceModal(false)}
+                    className={`h-9 w-9 rounded-xl border flex items-center justify-center cursor-pointer transition-colors ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted} hover:${adminThemeClass.textHighlight}`}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Toast message if any */}
+              {attendanceActionSuccess && (
+                <div className="bg-emerald-500/15 border-b border-emerald-500/30 px-6 py-2.5 flex items-center space-x-2 text-emerald-400 text-xs font-semibold animate-fade-in">
+                  <CheckCircle2 className="h-4 w-4 shrink-0" />
+                  <span>{attendanceActionSuccess}</span>
+                </div>
+              )}
+
+              {/* Worker Selection ("Just a name per time") */}
+              <div className={`p-4 sm:p-5 border-b space-y-3 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center space-x-2">
+                    <Users className={`h-4 w-4 ${adminThemeClass.textMuted}`} />
+                    <span className={`text-xs font-bold uppercase tracking-wider font-mono ${adminThemeClass.textTitle}`}>
+                      Select Employee to Manage:
+                    </span>
+                  </div>
+
+                  <div className="flex items-center space-x-2 w-full sm:w-auto">
+                    {/* Worker Search / Dropdown */}
+                    <div className="relative w-full sm:w-72">
+                      <Search className={`absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 ${adminThemeClass.textMuted}`} />
+                      <input
+                        type="text"
+                        placeholder="Search employee by name..."
+                        value={attendanceWorkerSearch}
+                        onChange={(e) => setAttendanceWorkerSearch(e.target.value)}
+                        className={`w-full pl-9 pr-3 py-1.5 text-xs rounded-xl border outline-none font-medium ${adminThemeClass.inputBg}`}
+                      />
+                    </div>
+                    {/* Scroll Left / Right Buttons */}
+                    <div className="flex items-center space-x-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const el = document.getElementById("attendance_worker_selector_list");
+                          if (el) el.scrollBy({ left: -220, behavior: "smooth" });
+                        }}
+                        className={`p-1.5 rounded-xl border text-xs cursor-pointer transition-all hover:${adminThemeClass.textHighlight} ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+                        title="Scroll Left"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const el = document.getElementById("attendance_worker_selector_list");
+                          if (el) el.scrollBy({ left: 220, behavior: "smooth" });
+                        }}
+                        className={`p-1.5 rounded-xl border text-xs cursor-pointer transition-all hover:${adminThemeClass.textHighlight} ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+                        title="Scroll Right"
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Worker Selector Pills with Horizontal Scrolling */}
+                <div
+                  id="attendance_worker_selector_list"
+                  onWheel={(e) => {
+                    if (e.deltaY !== 0) {
+                      e.currentTarget.scrollLeft += e.deltaY;
+                    }
+                  }}
+                  className="flex items-center gap-2 overflow-x-auto pb-1.5 pt-0.5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden touch-pan-x select-none w-full scroll-smooth"
+                >
+                  {workers
+                    .filter((w) => {
+                      if (!attendanceWorkerSearch.trim()) return true;
+                      const q = attendanceWorkerSearch.toLowerCase();
+                      return (
+                        w.firstName.toLowerCase().includes(q) ||
+                        w.lastName.toLowerCase().includes(q) ||
+                        w.email.toLowerCase().includes(q)
+                      );
+                    })
+                    .map((w) => {
+                      const isSelected = (selectedAttendanceWorkerId || workers[0]?.id) === w.id;
+                      const wDept = departments.find((d) => d.id === w.department_id)?.name || "Unassigned";
+                      return (
+                        <button
+                          key={w.id}
+                          type="button"
+                          onClick={() => setSelectedAttendanceWorkerId(w.id)}
+                          className={`shrink-0 flex items-center space-x-2 px-3 py-1.5 rounded-xl text-xs font-medium border transition-all cursor-pointer ${
+                            isSelected
+                              ? "bg-cyan-500/15 border-cyan-500/50 text-cyan-400 shadow-sm ring-1 ring-cyan-500/30"
+                              : `${adminThemeClass.cardBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted} hover:border-cyan-500/30`
+                          }`}
+                        >
+                          <img
+                            src={w.profilePhoto?.small || IMAGES.defaultWorkerAvatar}
+                            alt=""
+                            className="h-5 w-5 rounded-full object-cover border border-cyan-500/20"
+                          />
+                          <span className="font-bold">{w.firstName} {w.lastName}</span>
+                          <span className="text-[10px] opacity-60">({wDept})</span>
+                        </button>
+                      );
+                    })}
+                </div>
+
+                {/* Active Worker Profile Header Card */}
+                {(() => {
+                  const targetWorker = workers.find((w) => w.id === (selectedAttendanceWorkerId || workers[0]?.id));
+                  if (!targetWorker) return null;
+                  const wDept = departments.find((d) => d.id === targetWorker.department_id)?.name || "Unassigned";
+                  const wRecords = (attendanceRecords || []).filter((r: any) => r.worker_id === targetWorker.id);
+                  const onTimeCount = wRecords.filter((r: any) => r.statusIn === AttendanceStatus.PRESENT).length;
+                  const lateCount = wRecords.filter((r: any) => r.statusIn === AttendanceStatus.LATE).length;
+
+                  return (
+                    <div className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}>
+                      <div className="flex items-center space-x-3">
+                        <img
+                          src={targetWorker.profilePhoto?.medium || targetWorker.profilePhoto?.small || IMAGES.defaultWorkerAvatar}
+                          alt=""
+                          className="h-11 w-11 rounded-2xl object-cover border border-cyan-500/30 shadow-sm"
+                        />
+                        <div>
+                          <div className="flex items-center space-x-2">
+                            <h4 className={`text-sm font-bold ${adminThemeClass.textTitle}`}>
+                              {targetWorker.firstName} {targetWorker.lastName}
+                            </h4>
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                              {wDept}
+                            </span>
+                          </div>
+                          <span className={`text-[11px] ${adminThemeClass.textMuted}`}>
+                            {targetWorker.email} | ID: {targetWorker.id.slice(0, 8)}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-4 text-xs font-mono">
+                        <div className="text-center">
+                          <span className={`block text-[10px] uppercase font-bold ${adminThemeClass.textMuted}`}>Total Shifts</span>
+                          <span className={`font-bold text-sm ${adminThemeClass.textTitle}`}>{wRecords.length}</span>
+                        </div>
+                        <div className="text-center">
+                          <span className="block text-[10px] uppercase font-bold text-emerald-400">On Time</span>
+                          <span className="font-bold text-sm text-emerald-400">{onTimeCount}</span>
+                        </div>
+                        <div className="text-center">
+                          <span className="block text-[10px] uppercase font-bold text-amber-400">Late</span>
+                          <span className="font-bold text-sm text-amber-400">{lateCount}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Shift Register Table Container */}
+              <div className="flex-1 overflow-auto max-h-[500px] p-0">
+                {(() => {
+                  const activeWorkerId = selectedAttendanceWorkerId || workers[0]?.id;
+                  const activeRecords = (attendanceRecords || [])
+                    .filter((r: any) => r.worker_id === activeWorkerId)
+                    .sort((a: any, b: any) => (b.date || "").localeCompare(a.date || ""));
+
+                  if (activeRecords.length === 0) {
+                    return (
+                      <div className="p-12 text-center space-y-3">
+                        <Calendar className={`h-10 w-10 mx-auto opacity-40 ${adminThemeClass.textMuted}`} />
+                        <p className={`text-sm font-light ${adminThemeClass.textMuted}`}>
+                          No recorded attendance logs for this employee.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={handleOpenCreateAttendance}
+                          className="px-4 py-2 text-xs font-bold text-cyan-400 border border-cyan-500/30 hover:bg-cyan-500/10 rounded-xl transition-all cursor-pointer"
+                        >
+                          + Create First Shift Record
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className={`sticky top-0 z-20 ${adminThemeClass.innerBg} shadow-xs`}>
+                        <tr className={`border-b font-bold uppercase tracking-wider select-none text-[10px] ${adminThemeClass.innerBg} ${adminThemeClass.textMuted} ${adminThemeClass.accentBorder}`}>
+                          <th className="p-4">S/N</th>
+                          <th className="p-4">Date</th>
+                          <th className="p-4">Time In</th>
+                          <th className="p-4">Status In</th>
+                          <th className="p-4">Time Out</th>
+                          <th className="p-4">Status Out</th>
+                          <th className="p-4">Shift Duration</th>
+                          <th className="p-4 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className={`divide-y font-sans ${adminThemeClass.tableRowDivider}`}>
+                        {activeRecords.map((rec: any, idx: number) => {
+                          const shiftSecs = calculateShiftSeconds(rec, settings);
+                          const durationFormatted = formatDurationHHMMSS(shiftSecs);
+
+                          return (
+                            <tr
+                              key={`${rec.id || rec.date}-${idx}`}
+                              className={`transition-colors duration-100 ${adminThemeClass.tableRowHover}`}
+                            >
+                              <td className="p-4 font-mono font-medium text-neutral-500">
+                                {idx + 1}
+                              </td>
+                              <td className={`p-4 font-mono font-semibold ${adminThemeClass.textTitle}`}>
+                                {formatDateToCustomString(rec.date)}
+                              </td>
+                              <td className={`p-4 font-mono ${adminThemeClass.textHighlight}`}>
+                                {rec.timeIn || "--:--:--"}
+                              </td>
+                              <td className="p-4">
+                                <span className={`inline-block px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase border ${
+                                  rec.statusIn === AttendanceStatus.PRESENT
+                                    ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                                    : "bg-orange-500/15 text-orange-400 border-orange-500/30"
+                                }`}>
+                                  {rec.statusIn === AttendanceStatus.PRESENT ? "ON TIME" : "LATE"}
+                                </span>
+                              </td>
+                              <td className={`p-4 font-mono ${adminThemeClass.textHighlight}`}>
+                                {rec.timeOut || (
+                                  <span className="text-cyan-400/80 italic font-sans text-[11px]">Active Shift</span>
+                                )}
+                              </td>
+                              <td className={`p-4 ${adminThemeClass.textMuted}`}>
+                                {rec.statusOut || "--"}
+                              </td>
+                              <td className={`p-4 font-mono text-xs ${adminThemeClass.textHighlight}`}>
+                                {rec.timeOut ? durationFormatted : "--"}
+                              </td>
+                              <td className="p-4 text-right">
+                                <div className="flex items-center justify-end space-x-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditAttendance(rec)}
+                                    className="p-1.5 text-xs font-bold text-cyan-400 hover:bg-cyan-500/15 border border-cyan-500/30 rounded-lg transition-all cursor-pointer flex items-center space-x-1"
+                                    title="Edit Attendance Record"
+                                  >
+                                    <Edit3 className="h-3.5 w-3.5" />
+                                    <span className="hidden sm:inline">Edit</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handlePromptDeleteAttendanceConfirm(rec)}
+                                    className="p-1.5 text-xs font-bold text-red-400 hover:bg-red-500/15 border border-red-500/30 rounded-lg transition-all cursor-pointer flex items-center space-x-1"
+                                    title="Delete Attendance Record"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                    <span className="hidden sm:inline">Delete</span>
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  );
+                })()}
+              </div>
+
+              {/* Modal Footer */}
+              <div className={`p-4 border-t flex items-center justify-between ${adminThemeClass.accentBorder} ${adminThemeClass.innerBg}`}>
+                <span className={`text-xs ${adminThemeClass.textMuted}`}>
+                  Changes are synchronized live across Admin Shift Register and Worker Dashboards.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowUpdateAttendanceModal(false)}
+                  className="px-5 py-2 text-xs font-bold rounded-xl border border-neutral-500/30 text-neutral-300 hover:bg-neutral-500/10 transition-all cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* -------------------- MODAL AREA: CREATE / EDIT ATTENDANCE FORM SUBMODAL -------------------- */}
+      <AnimatePresence>
+        {showAttendanceFormModal && (
+          <div
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm z-55 flex items-center justify-center p-4"
+            onClick={() => setShowAttendanceFormModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className={`w-full max-w-lg max-h-[90vh] overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden rounded-3xl border p-6 shadow-2xl select-none space-y-5 ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+            >
+              <div className="flex items-center justify-between border-b pb-3 border-neutral-500/20">
+                <div className="flex items-center space-x-2.5">
+                  <div className="h-9 w-9 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 flex items-center justify-center">
+                    <Edit3 className="h-4.5 w-4.5" />
+                  </div>
+                  <div>
+                    <h4 className={`font-bold text-base ${adminThemeClass.textTitle}`}>
+                      {attendanceFormMode === "create" ? "Create Attendance Record" : "Edit Attendance Record"}
+                    </h4>
+                    <p className={`text-[11px] ${adminThemeClass.textMuted}`}>
+                      {attendanceFormMode === "create"
+                        ? "Manually add an employee shift record"
+                        : "Modify existing check-in / check-out times and status"}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAttendanceFormModal(false)}
+                  className={`p-1.5 rounded-lg text-neutral-400 hover:${adminThemeClass.textHighlight} cursor-pointer transition-colors`}
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Employee Target Summary */}
+              {(() => {
+                const targetWorker = workers.find((w) => w.id === (selectedAttendanceWorkerId || workers[0]?.id));
+                return (
+                  <div className={`p-3 rounded-2xl border flex items-center space-x-3 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                    <img
+                      src={targetWorker?.profilePhoto?.small || IMAGES.defaultWorkerAvatar}
+                      alt=""
+                      className="h-10 w-10 rounded-xl object-cover border border-cyan-500/20"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <span className={`block font-bold text-xs truncate ${adminThemeClass.textTitle}`}>
+                        {targetWorker ? `${targetWorker.firstName} ${targetWorker.lastName}` : "Employee"}
+                      </span>
+                      <span className={`text-[10px] block truncate ${adminThemeClass.textMuted}`}>
+                        {targetWorker?.email} &bull; <span className="font-mono text-cyan-400 font-semibold">{targetWorker?.employeeId || targetWorker?.id?.slice(0, 8)}</span>
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <form onSubmit={handlePromptAttendanceFormConfirm} className="space-y-4">
+                {/* Shift Date Field - Custom Calendar Design */}
+                <div>
+                  <label className={`block text-[11px] font-semibold mb-1.5 ${adminThemeClass.textTitle}`}>
+                    Shift Date
+                  </label>
+                  <CustomDatePicker
+                    value={attendanceFormDate}
+                    onChange={(newDate) => setAttendanceFormDate(newDate)}
+                    theme={theme === "light" ? "light" : theme === "army" ? "army" : theme === "navy" ? "navy" : "dark"}
+                    className="w-full"
+                    placeholder="Select Shift Date"
+                   disableFutureDates={true} />
+                </div>
+
+                {/* Time In & Arrival Status Custom Dropdown Field */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className={`block text-[11px] font-semibold mb-1.5 ${adminThemeClass.textTitle}`}>
+                      Check-In Time
+                    </label>
+                    <CustomTimePicker
+                      value={attendanceFormTimeIn}
+                      onChange={(newTime) => setAttendanceFormTimeIn(newTime.length === 5 ? `${newTime}:00` : newTime)}
+                      theme={theme === "light" ? "light" : theme === "army" ? "army" : theme === "navy" ? "navy" : "dark"}
+                      className="w-full"
+                    />
+                  </div>
+
+                  <div>
+                    <label className={`block text-[11px] font-semibold mb-1.5 ${adminThemeClass.textTitle}`}>
+                      Arrival Status
+                    </label>
+                    <CustomSelect
+                      value={attendanceFormStatusIn}
+                      onChange={(val) => setAttendanceFormStatusIn(val as AttendanceStatus)}
+                      options={arrivalStatusDropdownOptions}
+                      theme={theme === "light" ? "light" : theme === "army" ? "army" : theme === "navy" ? "navy" : "dark"}
+                      className={`h-10 rounded-xl px-3.5 text-xs font-medium ${adminThemeClass.inputBg} ${adminThemeClass.accentBorder}`}
+                    />
+                  </div>
+                </div>
+
+                {/* Has Checkout Toggle */}
+                <div className="pt-1">
+                  <label className="flex items-center space-x-2.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={attendanceFormHasCheckout}
+                      onChange={(e) => setAttendanceFormHasCheckout(e.target.checked)}
+                      className="h-4 w-4 rounded text-cyan-500 focus:ring-cyan-400 cursor-pointer accent-cyan-500"
+                    />
+                    <span className={`text-xs font-semibold ${adminThemeClass.textTitle}`}>
+                      Include Check-Out Time &amp; Status
+                    </span>
+                  </label>
+                </div>
+
+                {/* Time Out & Checkout Status Custom Dropdown Field */}
+                {attendanceFormHasCheckout && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 animate-fade-in pt-1">
+                    <div>
+                      <label className={`block text-[11px] font-semibold mb-1.5 ${adminThemeClass.textTitle}`}>
+                        Check-Out Time
+                      </label>
+                      <CustomTimePicker
+                        value={attendanceFormTimeOut}
+                        onChange={(newTime) => setAttendanceFormTimeOut(newTime.length === 5 ? `${newTime}:00` : newTime)}
+                        theme={theme === "light" ? "light" : theme === "army" ? "army" : theme === "navy" ? "navy" : "dark"}
+                        className="w-full"
+                      />
+                    </div>
+
+                    <div>
+                      <label className={`block text-[11px] font-semibold mb-1.5 ${adminThemeClass.textTitle}`}>
+                        Checkout Status
+                      </label>
+                      <CustomSelect
+                        value={attendanceFormStatusOut}
+                        onChange={(val) => setAttendanceFormStatusOut(val)}
+                        options={checkoutStatusDropdownOptions}
+                        theme={theme === "light" ? "light" : theme === "army" ? "army" : theme === "navy" ? "navy" : "dark"}
+                        className={`h-10 rounded-xl px-3.5 text-xs font-medium ${adminThemeClass.inputBg} ${adminThemeClass.accentBorder}`}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Cancel / Proceed to Confirm Buttons - Spread to fill container */}
+                <div className="grid grid-cols-2 gap-3 w-full pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowAttendanceFormModal(false)}
+                    className="w-full py-3 px-4 text-xs font-bold rounded-xl border border-neutral-500/30 text-neutral-300 hover:bg-neutral-500/10 cursor-pointer transition-all active:scale-98 text-center"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="w-full py-3 px-4 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-bold rounded-xl shadow-md cursor-pointer transition-all active:scale-98 text-center flex items-center justify-center space-x-1.5"
+                  >
+                    <Check className="h-4 w-4" />
+                    <span>Proceed to Confirm</span>
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* -------------------- MODAL AREA: CONFIRM ATTENDANCE ACTION (Update Attendance) -------------------- */}
+      <AnimatePresence>
+        {attendanceConfirmData && attendanceConfirmData.isOpen && (
+          <div
+            className="fixed inset-0 bg-black/80 backdrop-blur-md z-60 flex items-center justify-center p-4"
+            onClick={() => !isProcessingAttendanceAction && setAttendanceConfirmData(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.92, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.92, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className={`w-full max-w-md rounded-3xl border p-6 text-center space-y-5 shadow-2xl select-none ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+            >
+              <div className={`h-14 w-14 rounded-2xl mx-auto flex items-center justify-center border shadow-sm ${
+                attendanceConfirmData.actionType === "delete"
+                  ? "bg-red-500/15 text-red-400 border-red-500/30"
+                  : "bg-cyan-500/15 text-cyan-400 border-cyan-500/30"
+              }`}>
+                {attendanceConfirmData.actionType === "delete" ? (
+                  <Trash2 className="h-7 w-7" />
+                ) : (
+                  <ClipboardCheck className="h-7 w-7" />
+                )}
+              </div>
+
+              <div>
+                <h4 className={`text-lg font-bold font-display ${adminThemeClass.textTitle}`}>
+                  Update Attendance
+                </h4>
+                <p className={`text-xs mt-1 ${adminThemeClass.textMuted}`}>
+                  {attendanceConfirmData.actionType === "delete"
+                    ? "Are you sure you want to permanently delete this shift attendance record?"
+                    : attendanceConfirmData.actionType === "create"
+                    ? "Please confirm creating this new official shift record."
+                    : "Please confirm saving the modified attendance details."}
+                </p>
+              </div>
+
+              {/* Action Summary Card */}
+              <div className={`p-4 rounded-2xl border text-left space-y-2 text-xs ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                <div className="flex items-center justify-between border-b pb-2 border-neutral-500/20">
+                  <span className={adminThemeClass.textMuted}>Target Employee:</span>
+                  <span className={`font-bold ${adminThemeClass.textTitle}`}>
+                    {attendanceConfirmData.workerName}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between border-b pb-2 border-neutral-500/20">
+                  <span className={adminThemeClass.textMuted}>Shift Date:</span>
+                  <span className={`font-mono font-semibold ${adminThemeClass.textTitle}`}>
+                    {formatDateToCustomString(attendanceConfirmData.date)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between border-b pb-2 border-neutral-500/20">
+                  <span className={adminThemeClass.textMuted}>Check-In Time & Status:</span>
+                  <span className={`font-mono ${adminThemeClass.textHighlight}`}>
+                    {attendanceConfirmData.timeIn} ({attendanceConfirmData.statusIn === AttendanceStatus.PRESENT ? "On Time" : "Late"})
+                  </span>
+                </div>
+                {attendanceConfirmData.timeOut && (
+                  <div className="flex items-center justify-between border-b pb-2 border-neutral-500/20">
+                    <span className={adminThemeClass.textMuted}>Check-Out Time & Status:</span>
+                    <span className={`font-mono ${adminThemeClass.textHighlight}`}>
+                      {attendanceConfirmData.timeOut} ({attendanceConfirmData.statusOut || "Normal"})
+                    </span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between pt-1">
+                  <span className={adminThemeClass.textMuted}>Action Protocol:</span>
+                  <span className={`font-mono font-bold uppercase text-[10px] px-2 py-0.5 rounded-md ${
+                    attendanceConfirmData.actionType === "delete"
+                      ? "bg-red-500/20 text-red-400"
+                      : "bg-cyan-500/20 text-cyan-400"
+                  }`}>
+                    {attendanceConfirmData.actionType === "delete" ? "DELETE RECORD" : attendanceConfirmData.actionType === "create" ? "CREATE RECORD" : "UPDATE RECORD"}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 w-full pt-2">
+                <button
+                  type="button"
+                  disabled={isProcessingAttendanceAction}
+                  onClick={() => setAttendanceConfirmData(null)}
+                  className="w-full py-3 px-4 border border-neutral-500/30 hover:bg-neutral-500/10 font-bold rounded-xl text-xs transition-all cursor-pointer text-neutral-300 disabled:opacity-50 text-center"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isProcessingAttendanceAction}
+                  onClick={handleExecuteAttendanceAction}
+                  className={`w-full py-3 px-4 text-white font-bold rounded-xl text-xs transition-all shadow-md cursor-pointer flex items-center justify-center space-x-2 disabled:opacity-50 active:scale-98 ${
+                    attendanceConfirmData.actionType === "delete"
+                      ? "bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500"
+                      : "bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500"
+                  }`}
+                >
+                  {isProcessingAttendanceAction ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 animate-spin shrink-0" />
+                      <span>Processing...</span>
+                    </>
+                  ) : (
+                    <span>Confirm &amp; Execute</span>
+                  )}
                 </button>
               </div>
             </motion.div>
@@ -6044,7 +8397,7 @@ export default function AdminDashboard({
                           <strong className="text-lg text-cyan-400 block font-mono mt-1 font-bold">{metrics.approvedPermissionDays} Days</strong>
                         </div>
                         <div className={`p-4 rounded-2xl border col-span-2 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
-                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider block ${adminThemeClass.textMuted}`}>Performance Index</span>
+                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider block ${adminThemeClass.textMuted}`}>Overall Performance Index</span>
                           <strong className={`text-xl block font-mono mt-1 font-extrabold ${adminThemeClass.accentText}`}>{metrics.performancePercentage.toFixed(2)}%</strong>
                         </div>
                       </div>
@@ -6420,49 +8773,535 @@ export default function AdminDashboard({
                 })()}
 
                 {activeSummaryTab === "hours" && (() => {
-                  const dailyM = getPersonalWorkerMetrics(activeLeaderModal, "daily");
-                  const weeklyM = getPersonalWorkerMetrics(activeLeaderModal, "weekly");
-                  const monthlyM = getPersonalWorkerMetrics(activeLeaderModal, "monthly");
-                  const yearlyM = getPersonalWorkerMetrics(activeLeaderModal, "yearly");
-                  const cumulativeM = getPersonalWorkerMetrics(activeLeaderModal, "cumulative");
+                  const daysList = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"] as const;
+                  const monthNames = [
+                    "January", "February", "March", "April", "May", "June",
+                    "July", "August", "September", "October", "November", "December"
+                  ];
+                  const currentYear = new Date().getFullYear();
+                  const yearsList = [];
+                  for (let y = 2024; y <= currentYear; y++) {
+                    yearsList.push(y);
+                  }
+
+                  const activeDays = activeLeaderModal.activityDays || settings?.activityDays || {
+                    Monday: true, Tuesday: true, Wednesday: true, Thursday: true, Friday: true, Saturday: false, Sunday: false
+                  };
+
+                  // Helper function to calculate precise metrics for any specific date range or filter
+                  const calculateAuditRangeMetrics = (filterType: "daily" | "weekly" | "monthly" | "yearly") => {
+                    const getRecordDurationSeconds = (r: any): number => {
+                      if (typeof r.coveredTime === "number" && r.coveredTime > 0) {
+                        return r.coveredTime;
+                      }
+                      if (r.timeIn && r.timeOut) {
+                        const [h1, m1, s1] = r.timeIn.split(":").map(Number);
+                        const [h2, m2, s2] = r.timeOut.split(":").map(Number);
+                        const sIn = (h1 || 0) * 3600 + (m1 || 0) * 60 + (s1 || 0);
+                        const sOut = (h2 || 0) * 3600 + (m2 || 0) * 60 + (s2 || 0);
+                        if (sOut > sIn) return sOut - sIn;
+                      }
+                      return 0;
+                    };
+
+                    let targetRecords: any[] = [];
+                    let expectedWorkDays = 0;
+                    let attendedDays = 0;
+                    let lateCount = 0;
+                    let onTimeCount = 0;
+                    let approvedExemptions = 0;
+                    let absentDays = 0;
+                    let totalSeconds = 0;
+
+                    const workerRecords = attendanceRecords.filter(r => r.worker_id === activeLeaderModal.id);
+
+                    if (filterType === "daily") {
+                      // Monday to Sunday: match chosen day of the week
+                      const matchingRecords = workerRecords.filter(r => {
+                        const [y, m, d] = r.date.split("-").map(Number);
+                        const dateObj = new Date(y, m - 1, d);
+                        const dayIdx = dateObj.getDay();
+                        const rDayName = daysList[dayIdx === 0 ? 6 : dayIdx - 1];
+                        return rDayName === auditSelectedDay;
+                      });
+
+                      targetRecords = matchingRecords;
+                      const isScheduled = activeDays[auditSelectedDay] === true;
+                      expectedWorkDays = isScheduled ? Math.max(1, matchingRecords.length) : 0;
+                      
+                      attendedDays = targetRecords.filter(r => (r.statusIn || "").toUpperCase() === "PRESENT" || (r.statusIn || "").toUpperCase() === "LATE").length;
+                      lateCount = targetRecords.filter(r => (r.statusIn || "").toUpperCase() === "LATE").length;
+                      onTimeCount = targetRecords.filter(r => (r.statusIn || "").toUpperCase() === "PRESENT").length;
+                      absentDays = Math.max(0, expectedWorkDays - attendedDays);
+
+                      totalSeconds = targetRecords.reduce((sum, r) => sum + getRecordDurationSeconds(r), 0);
+                    } else if (filterType === "weekly") {
+                      // Week 1 - Week 52: ISO Week calculation
+                      const getISOWeek = (dateStr: string) => {
+                        const [y, m, d] = dateStr.split("-").map(Number);
+                        const target = new Date(Date.UTC(y, m - 1, d));
+                        const dayNum = target.getUTCDay() || 7;
+                        target.setUTCDate(target.getUTCDate() + 4 - dayNum);
+                        const yearStart = new Date(Date.UTC(target.getUTCFullYear(), 0, 1));
+                        return Math.min(52, Math.max(1, Math.ceil((((target.getTime() - yearStart.getTime()) / 86400000) + 1) / 7)));
+                      };
+
+                      targetRecords = workerRecords.filter(r => getISOWeek(r.date) === auditSelectedWeek);
+                      const scheduledPerWeek = Object.values(activeDays).filter(Boolean).length;
+                      expectedWorkDays = scheduledPerWeek;
+                      attendedDays = targetRecords.filter(r => (r.statusIn || "").toUpperCase() === "PRESENT" || (r.statusIn || "").toUpperCase() === "LATE").length;
+                      lateCount = targetRecords.filter(r => (r.statusIn || "").toUpperCase() === "LATE").length;
+                      onTimeCount = targetRecords.filter(r => (r.statusIn || "").toUpperCase() === "PRESENT").length;
+                      absentDays = Math.max(0, expectedWorkDays - attendedDays);
+
+                      totalSeconds = targetRecords.reduce((sum, r) => sum + getRecordDurationSeconds(r), 0);
+                    } else if (filterType === "monthly") {
+                      // January - December
+                      targetRecords = workerRecords.filter(r => {
+                        const [y, m] = r.date.split("-").map(Number);
+                        return (m - 1) === auditSelectedMonth;
+                      });
+
+                      const scheduledPerWeek = Object.values(activeDays).filter(Boolean).length;
+                      expectedWorkDays = scheduledPerWeek * 4;
+                      attendedDays = targetRecords.filter(r => (r.statusIn || "").toUpperCase() === "PRESENT" || (r.statusIn || "").toUpperCase() === "LATE").length;
+                      lateCount = targetRecords.filter(r => (r.statusIn || "").toUpperCase() === "LATE").length;
+                      onTimeCount = targetRecords.filter(r => (r.statusIn || "").toUpperCase() === "PRESENT").length;
+                      absentDays = Math.max(0, expectedWorkDays - attendedDays);
+
+                      totalSeconds = targetRecords.reduce((sum, r) => sum + getRecordDurationSeconds(r), 0);
+                    } else if (filterType === "yearly") {
+                      // 2024 to current year
+                      targetRecords = workerRecords.filter(r => {
+                        const [y] = r.date.split("-").map(Number);
+                        return y === auditSelectedYear;
+                      });
+
+                      const scheduledPerWeek = Object.values(activeDays).filter(Boolean).length;
+                      expectedWorkDays = scheduledPerWeek * 52;
+                      attendedDays = targetRecords.filter(r => (r.statusIn || "").toUpperCase() === "PRESENT" || (r.statusIn || "").toUpperCase() === "LATE").length;
+                      lateCount = targetRecords.filter(r => (r.statusIn || "").toUpperCase() === "LATE").length;
+                      onTimeCount = targetRecords.filter(r => (r.statusIn || "").toUpperCase() === "PRESENT").length;
+                      absentDays = Math.max(0, expectedWorkDays - attendedDays);
+
+                      totalSeconds = targetRecords.reduce((sum, r) => sum + getRecordDurationSeconds(r), 0);
+                    }
+
+                    const workHours = Number((totalSeconds / 3600).toFixed(2));
+                    const performanceScore = expectedWorkDays > 0 
+                      ? Math.min(100, Number(((attendedDays / expectedWorkDays) * 100).toFixed(1))) 
+                      : 0;
+
+                    return {
+                      workHours,
+                      expectedWorkDays,
+                      attendedDays,
+                      lateCount,
+                      onTimeCount,
+                      approvedExemptions,
+                      absentDays,
+                      performanceScore,
+                      totalRecordsCount: targetRecords.length
+                    };
+                  };
+
+                  const currentAuditMetrics = calculateAuditRangeMetrics(auditTimeframe);
+
+                  const dailyAuditMetrics = calculateAuditRangeMetrics("daily");
+                  const weeklyAuditMetrics = calculateAuditRangeMetrics("weekly");
+                  const monthlyAuditMetrics = calculateAuditRangeMetrics("monthly");
+                  const yearlyAuditMetrics = calculateAuditRangeMetrics("yearly");
+
+                  const allWorkerRecords = attendanceRecords.filter(r => r.worker_id === activeLeaderModal.id);
+                  const totalCumulativeSeconds = allWorkerRecords.reduce((sum, r) => {
+                    if (typeof r.coveredTime === "number" && r.coveredTime > 0) return sum + r.coveredTime;
+                    if (r.timeIn && r.timeOut) {
+                      const [h1, m1, s1] = r.timeIn.split(":").map(Number);
+                      const [h2, m2, s2] = r.timeOut.split(":").map(Number);
+                      const sIn = (h1 || 0) * 3600 + (m1 || 0) * 60 + (s1 || 0);
+                      const sOut = (h2 || 0) * 3600 + (m2 || 0) * 60 + (s2 || 0);
+                      if (sOut > sIn) return sum + (sOut - sIn);
+                    }
+                    return sum;
+                  }, 0);
+                  const totalCumulativeHours = Number((totalCumulativeSeconds / 3600).toFixed(2));
+
+                  const getPerformanceBadge = (score: number) => {
+                    if (score >= 90) return { label: "Optimal Standing", bg: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25" };
+                    if (score >= 75) return { label: "Good Standing", bg: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/25" };
+                    if (score >= 50) return { label: "Satisfactory", bg: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25" };
+                    return { label: "Needs Improvement", bg: "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/25" };
+                  };
+                  const perfBadge = getPerformanceBadge(currentAuditMetrics.performanceScore);
 
                   return (
-                    <div className="space-y-4 font-sans">
-                      <span className={`text-[10px] uppercase font-bold tracking-wider font-mono block mb-2 ${adminThemeClass.textMuted}`}>Cumulative Hours matrix</span>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className={`p-4 rounded-2xl border flex flex-col justify-between ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
-                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${adminThemeClass.textMuted}`}>Total Cumulative Hours</span>
-                          <div className="mt-2 flex items-baseline space-x-1">
-                            <strong className="text-2xl text-cyan-400 font-mono font-bold">{cumulativeM.workHours.toFixed(2)}</strong>
-                            <span className="text-[10px] font-medium text-gray-400">hours</span>
+                    <div className="space-y-5 font-sans">
+                      {/* HR Timeframe Audit Controller */}
+                      <div className={`p-5 rounded-2xl border shadow-sm space-y-4 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                          <div>
+                            <span className={`text-[10px] uppercase font-bold tracking-wider font-mono block mb-0.5 ${adminThemeClass.textMuted}`}>
+                              HR Work-Hours & Performance Audit Timeframe
+                            </span>
+                            <p className={`text-xs font-light ${adminThemeClass.textMuted}`}>
+                              Audit employee work hours and shift attendance performance across custom time horizons.
+                            </p>
+                          </div>
+
+                          {/* Primary Basis Switcher: Daily, Weekly, Monthly, Yearly */}
+                          <div className={`flex rounded-xl p-0.5 border shadow-inner ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder} self-start sm:self-auto`}>
+                            {(["daily", "weekly", "monthly", "yearly"] as const).map((tf) => (
+                              <button
+                                key={tf}
+                                type="button"
+                                onClick={() => setAuditTimeframe(tf)}
+                                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold capitalize transition-all cursor-pointer ${
+                                  auditTimeframe === tf
+                                    ? "bg-cyan-600 text-white shadow-sm scale-[1.02]"
+                                    : `text-neutral-400 hover:${adminThemeClass.textHighlight}`
+                                }`}
+                              >
+                                {tf}
+                              </button>
+                            ))}
                           </div>
                         </div>
-                        <div className={`p-4 rounded-2xl border flex flex-col justify-between ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
-                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${adminThemeClass.textMuted}`}>Daily Shift Hours</span>
-                          <div className="mt-2 flex items-baseline space-x-1">
-                            <strong className="text-2xl text-emerald-500 font-mono font-bold">{dailyM.workHours.toFixed(2)}</strong>
-                            <span className="text-[10px] font-medium text-gray-400">hours</span>
+
+                        {/* Interactive Selector Trigger for current Timeframe */}
+                        <div className={`pt-3 border-t flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${adminThemeClass.accentBorder}`}>
+                          <div className="flex items-center space-x-2">
+                            <span className={`text-[11px] font-semibold ${adminThemeClass.textTitle}`}>
+                              {auditTimeframe === "daily" && "Daily Audit Selection:"}
+                              {auditTimeframe === "weekly" && "Weekly Audit Selection:"}
+                              {auditTimeframe === "monthly" && "Monthly Audit Selection:"}
+                              {auditTimeframe === "yearly" && "Yearly Audit Selection:"}
+                            </span>
+                            <span className="text-[11px] font-bold text-cyan-600 dark:text-cyan-400 font-mono">
+                              {auditTimeframe === "daily" && auditSelectedDay}
+                              {auditTimeframe === "weekly" && `Week ${auditSelectedWeek}`}
+                              {auditTimeframe === "monthly" && monthNames[auditSelectedMonth]}
+                              {auditTimeframe === "yearly" && auditSelectedYear}
+                            </span>
+                          </div>
+
+                          <button
+                            id="open_audit_picker_modal_btn"
+                            type="button"
+                            onClick={() => setShowAuditPickerModal(true)}
+                            className={`px-4 py-2 rounded-xl border flex items-center justify-between sm:justify-start space-x-3 text-xs font-bold cursor-pointer transition-all hover:scale-[1.01] shadow-xs ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle}`}
+                          >
+                            <div className="flex items-center space-x-2">
+                              <Calendar className="h-4 w-4 text-cyan-500 dark:text-cyan-400 shrink-0" />
+                              <span>
+                                {auditTimeframe === "daily" && `Choose Day (Monday - Sunday)`}
+                                {auditTimeframe === "weekly" && `Choose Week (Week 1 - Week 52)`}
+                                {auditTimeframe === "monthly" && `Choose Month (January - December)`}
+                                {auditTimeframe === "yearly" && `Choose Year (2024 - ${currentYear})`}
+                              </span>
+                            </div>
+                            <ChevronDown className="h-4 w-4 text-neutral-400 ml-2 shrink-0" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Vertical List Selection Modal for Timeframe (Daily, Weekly, Monthly, Yearly) */}
+                      <AnimatePresence>
+                        {showAuditPickerModal && (
+                          <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[99999] flex items-center justify-center p-4 overflow-y-auto">
+                            <motion.div
+                              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+                              animate={{ opacity: 1, scale: 1, y: 0 }}
+                              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+                              className={`w-full max-w-md my-auto max-h-[85vh] flex flex-col rounded-3xl border shadow-2xl overflow-hidden ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+                            >
+                              {/* Modal Header */}
+                              <div className={`p-5 border-b flex items-center justify-between shrink-0 ${adminThemeClass.accentBorder}`}>
+                                <div className="flex items-center space-x-3">
+                                  <div className="p-2.5 rounded-2xl bg-cyan-500/10 text-cyan-500 dark:text-cyan-400">
+                                    <Calendar className="h-5 w-5" />
+                                  </div>
+                                  <div>
+                                    <h3 className={`font-bold text-sm sm:text-base ${adminThemeClass.textTitle}`}>
+                                      {auditTimeframe === "daily" && "Select Day of Week"}
+                                      {auditTimeframe === "weekly" && "Select Calendar Week"}
+                                      {auditTimeframe === "monthly" && "Select Calendar Month"}
+                                      {auditTimeframe === "yearly" && "Select Audit Year"}
+                                    </h3>
+                                    <p className={`text-xs ${adminThemeClass.textMuted}`}>
+                                      {auditTimeframe === "daily" && "Monday to Sunday"}
+                                      {auditTimeframe === "weekly" && "Week 1 to Week 52"}
+                                      {auditTimeframe === "monthly" && "January to December"}
+                                      {auditTimeframe === "yearly" && `2024 to ${currentYear}`}
+                                    </p>
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setShowAuditPickerModal(false)}
+                                  className={`p-2 rounded-xl text-neutral-400 hover:${adminThemeClass.textTitle} hover:bg-neutral-800/30 transition-colors cursor-pointer`}
+                                >
+                                  <X className="h-5 w-5" />
+                                </button>
+                              </div>
+
+                              {/* Vertical List Content */}
+                              <div className="p-4 sm:p-5 space-y-2 overflow-y-auto flex-1 scrollbar-thin">
+                                {/* Daily: Monday to Sunday */}
+                                {auditTimeframe === "daily" &&
+                                  daysList.map((day) => {
+                                    const isSelected = auditSelectedDay === day;
+                                    return (
+                                      <button
+                                        key={day}
+                                        type="button"
+                                        onClick={() => {
+                                          setAuditSelectedDay(day);
+                                          setShowAuditPickerModal(false);
+                                        }}
+                                        className={`w-full p-3.5 rounded-2xl flex items-center justify-between transition-all cursor-pointer border text-left ${
+                                          isSelected
+                                            ? "bg-cyan-500/15 border-cyan-500/50 text-cyan-600 dark:text-cyan-400 font-bold shadow-xs"
+                                            : `${adminThemeClass.innerBg} border-transparent hover:${adminThemeClass.accentBorder} ${adminThemeClass.textTitle} font-medium`
+                                        }`}
+                                      >
+                                        <div className="flex items-center space-x-3">
+                                          <span
+                                            className={`w-2.5 h-2.5 rounded-full ${
+                                              isSelected ? "bg-cyan-500 dark:bg-cyan-400 shadow-sm" : "bg-neutral-500 dark:bg-neutral-600"
+                                            }`}
+                                          />
+                                          <span className="text-sm font-semibold">{day}</span>
+                                        </div>
+                                        {isSelected && <Check className="h-4 w-4 text-cyan-500 dark:text-cyan-400 shrink-0" />}
+                                      </button>
+                                    );
+                                  })}
+
+                                {/* Weekly: Week 1 to Week 52 */}
+                                {auditTimeframe === "weekly" &&
+                                  Array.from({ length: 52 }, (_, i) => i + 1).map((wk) => {
+                                    const isSelected = auditSelectedWeek === wk;
+                                    return (
+                                      <button
+                                        key={wk}
+                                        type="button"
+                                        onClick={() => {
+                                          setAuditSelectedWeek(wk);
+                                          setShowAuditPickerModal(false);
+                                        }}
+                                        className={`w-full p-3.5 rounded-2xl flex items-center justify-between transition-all cursor-pointer border text-left ${
+                                          isSelected
+                                            ? "bg-cyan-500/15 border-cyan-500/50 text-cyan-600 dark:text-cyan-400 font-bold shadow-xs"
+                                            : `${adminThemeClass.innerBg} border-transparent hover:${adminThemeClass.accentBorder} ${adminThemeClass.textTitle} font-medium`
+                                        }`}
+                                      >
+                                        <div className="flex items-center space-x-3">
+                                          <span
+                                            className={`w-2.5 h-2.5 rounded-full ${
+                                              isSelected ? "bg-cyan-500 dark:bg-cyan-400 shadow-sm" : "bg-neutral-500 dark:bg-neutral-600"
+                                            }`}
+                                          />
+                                          <span className="text-sm font-semibold font-mono">Week {wk}</span>
+                                        </div>
+                                        {isSelected && <Check className="h-4 w-4 text-cyan-500 dark:text-cyan-400 shrink-0" />}
+                                      </button>
+                                    );
+                                  })}
+
+                                {/* Monthly: January to December */}
+                                {auditTimeframe === "monthly" &&
+                                  monthNames.map((month, idx) => {
+                                    const isSelected = auditSelectedMonth === idx;
+                                    return (
+                                      <button
+                                        key={month}
+                                        type="button"
+                                        onClick={() => {
+                                          setAuditSelectedMonth(idx);
+                                          setShowAuditPickerModal(false);
+                                        }}
+                                        className={`w-full p-3.5 rounded-2xl flex items-center justify-between transition-all cursor-pointer border text-left ${
+                                          isSelected
+                                            ? "bg-cyan-500/15 border-cyan-500/50 text-cyan-600 dark:text-cyan-400 font-bold shadow-xs"
+                                            : `${adminThemeClass.innerBg} border-transparent hover:${adminThemeClass.accentBorder} ${adminThemeClass.textTitle} font-medium`
+                                        }`}
+                                      >
+                                        <div className="flex items-center space-x-3">
+                                          <span
+                                            className={`w-2.5 h-2.5 rounded-full ${
+                                              isSelected ? "bg-cyan-500 dark:bg-cyan-400 shadow-sm" : "bg-neutral-500 dark:bg-neutral-600"
+                                            }`}
+                                          />
+                                          <span className="text-sm font-semibold">{month}</span>
+                                        </div>
+                                        {isSelected && <Check className="h-4 w-4 text-cyan-500 dark:text-cyan-400 shrink-0" />}
+                                      </button>
+                                    );
+                                  })}
+
+                                {/* Yearly: 2024 to current year */}
+                                {auditTimeframe === "yearly" &&
+                                  yearsList.map((yr) => {
+                                    const isSelected = auditSelectedYear === yr;
+                                    return (
+                                      <button
+                                        key={yr}
+                                        type="button"
+                                        onClick={() => {
+                                          setAuditSelectedYear(yr);
+                                          setShowAuditPickerModal(false);
+                                        }}
+                                        className={`w-full p-3.5 rounded-2xl flex items-center justify-between transition-all cursor-pointer border text-left ${
+                                          isSelected
+                                            ? "bg-cyan-500/15 border-cyan-500/50 text-cyan-600 dark:text-cyan-400 font-bold shadow-xs"
+                                            : `${adminThemeClass.innerBg} border-transparent hover:${adminThemeClass.accentBorder} ${adminThemeClass.textTitle} font-medium`
+                                        }`}
+                                      >
+                                        <div className="flex items-center space-x-3">
+                                          <span
+                                            className={`w-2.5 h-2.5 rounded-full ${
+                                              isSelected ? "bg-cyan-500 dark:bg-cyan-400 shadow-sm" : "bg-neutral-500 dark:bg-neutral-600"
+                                            }`}
+                                          />
+                                          <span className="text-sm font-semibold font-mono">{yr}</span>
+                                        </div>
+                                        {isSelected && <Check className="h-4 w-4 text-cyan-500 dark:text-cyan-400 shrink-0" />}
+                                      </button>
+                                    );
+                                  })}
+                              </div>
+
+                              {/* Modal Footer */}
+                              <div className={`p-4 border-t flex justify-end shrink-0 ${adminThemeClass.accentBorder}`}>
+                                <button
+                                  type="button"
+                                  onClick={() => setShowAuditPickerModal(false)}
+                                  className={`px-5 py-2 rounded-xl border font-bold text-xs cursor-pointer ${adminThemeClass.innerBg} ${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`}
+                                >
+                                  Close
+                                </button>
+                              </div>
+                            </motion.div>
+                          </div>
+                        )}
+                      </AnimatePresence>
+
+                      {/* Active Audit Evaluation Overview Card */}
+                      <div className={`p-6 rounded-3xl border shadow-md space-y-5 ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}>
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-3 border-neutral-200/20">
+                          <div>
+                            <div className="flex items-center space-x-2">
+                              <span className={`text-[10px] uppercase font-bold tracking-wider font-mono ${adminThemeClass.textMuted}`}>
+                                Active Audit Horizon
+                              </span>
+                              <span className="inline-block h-1 w-1 rounded-full bg-cyan-400" />
+                              <span className="text-[10px] font-mono font-semibold uppercase text-cyan-600 dark:text-cyan-400">
+                                {auditTimeframe === "daily" && `${auditSelectedDay} (Daily)`}
+                                {auditTimeframe === "weekly" && `Week ${auditSelectedWeek} (Wk 1-52)`}
+                                {auditTimeframe === "monthly" && `${monthNames[auditSelectedMonth]} (Monthly)`}
+                                {auditTimeframe === "yearly" && `Year ${auditSelectedYear} (2024-${currentYear})`}
+                              </span>
+                            </div>
+                            <h4 className={`text-base font-bold mt-0.5 ${adminThemeClass.textTitle}`}>
+                              Audited Work-Hours & Performance Metrics
+                            </h4>
+                          </div>
+                          <span className={`text-[10px] px-2.5 py-1 rounded-lg border font-semibold self-start sm:self-auto ${perfBadge.bg}`}>
+                            {perfBadge.label}
+                          </span>
+                        </div>
+
+                        {/* Audit Key Metrics Grid */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                          <div className={`p-4 rounded-2xl border flex flex-col justify-between ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                            <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${adminThemeClass.textMuted}`}>
+                              Audited Work Hours
+                            </span>
+                            <div className="mt-2 flex items-baseline space-x-1">
+                              <strong className="text-2xl text-cyan-600 dark:text-cyan-400 font-mono font-bold">
+                                {currentAuditMetrics.workHours.toFixed(2)}
+                              </strong>
+                              <span className={`text-[10px] font-medium ${adminThemeClass.textMuted}`}>hrs</span>
+                            </div>
+                          </div>
+
+                          <div className={`p-4 rounded-2xl border flex flex-col justify-between ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                            <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${adminThemeClass.textMuted}`}>
+                              Performance Rate
+                            </span>
+                            <div className="mt-2 flex items-baseline space-x-1">
+                              <strong className="text-2xl text-emerald-600 dark:text-emerald-400 font-mono font-bold">
+                                {currentAuditMetrics.performanceScore.toFixed(1)}%
+                              </strong>
+                            </div>
+                          </div>
+
+                          <div className={`p-4 rounded-2xl border flex flex-col justify-between ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                            <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${adminThemeClass.textMuted}`}>
+                              Attended Days
+                            </span>
+                            <div className="mt-2 flex items-baseline space-x-1">
+                              <strong className="text-xl text-emerald-600 dark:text-emerald-400 font-mono font-bold">
+                                {currentAuditMetrics.attendedDays}
+                              </strong>
+                              <span className={`text-[10px] font-medium ${adminThemeClass.textMuted}`}>/ {currentAuditMetrics.expectedWorkDays}</span>
+                            </div>
+                          </div>
+
+                          <div className={`p-4 rounded-2xl border flex flex-col justify-between ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                            <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${adminThemeClass.textMuted}`}>
+                              Lateness Flags
+                            </span>
+                            <div className="mt-2 flex items-baseline space-x-1">
+                              <strong className="text-xl text-orange-600 dark:text-orange-400 font-mono font-bold">
+                                {currentAuditMetrics.lateCount}
+                              </strong>
+                              <span className={`text-[10px] font-medium ${adminThemeClass.textMuted}`}>days</span>
+                            </div>
                           </div>
                         </div>
-                        <div className={`p-4 rounded-2xl border flex flex-col justify-between ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
-                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${adminThemeClass.textMuted}`}>Weekly Accumulated Hours</span>
-                          <div className="mt-2 flex items-baseline space-x-1">
-                            <strong className="text-xl text-amber-500 font-mono font-bold">{weeklyM.workHours.toFixed(2)}</strong>
-                            <span className="text-[10px] font-medium text-gray-400">hours</span>
+                      </div>
+
+                      {/* Reference Cumulative Hours Matrix */}
+                      <div>
+                        <span className={`text-[10px] uppercase font-bold tracking-wider font-mono block mb-2 ${adminThemeClass.textMuted}`}>
+                          Cumulative Standard Timeframe Reference Matrix
+                        </span>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className={`p-4 rounded-2xl border flex flex-col justify-between ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                            <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${adminThemeClass.textMuted}`}>Total Cumulative Hours</span>
+                            <div className="mt-2 flex items-baseline space-x-1">
+                              <strong className="text-2xl text-cyan-600 dark:text-cyan-400 font-mono font-bold">{totalCumulativeHours.toFixed(2)}</strong>
+                              <span className={`text-[10px] font-medium ${adminThemeClass.textMuted}`}>hours</span>
+                            </div>
                           </div>
-                        </div>
-                        <div className={`p-4 rounded-2xl border flex flex-col justify-between ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
-                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${adminThemeClass.textMuted}`}>Monthly Total Hours</span>
-                          <div className="mt-2 flex items-baseline space-x-1">
-                            <strong className="text-xl text-indigo-400 font-mono font-bold">{monthlyM.workHours.toFixed(2)}</strong>
-                            <span className="text-[10px] font-medium text-gray-400">hours</span>
+                          <div className={`p-4 rounded-2xl border flex flex-col justify-between ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                            <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${adminThemeClass.textMuted}`}>Daily Shift Hours</span>
+                            <div className="mt-2 flex items-baseline space-x-1">
+                              <strong className="text-2xl text-emerald-600 dark:text-emerald-400 font-mono font-bold">{dailyAuditMetrics.workHours.toFixed(2)}</strong>
+                              <span className={`text-[10px] font-medium ${adminThemeClass.textMuted}`}>hours</span>
+                            </div>
                           </div>
-                        </div>
-                        <div className={`p-4 rounded-2xl border flex flex-col justify-between ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} col-span-2`}>
-                          <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${adminThemeClass.textMuted}`}>Yearly Aggregated Hours</span>
-                          <div className="mt-2 flex items-baseline space-x-1">
-                            <strong className={`text-2xl font-mono font-bold ${adminThemeClass.accentText}`}>{yearlyM.workHours.toFixed(2)}</strong>
-                            <span className="text-[10px] font-medium text-gray-400">hours</span>
+                          <div className={`p-4 rounded-2xl border flex flex-col justify-between ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                            <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${adminThemeClass.textMuted}`}>Weekly Accumulated Hours</span>
+                            <div className="mt-2 flex items-baseline space-x-1">
+                              <strong className="text-xl text-amber-600 dark:text-amber-400 font-mono font-bold">{weeklyAuditMetrics.workHours.toFixed(2)}</strong>
+                              <span className={`text-[10px] font-medium ${adminThemeClass.textMuted}`}>hours</span>
+                            </div>
+                          </div>
+                          <div className={`p-4 rounded-2xl border flex flex-col justify-between ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                            <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${adminThemeClass.textMuted}`}>Monthly Total Hours</span>
+                            <div className="mt-2 flex items-baseline space-x-1">
+                              <strong className="text-xl text-indigo-600 dark:text-indigo-400 font-mono font-bold">{monthlyAuditMetrics.workHours.toFixed(2)}</strong>
+                              <span className={`text-[10px] font-medium ${adminThemeClass.textMuted}`}>hours</span>
+                            </div>
+                          </div>
+                          <div className={`p-4 rounded-2xl border flex flex-col justify-between ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} col-span-2`}>
+                            <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${adminThemeClass.textMuted}`}>Yearly Aggregated Hours</span>
+                            <div className="mt-2 flex items-baseline space-x-1">
+                              <strong className={`text-2xl font-mono font-bold ${adminThemeClass.accentText}`}>{yearlyAuditMetrics.workHours.toFixed(2)}</strong>
+                              <span className={`text-[10px] font-medium ${adminThemeClass.textMuted}`}>hours</span>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -6507,7 +9346,7 @@ export default function AdminDashboard({
                                   const dayOfWeek = isNaN(dateObj.getTime()) 
                                     ? "--" 
                                     : dateObj.toLocaleDateString("en-US", { weekday: "long" });
-                                  const hoursWorked = log.coveredTime ? (log.coveredTime / 3600).toFixed(2) : "0.00";
+                                  const durationStr = formatDurationHHMMSS(log.coveredTime);
                                   
                                   // Check if there was an approved leave/permission for this date
                                   const permission = permissions.find(p => 
@@ -6527,7 +9366,7 @@ export default function AdminDashboard({
                                       </td>
                                       <td className={`p-3 font-mono ${adminThemeClass.textHighlight}`}>{log.timeIn || "--"}</td>
                                       <td className={`p-3 font-mono ${adminThemeClass.textHighlight}`}>{log.timeOut || "Active Shift"}</td>
-                                      <td className={`p-3 font-mono font-bold ${adminThemeClass.accentText}`}>{hoursWorked} hrs</td>
+                                      <td className={`p-3 font-mono font-bold ${adminThemeClass.accentText}`}>{durationStr}</td>
                                       <td className="p-3">
                                         <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-semibold border uppercase ${
                                           (log.statusIn || "").toString().toUpperCase() === 'PRESENT' || (log.statusIn || "").toString().toUpperCase() === 'ON TIME' || (log.statusIn || "").toString().toUpperCase() === 'ON_TIME'
@@ -6630,7 +9469,7 @@ export default function AdminDashboard({
                                     onNotifyAdmin("Error Deleting", "Server refused account deletion.");
                                   }
                                 } catch (err) {
-                                  onNotifyAdmin("Network Error", "Централ authorization server unreachable.");
+                                  onNotifyAdmin("Network Error", "Central authorization server unreachable.");
                                 }
                               }
                             });
@@ -6875,7 +9714,7 @@ export default function AdminDashboard({
       <AnimatePresence>
         {showQrModal && (
           <div
-            className="fixed inset-0 bg-black/70 backdrop-blur-xs z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto"
             onClick={() => setShowQrModal(false)}
           >
             <motion.div
@@ -6883,64 +9722,177 @@ export default function AdminDashboard({
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
               onClick={(e) => e.stopPropagation()}
-              className={`rounded-3xl max-w-sm w-full p-6 text-center space-y-6 shadow-2xl border select-none ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle}`}
+              className={`rounded-3xl max-w-md w-full max-h-[85vh] overflow-y-auto scrollbar-thin p-6 sm:p-7 text-center space-y-5 shadow-2xl border select-none my-auto flex flex-col ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle}`}
             >
+              {/* Simplified Header: Company Name & Gateway Title */}
               <div
-                className={`flex justify-between items-center pb-2 border-b ${adminThemeClass.accentBorder}`}
+                className={`flex justify-between items-center pb-3 border-b ${adminThemeClass.accentBorder}`}
               >
-                <div className="flex items-center space-x-2">
-                  <QrCode className="h-5 w-5 text-cyan-400" />
-                  <span
-                    className={`font-display font-bold text-base ${adminThemeClass.textTitle}`}
-                  >
-                    Secure Company Gateway QR
-                  </span>
+                <div className="flex items-center space-x-2.5 text-left min-w-0">
+                  <div className="p-2 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shrink-0">
+                    <QrCode className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className={`font-display font-bold text-base truncate ${adminThemeClass.textTitle}`}>
+                      {tenant.name}
+                    </h3>
+                    <span className={`text-[10px] uppercase font-bold tracking-wider font-mono block ${adminThemeClass.textMuted}`}>
+                      Gateway Check-In QR
+                    </span>
+                  </div>
                 </div>
                 <button
                   onClick={() => setShowQrModal(false)}
-                  className={`font-bold text-xl cursor-pointer hover:opacity-85 ${adminThemeClass.textMuted}`}
+                  className={`p-1.5 rounded-xl border font-bold text-lg cursor-pointer transition-colors ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted} hover:${adminThemeClass.textHighlight}`}
+                  aria-label="Close QR Modal"
                 >
-                  &times;
+                  <X className="h-4 w-4" />
                 </button>
               </div>
 
-              <div className="space-y-4">
-                {/* QR Display container */}
-                <div className="p-4 bg-white rounded-2xl inline-block shadow-md mx-auto border border-neutral-200">
+              {/* Simplified Modal Content: Company Name and QR Code */}
+              <div className="space-y-3">
+                <div className="p-5 bg-white rounded-3xl inline-block shadow-lg mx-auto border border-neutral-200">
                   {qrDataUrl ? (
                     <img
                       src={qrDataUrl}
                       alt={`${tenant.name} QR Check-In Token`}
-                      className="h-44 w-44 object-contain mx-auto"
+                      className="h-60 w-60 object-contain mx-auto transition-transform duration-200"
                     />
                   ) : (
-                    <div className="h-44 w-44 flex items-center justify-center text-gray-400 bg-neutral-100 rounded-xl">
+                    <div className="h-60 w-60 flex items-center justify-center text-gray-400 bg-neutral-100 rounded-2xl font-medium text-xs">
                       Generating credentials...
                     </div>
                   )}
                 </div>
 
-                <div
-                  className={`text-xs font-mono font-bold tracking-widest uppercase ${adminThemeClass.accentText}`}
-                >
-                  {tenant.name} ID
+                <div className="flex items-center justify-center space-x-2">
+                  <span className={`text-xs font-mono font-bold tracking-wider uppercase truncate ${adminThemeClass.accentText}`}>
+                    {tenant.name}
+                  </span>
+                  <span className={`text-[10px] font-mono ${adminThemeClass.textMuted}`}>
+                    &bull; ID: {tenant.id}
+                  </span>
                 </div>
               </div>
 
-              <div className="flex space-x-3 pt-2">
-                <a
-                  href={qrDataUrl}
-                  download={`clock_it_qr_${tenant.id}.png`}
-                  className="flex-1 py-3 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-xs rounded-xl active:scale-95 transition-all cursor-pointer text-center flex items-center justify-center space-x-1 shadow-lg shadow-cyan-950/20"
-                >
-                  <Download className="h-3.5 w-3.5" />
-                  <span>Download Code</span>
-                </a>
+              {/* Secondary Options Collapsible Trigger (Collapsed by default) */}
+              <div className="pt-1">
                 <button
-                  onClick={() => setShowQrModal(false)}
-                  className={`flex-1 py-3 font-semibold text-xs rounded-xl active:scale-95 transition-all cursor-pointer border ${adminThemeClass.inputBg}`}
+                  type="button"
+                  onClick={() => setIsQrSecondaryOptionsExpanded((prev) => !prev)}
+                  className={`w-full p-3 rounded-2xl border text-xs font-bold flex items-center justify-between transition-all cursor-pointer ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} hover:opacity-90`}
                 >
-                  Close View
+                  <div className="flex items-center space-x-2">
+                    <span className="text-[11px] font-semibold">
+                      {isQrSecondaryOptionsExpanded ? "Hide Secondary Options" : "View Code & Download Options"}
+                    </span>
+                  </div>
+                  {isQrSecondaryOptionsExpanded ? (
+                    <ChevronUp className="h-4 w-4 text-cyan-400" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4 text-neutral-400" />
+                  )}
+                </button>
+
+                {/* Collapsible Secondary Options Body */}
+                <AnimatePresence initial={false}>
+                  {isQrSecondaryOptionsExpanded && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.2, ease: "easeInOut" }}
+                      className="overflow-hidden space-y-3 pt-3"
+                    >
+                      {/* Six-Character Alternative Code Box */}
+                      {(() => {
+                        const altCode = getAlternativeAttendanceCode(tenant.id);
+                        return (
+                          <div
+                            id="admin_alternative_code_box"
+                            className={`p-3 rounded-2xl border flex items-center justify-between gap-3 text-left ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                          >
+                            <div className="flex-1 min-w-0">
+                              <span className={`text-[9px] uppercase font-bold tracking-wider font-mono block truncate ${adminThemeClass.textMuted}`}>
+                                6-Char Alternative Code (24h Dynamic)
+                              </span>
+                              <span className={`text-lg font-mono font-black tracking-[0.25em] block truncate transition-all duration-150 ${adminThemeClass.accentText}`}>
+                                {showAltCode ? altCode : "&bull;&bull;&bull;&bull;&bull;&bull;"}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center space-x-1.5 shrink-0">
+                              {/* Eye Hide / Reveal Button */}
+                              <button
+                                id="admin_toggle_alt_code_visibility_btn"
+                                type="button"
+                                onClick={() => setShowAltCode(!showAltCode)}
+                                className={`p-2 rounded-xl border text-xs font-bold flex items-center justify-center transition-all cursor-pointer shadow-xs ${
+                                  !showAltCode
+                                    ? "bg-slate-700/30 text-slate-300 border-slate-600/40"
+                                    : `${adminThemeClass.inputBg} ${adminThemeClass.textTitle} hover:${adminThemeClass.accentText}`
+                                }`}
+                                title={showAltCode ? "Hide alternative code" : "Show alternative code"}
+                                aria-label={showAltCode ? "Hide alternative code" : "Show alternative code"}
+                              >
+                                {showAltCode ? (
+                                  <EyeOff className="h-3.5 w-3.5" />
+                                ) : (
+                                  <Eye className="h-3.5 w-3.5" />
+                                )}
+                              </button>
+
+                              {/* Icon-Only Copy Button */}
+                              <button
+                                id="admin_copy_alt_code_btn"
+                                type="button"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(altCode);
+                                  setCopiedAltCode(true);
+                                  setTimeout(() => setCopiedAltCode(false), 2000);
+                                }}
+                                className={`p-2 rounded-xl border text-xs font-bold flex items-center justify-center transition-all cursor-pointer shadow-xs ${
+                                  copiedAltCode
+                                    ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
+                                    : `${adminThemeClass.inputBg} ${adminThemeClass.textTitle} hover:${adminThemeClass.accentText}`
+                                }`}
+                                title={copiedAltCode ? "Code copied to clipboard!" : "Copy code"}
+                                aria-label="Copy 6-character alternative code"
+                              >
+                                {copiedAltCode ? (
+                                  <Check className="h-3.5 w-3.5 text-emerald-400" />
+                                ) : (
+                                  <Copy className="h-3.5 w-3.5 text-cyan-400" />
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* Download Link */}
+                      <a
+                        href={qrDataUrl}
+                        download={`clock_it_qr_${tenant.id}.png`}
+                        className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-xs rounded-xl active:scale-95 transition-all cursor-pointer text-center flex items-center justify-center space-x-1.5 shadow-md"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        <span>Download QR Image</span>
+                      </a>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              {/* Close Button */}
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowQrModal(false)}
+                  className={`w-full py-3 font-semibold text-xs rounded-2xl active:scale-95 transition-all cursor-pointer border ${adminThemeClass.inputBg} ${adminThemeClass.accentBorder} hover:opacity-90 min-h-[44px]`}
+                >
+                  Close Gateway View
                 </button>
               </div>
             </motion.div>
@@ -7166,7 +10118,7 @@ export default function AdminDashboard({
                           <span
                             className={`font-black text-sm ${adminThemeClass.accentText}`}
                           >
-                            {metrics.performancePercentage}%
+                            {metrics.performancePercentage.toFixed(2)}%
                           </span>
                         </div>
                       </div>
@@ -8185,6 +11137,319 @@ export default function AdminDashboard({
         )}
       </AnimatePresence>
 
+      {/* CARD PAYMENT GATEWAY MODAL */}
+      <AnimatePresence>
+        {showCardModal && (() => {
+          // Detect Card Type (Mastercard, Visa, Verve)
+          const cleanDigits = cardNumber.replace(/\D/g, "");
+          const getCardBrand = (digits: string): { name: "Mastercard" | "Visa" | "Verve" | "Unknown"; label: string; color: string } => {
+            if (/^4/.test(digits)) {
+              return { name: "Visa", label: "VISA", color: "text-blue-400" };
+            }
+            if (/^(5[1-5]|2[2-7])/.test(digits)) {
+              return { name: "Mastercard", label: "MASTERCARD", color: "text-orange-400" };
+            }
+            if (/^(506|507|650|504)/.test(digits)) {
+              return { name: "Verve", label: "VERVE", color: "text-emerald-400" };
+            }
+            return { name: "Unknown", label: "CARD", color: "text-neutral-400" };
+          };
+
+          const cardBrand = getCardBrand(cleanDigits);
+
+          return (
+            <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[9999] flex items-center justify-center p-4 overflow-y-auto">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 15 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 15 }}
+                className={`w-full max-w-lg my-auto max-h-[90vh] flex flex-col rounded-3xl border shadow-2xl overflow-hidden ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+              >
+                {/* Header */}
+                <div className={`p-6 border-b flex items-center justify-between shrink-0 ${adminThemeClass.accentBorder}`}>
+                  <div className="flex items-center space-x-3">
+                    <div className="p-2.5 rounded-2xl bg-cyan-500/10 text-cyan-400">
+                      <CreditCard className="h-6 w-6" />
+                    </div>
+                    <div>
+                      <h3 className={`font-bold text-base ${adminThemeClass.textTitle}`}>
+                        Card Payment Gateway
+                      </h3>
+                      <p className={`text-xs ${adminThemeClass.textMuted}`}>
+                        Secure 256-bit encrypted checkout authorization
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowCardModal(false)}
+                    className={`p-2 rounded-xl text-neutral-400 hover:${adminThemeClass.textTitle} hover:bg-neutral-800/30 transition-colors`}
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+
+                {/* Body - Scrollable */}
+                <div className="p-6 space-y-5 overflow-y-auto flex-1 scrollbar-thin">
+                  {/* Virtual Card Preview */}
+                  <div className="p-5 rounded-2xl bg-gradient-to-tr from-slate-900 via-cyan-950 to-blue-900 border border-cyan-500/30 shadow-xl text-white space-y-4 relative overflow-hidden">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[10px] font-mono tracking-widest text-cyan-400 uppercase font-bold">
+                        Corporate Debit Card
+                      </span>
+                      {/* Card Type Brand Indicator */}
+                      <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-black/40 border border-white/10 backdrop-blur-md">
+                        {cardBrand.name === "Mastercard" && (
+                          <div className="flex items-center -space-x-1.5">
+                            <span className="w-3.5 h-3.5 rounded-full bg-red-500 inline-block shadow-sm" />
+                            <span className="w-3.5 h-3.5 rounded-full bg-amber-500 inline-block opacity-90 shadow-sm" />
+                          </div>
+                        )}
+                        {cardBrand.name === "Visa" && (
+                          <span className="text-xs font-black italic tracking-wider text-blue-300">
+                            VISA
+                          </span>
+                        )}
+                        {cardBrand.name === "Verve" && (
+                          <div className="flex items-center space-x-1">
+                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block" />
+                            <span className="text-[10px] font-black tracking-wider text-emerald-300">
+                              VERVE
+                            </span>
+                          </div>
+                        )}
+                        {cardBrand.name === "Unknown" && (
+                          <span className="text-xs font-bold italic tracking-wider text-white/70">
+                            SECURE PAY
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="py-2">
+                      <div className="text-lg sm:text-xl font-mono tracking-widest font-bold text-slate-100">
+                        {cardNumber || "Card Number"}
+                      </div>
+                    </div>
+                    <div className="flex justify-between items-end text-xs font-mono">
+                      <div>
+                        <span className="text-[9px] text-neutral-400 block uppercase">Cardholder</span>
+                        <span className="font-semibold uppercase tracking-wide">
+                          {cardHolderName || "COMPANY REPRESENTATIVE"}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-neutral-400 block uppercase">Expires</span>
+                        <span className="font-semibold">
+                          {cardExpiry || "MM/YY"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {cardError && (
+                    <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-medium flex items-center space-x-2">
+                      <AlertTriangle className="h-4 w-4 shrink-0" />
+                      <span>{cardError}</span>
+                    </div>
+                  )}
+
+                  {/* Form Fields */}
+                  <div className="space-y-4 text-xs">
+                    <div>
+                      <label className={`block text-[11px] font-semibold mb-1 ${adminThemeClass.textTitle}`}>
+                        Cardholder Name
+                      </label>
+                      <input
+                        id="card_holder_name_input"
+                        type="text"
+                        placeholder="e.g. John Doe"
+                        value={cardHolderName}
+                        onChange={(e) => {
+                          setCardHolderName(e.target.value);
+                          setCardError(null);
+                        }}
+                        className={`w-full px-4 py-3 rounded-xl border outline-none font-medium ${adminThemeClass.inputBg}`}
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className={`block text-[11px] font-semibold ${adminThemeClass.textTitle}`}>
+                          Card Number
+                        </label>
+                        {/* Identified card brand display above the field only */}
+                        {cardBrand.name !== "Unknown" && (
+                          <div className="flex items-center space-x-1.5 px-2 py-0.5 rounded-lg bg-neutral-900/60 border border-neutral-700/60 shadow-xs">
+                            {cardBrand.name === "Mastercard" && (
+                              <div className="flex items-center -space-x-1">
+                                <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block shadow-xs" />
+                                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block opacity-90 shadow-xs" />
+                              </div>
+                            )}
+                            {cardBrand.name === "Visa" && (
+                              <span className="text-[10px] font-black italic tracking-wider text-blue-400">
+                                VISA
+                              </span>
+                            )}
+                            {cardBrand.name === "Verve" && (
+                              <div className="flex items-center space-x-1">
+                                <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
+                              </div>
+                            )}
+                            <span className={`text-[10px] font-mono font-bold tracking-wider ${
+                              cardBrand.name === "Mastercard" ? "text-orange-400" :
+                              cardBrand.name === "Visa" ? "text-blue-400" :
+                              cardBrand.name === "Verve" ? "text-emerald-400" :
+                              "text-neutral-400"
+                            }`}>
+                              {cardBrand.name}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      <input
+                        id="card_number_input"
+                        type="text"
+                        maxLength={19}
+                        placeholder="Card Number"
+                        value={cardNumber}
+                        onChange={(e) => {
+                          const raw = e.target.value.replace(/\D/g, "").slice(0, 16);
+                          const formatted = raw.match(/.{1,4}/g)?.join(" ") || raw;
+                          setCardNumber(formatted);
+                          setCardError(null);
+                        }}
+                        className={`w-full px-4 py-3 rounded-xl border outline-none font-mono font-medium ${adminThemeClass.inputBg}`}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className={`block text-[11px] font-semibold mb-1 ${adminThemeClass.textTitle}`}>
+                          Expiry Date (MM/YY)
+                        </label>
+                        <input
+                          id="card_expiry_input"
+                          type="text"
+                          maxLength={5}
+                          placeholder="MM/YY"
+                          value={cardExpiry}
+                          onChange={(e) => {
+                            let raw = e.target.value.replace(/\D/g, "").slice(0, 4);
+                            if (raw.length >= 3) {
+                              raw = `${raw.slice(0, 2)}/${raw.slice(2)}`;
+                            }
+                            setCardExpiry(raw);
+                            setCardError(null);
+                          }}
+                          className={`w-full px-4 py-3 rounded-xl border outline-none font-mono font-medium ${adminThemeClass.inputBg}`}
+                        />
+                      </div>
+                      <div>
+                        <label className={`block text-[11px] font-semibold mb-1 ${adminThemeClass.textTitle}`}>
+                          CVV / Security Code
+                        </label>
+                        <input
+                          id="card_cvv_input"
+                          type="password"
+                          maxLength={4}
+                          placeholder="123"
+                          value={cardCvv}
+                          onChange={(e) => {
+                            setCardCvv(e.target.value.replace(/\D/g, "").slice(0, 4));
+                            setCardError(null);
+                          }}
+                          className={`w-full px-4 py-3 rounded-xl border outline-none font-mono font-medium ${adminThemeClass.inputBg}`}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Footer */}
+                <div className={`p-6 border-t flex items-center justify-between gap-3 shrink-0 ${adminThemeClass.accentBorder}`}>
+                  <button
+                    type="button"
+                    onClick={() => setShowCardModal(false)}
+                    className={`px-5 py-2.5 rounded-xl border font-bold text-xs cursor-pointer ${adminThemeClass.innerBg} ${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    id="confirm_card_payment_btn"
+                    type="button"
+                    disabled={isProcessingCard}
+                    onClick={() => {
+                      const cleanNum = cardNumber.replace(/\s/g, "");
+                      if (!cardHolderName.trim()) {
+                        setCardError("Please provide the cardholder name.");
+                        return;
+                      }
+                      if (cleanNum.length < 15) {
+                        setCardError("Please enter a valid 16-digit card number.");
+                        return;
+                      }
+                      if (!/^\d{2}\/\d{2}$/.test(cardExpiry)) {
+                        setCardError("Please enter a valid MM/YY expiry date.");
+                        return;
+                      }
+                      if (cardCvv.length < 3) {
+                        setCardError("Please enter a 3-digit CVV security code.");
+                        return;
+                      }
+
+                      setIsProcessingCard(true);
+                      setTimeout(() => {
+                        setIsProcessingCard(false);
+                        setShowCardModal(false);
+                        handleBillingRenewalSubmit();
+                      }, 800);
+                    }}
+                    className="px-6 py-3 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-cyan-950/45 cursor-pointer disabled:opacity-50 flex items-center space-x-2"
+                  >
+                    {isProcessingCard ? (
+                      <>
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                        <span>Authorizing Card...</span>
+                      </>
+                    ) : (
+                      <span>Authorize & Activate Subscription</span>
+                    )}
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          );
+        })()}
+      </AnimatePresence>
+
+      {/* Floating Application Central Announcement Button (Bottom Right - Icon only) */}
+      <div className="fixed bottom-6 right-6 z-40">
+        <button
+          id="admin_floating_announcement_btn"
+          type="button"
+          onClick={() => setIsAnnouncementModalOpen(true)}
+          className="h-13 w-13 sm:h-14 sm:w-14 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-2xl shadow-cyan-950/60 hover:shadow-cyan-500/40 active:scale-95 transition-all cursor-pointer flex items-center justify-center border border-cyan-400/40"
+          title="Application Central Announcement"
+          aria-label="Application Central Announcement"
+        >
+          <Megaphone className="h-5 w-5 sm:h-6 sm:w-6" />
+        </button>
+      </div>
+
+      {/* Application Central Announcement Modal */}
+      <ApplicationCentralAnnouncementModal
+        isOpen={isAnnouncementModalOpen}
+        onClose={() => setIsAnnouncementModalOpen(false)}
+        tenantId={tenant.id}
+        adminThemeClass={adminThemeClass}
+        isDarkMode={isDark}
+        theme={theme}
+        translations={translations}
+      />
+
       {/* At-a-Glance Attendance Overlay (Persistent Floating Panel) */}
       <AtAGlanceAttendanceOverlay
         isOpen={isAtAGlanceOpen}
@@ -8197,6 +11462,7 @@ export default function AdminDashboard({
         translations={translations}
         adminThemeClass={adminThemeClass}
         isDarkMode={isDark}
+        theme={theme}
       />
     </div>
   );

@@ -326,17 +326,7 @@ export default function LandingPage({ onStartTrial, onNavigateLogin, translation
   return (
     <div id="landing_root" className="min-h-screen bg-[#0A0A0A] text-[#E5E5E5] flex flex-col font-sans selection:bg-cyan-950 select-none relative overflow-x-hidden">
       
-      {/* Background Image Wrapper */}
-      <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
-        <img 
-          src="/src/assets/images/data_table_bg_1783096067748.jpg" 
-          alt="" 
-          className="w-full h-full object-cover opacity-8 mix-blend-screen filter brightness-50 contrast-125"
-          referrerPolicy="no-referrer"
-        />
-        <div className="absolute inset-0 bg-gradient-to-b from-[#0A0A0A] via-transparent to-[#0A0A0A]" />
-      </div>
-      
+
       {/* Dynamic Header */}
       <nav id="landing_nav" className="sticky top-0 bg-[#0D0D0D]/90 backdrop-blur-md border-b border-[#262626] z-40 px-3 sm:px-4 md:px-6 py-2.5 sm:py-3.5 md:py-4 flex items-center justify-between shadow-xl relative flex-nowrap whitespace-nowrap overflow-x-visible">
         <div 

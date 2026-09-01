@@ -56,6 +56,7 @@ function mapUser(u: any) {
     status: u.status || 'active',
     gender: u.gender || null,
     title: u.title || null,
+    password: u.password || null,
     createdAt: u.createdAt || new Date().toISOString(),
     activityDays: u.activityDays || null,
     deviceBinding: u.deviceBinding || null,
@@ -157,6 +158,8 @@ function mapSettings(st: any) {
     onlyShowTimeIn: Boolean(st.onlyShowTimeIn),
     selectedIntervalDays: st.selectedIntervalDays !== undefined ? st.selectedIntervalDays : 30,
     companyLogoUrl: st.companyLogoUrl || null,
+    layout: st.layout || 'top',
+    sideNavCollapsed: Boolean(st.sideNavCollapsed),
   };
 }
 

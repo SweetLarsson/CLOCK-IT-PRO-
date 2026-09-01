@@ -24,6 +24,7 @@ export const users = pgTable('users', {
   status: text('status').notNull().default('active'),
   gender: text('gender'),
   title: text('title'),
+  password: text('password'),
   createdAt: text('created_at'),
   activityDays: jsonb('activity_days'),
   deviceBinding: jsonb('device_binding'),
@@ -111,6 +112,8 @@ export const settings = pgTable('settings', {
   onlyShowTimeIn: boolean('only_show_time_in').default(false),
   selectedIntervalDays: integer('selected_interval_days').default(30),
   companyLogoUrl: text('company_logo_url'),
+  layout: text('layout').default('top'),
+  sideNavCollapsed: boolean('side_nav_collapsed').default(false),
 });
 
 export const reportJobs = pgTable('report_jobs', {
