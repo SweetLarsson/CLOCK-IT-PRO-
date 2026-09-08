@@ -563,10 +563,24 @@ app.get("/api/events/subscribe", (req, res) => {
   const client = { tenant_id, res };
   sseClients.push(client);
 
+  // Immediate handshake comment
+  res.write(": connected\n\n");
+
   req.on("close", () => {
     sseClients = sseClients.filter((c) => c.res !== res);
   });
 });
+
+// SSE Keep-Alive Ping every 15s to keep connections alive through proxies and background tabs
+setInterval(() => {
+  sseClients.forEach((client) => {
+    try {
+      client.res.write(": keepalive\n\n");
+    } catch (e) {
+      // client dropped
+    }
+  });
+}, 15000);
 
 // AUTHENTICATION
 app.post("/api/billing/pre-register", (req, res) => {
@@ -1539,17 +1553,36 @@ app.post("/api/tenant/departments/assign-lead", (req, res) => {
   return res.json({ success: true });
 });
 
+// GET TENANT DETAILS
+app.get(["/api/tenant", "/api/tenant/profile", "/api/admin/company-profile"], (req, res) => {
+  const tenant_id = (req.query.tenant_id as string) || (req.query.id as string);
+  if (!tenant_id) return res.status(400).json({ error: "tenant_id required" });
+  db = loadDB();
+  const tenant = db.tenants.find(t => t.id === tenant_id);
+  if (tenant) {
+    return res.json({ success: true, tenant });
+  }
+  return res.status(404).json({ error: "Tenant not found" });
+});
+
 // UPDATE TENANT PROFILE (NAME, EMAIL, PHONE)
-app.post("/api/tenant/update", (req, res) => {
+app.post(["/api/tenant/update", "/api/admin/company-profile"], (req, res) => {
   const { tenant_id, name, email, phone } = req.body;
   if (!tenant_id) return res.status(400).json({ error: "tenant_id required" });
 
   db = loadDB();
   const tIdx = db.tenants.findIndex(t => t.id === tenant_id);
   if (tIdx !== -1) {
-    if (name && name.trim()) db.tenants[tIdx].name = name.trim();
-    if (email && email.trim()) db.tenants[tIdx].email = email.trim();
-    if (phone && phone.trim()) db.tenants[tIdx].phone = phone.trim();
+    if (name !== undefined && name !== null) {
+      db.tenants[tIdx].name = name.trim();
+      db.tenants[tIdx].companyName = name.trim();
+    }
+    if (email !== undefined && email !== null) {
+      db.tenants[tIdx].email = email.trim();
+    }
+    if (phone !== undefined && phone !== null) {
+      db.tenants[tIdx].phone = phone.trim();
+    }
     saveDB(db);
     broadcastToTenant(tenant_id, "TENANT_UPDATED", db.tenants[tIdx]);
     return res.json({ success: true, tenant: db.tenants[tIdx] });
@@ -2170,6 +2203,36 @@ app.post("/api/attendance/manual-create", (req, res) => {
     } catch (e) {}
   }
 
+  const settings = db.settings.find(s => s.tenant_id === tenant_id);
+  const targetCheckIn = settings?.checkIn?.time || "08:00";
+  const [tH, tM] = targetCheckIn.split(":").map(Number);
+  const targetSecs = (tH || 8) * 3600 + (tM || 0) * 60;
+  const [inH, inM, inS] = timeIn.split(":").map(Number);
+  const inSecs = (inH || 0) * 3600 + (inM || 0) * 60 + (inS || 0);
+  const presetArrivalStatus = inSecs <= targetSecs ? "PRESENT" : "LATE";
+  const finalStatusIn = statusIn || presetArrivalStatus;
+
+  let finalStatusOut: string | undefined = undefined;
+  if (timeOut) {
+    if (statusOut) {
+      finalStatusOut = statusOut;
+    } else {
+      const closingTime = settings?.checkOut?.time || "17:00";
+      const [cH, cM] = closingTime.split(":").map(Number);
+      const closingSecs = (cH || 17) * 3600 + (cM || 0) * 60;
+      const [outH, outM, outS] = timeOut.split(":").map(Number);
+      const outSecs = (outH || 0) * 3600 + (outM || 0) * 60 + (outS || 0);
+      const overtimeEnabled = settings?.overtimeEnabled === true;
+      if (outSecs > closingSecs) {
+        finalStatusOut = overtimeEnabled ? "Overtime" : "Closing Time";
+      } else if (outSecs === closingSecs) {
+        finalStatusOut = "Normal Checkout";
+      } else {
+        finalStatusOut = "Early Departure";
+      }
+    }
+  }
+
   const newRecord: Attendance = {
     id: "att-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7),
     tenant_id,
@@ -2177,9 +2240,9 @@ app.post("/api/attendance/manual-create", (req, res) => {
     department_id: worker.department_id || "unassigned",
     date,
     timeIn,
-    statusIn: statusIn || "Normal Arrival",
+    statusIn: finalStatusIn,
     timeOut: timeOut || undefined,
-    statusOut: statusOut || (timeOut ? "Normal Checkout" : undefined),
+    statusOut: finalStatusOut,
     coveredTime: calculatedDuration,
   };
 
@@ -2241,10 +2304,46 @@ app.post("/api/attendance/manual-update", (req, res) => {
     rec.date = date;
   }
 
-  if (timeIn !== undefined) rec.timeIn = timeIn;
-  if (statusIn !== undefined) rec.statusIn = statusIn;
-  if (timeOut !== undefined) rec.timeOut = timeOut;
-  if (statusOut !== undefined) rec.statusOut = statusOut;
+  const settings = db.settings.find(s => s.tenant_id === tenant_id);
+  if (timeIn !== undefined) {
+    rec.timeIn = timeIn;
+    const targetCheckIn = settings?.checkIn?.time || "08:00";
+    const [tH, tM] = targetCheckIn.split(":").map(Number);
+    const targetSecs = (tH || 8) * 3600 + (tM || 0) * 60;
+    const [inH, inM, inS] = timeIn.split(":").map(Number);
+    const inSecs = (inH || 0) * 3600 + (inM || 0) * 60 + (inS || 0);
+    const presetArrivalStatus = inSecs <= targetSecs ? "PRESENT" : "LATE";
+    rec.statusIn = statusIn || presetArrivalStatus;
+  } else if (statusIn !== undefined) {
+    rec.statusIn = statusIn;
+  }
+
+  if (timeOut !== undefined) {
+    if (timeOut) {
+      rec.timeOut = timeOut;
+      let calculatedStatusOut = "Normal Checkout";
+      const closingTime = settings?.checkOut?.time || "17:00";
+      const [cH, cM] = closingTime.split(":").map(Number);
+      const closingSecs = (cH || 17) * 3600 + (cM || 0) * 60;
+      const [outH, outM, outS] = timeOut.split(":").map(Number);
+      const outSecs = (outH || 0) * 3600 + (outM || 0) * 60 + (outS || 0);
+      const overtimeEnabled = settings?.overtimeEnabled === true;
+      if (outSecs > closingSecs) {
+        calculatedStatusOut = overtimeEnabled ? "Overtime" : "Closing Time";
+      } else if (outSecs === closingSecs) {
+        calculatedStatusOut = "Normal Checkout";
+      } else {
+        calculatedStatusOut = "Early Departure";
+      }
+      rec.statusOut = statusOut || calculatedStatusOut;
+    } else {
+      rec.timeOut = undefined;
+      rec.statusOut = undefined;
+      rec.coveredTime = 0;
+    }
+  } else if (statusOut !== undefined) {
+    rec.statusOut = statusOut;
+  }
   
   if (rec.timeIn && rec.timeOut) {
     try {
@@ -2319,6 +2418,12 @@ app.post("/api/attendance/manual-delete", (req, res) => {
 
   broadcastToTenant(tenant_id, "ATTENDANCE_UPDATED", {
     action: "delete",
+    record_id,
+    workerName,
+    notification: notif
+  });
+
+  broadcastToTenant(tenant_id, "ATTENDANCE_DELETED", {
     record_id,
     workerName,
     notification: notif
@@ -3263,14 +3368,46 @@ app.post("/api/tenant/announcements/:id/acknowledge", (req, res) => {
     }
 
     announcement.acknowledgedWorkerIds = announcement.acknowledgedWorkerIds || [];
-    if (!announcement.acknowledgedWorkerIds.includes(worker_id)) {
+    announcement.feedbackSubmissions = announcement.feedbackSubmissions || [];
+
+    const isNew = !announcement.acknowledgedWorkerIds.includes(worker_id);
+    if (isNew) {
       announcement.acknowledgedWorkerIds.push(worker_id);
-      saveDB(db);
     }
+
+    // Reflect on responses list immediately
+    const existingSubmission = announcement.feedbackSubmissions.find((s) => s.worker_id === worker_id);
+    if (!existingSubmission) {
+      const dbWorker = db.users?.find((w) => w.id === worker_id);
+      const name = (req.body.worker_name as string) || (dbWorker ? `${dbWorker.firstName} ${dbWorker.lastName}` : "Worker");
+      announcement.feedbackSubmissions.push({
+        id: `ack_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        worker_id,
+        worker_name: name,
+        worker_department: dbWorker?.department_id,
+        feedback: "Acknowledged announcement",
+        submittedAt: new Date().toISOString()
+      });
+    }
+
+    saveDB(db);
+
+    broadcastToTenant(tenant_id, "ANNOUNCEMENT_ACKNOWLEDGED", {
+      announcement_id: id,
+      worker_id,
+      acknowledgedWorkerIds: announcement.acknowledgedWorkerIds,
+      announcement,
+    });
+    broadcastToTenant(tenant_id, "ANNOUNCEMENT_UPDATED", {
+      action: "acknowledge",
+      announcement,
+    });
 
     res.json({
       success: true,
-      message: "Announcement acknowledged"
+      message: "Announcement acknowledged",
+      acknowledgedWorkerIds: announcement.acknowledgedWorkerIds,
+      announcement
     });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
@@ -3360,28 +3497,42 @@ function generatePwaManifest(role: string = "guest", tenantName?: string, worker
   }
 
   return {
+    id: "/",
     name,
     short_name,
     description,
     start_url,
     scope: "/",
     display: "standalone",
+    display_override: ["window-controls-overlay", "standalone", "minimal-ui"],
     orientation: isWorker ? "portrait-primary" : "any",
     theme_color,
     background_color,
     categories: ["business", "productivity", "utilities"],
     icons: [
       {
-        src: `/api/pwa-icon?role=${role}&size=192`,
+        src: isAdmin ? "/pwa-admin-192.png" : isWorker ? "/pwa-worker-192.png" : "/pwa-192x192.png",
         sizes: "192x192",
-        type: "image/svg+xml",
-        purpose: "any maskable"
+        type: "image/png",
+        purpose: "any"
       },
       {
-        src: `/api/pwa-icon?role=${role}&size=512`,
+        src: isAdmin ? "/pwa-admin-512.png" : isWorker ? "/pwa-worker-512.png" : "/pwa-512x512.png",
         sizes: "512x512",
-        type: "image/svg+xml",
-        purpose: "any maskable"
+        type: "image/png",
+        purpose: "any"
+      },
+      {
+        src: isAdmin ? "/pwa-admin-maskable-512.png" : isWorker ? "/pwa-worker-maskable-512.png" : "/pwa-maskable-512x512.png",
+        sizes: "512x512",
+        type: "image/png",
+        purpose: "maskable"
+      },
+      {
+        src: "/pwa-maskable-192x192.png",
+        sizes: "192x192",
+        type: "image/png",
+        purpose: "maskable"
       }
     ],
     shortcuts: isAdmin
@@ -3390,19 +3541,22 @@ function generatePwaManifest(role: string = "guest", tenantName?: string, worker
             name: "Attendance Logs",
             short_name: "Logs",
             description: "View real-time attendance logs",
-            url: "/?pwa=admin&tab=logs"
+            url: "/?pwa=admin&tab=logs",
+            icons: [{ src: "/pwa-admin-192.png", sizes: "192x192", type: "image/png" }]
           },
           {
             name: "Shift Register",
             short_name: "Register",
             description: "View daily shift roster & roll calls",
-            url: "/?pwa=admin&tab=register"
+            url: "/?pwa=admin&tab=register",
+            icons: [{ src: "/pwa-admin-192.png", sizes: "192x192", type: "image/png" }]
           },
           {
             name: "Terminal QR Code",
             short_name: "QR Code",
             description: "Display live check-in terminal QR code",
-            url: "/?pwa=admin&action=qr"
+            url: "/?pwa=admin&action=qr",
+            icons: [{ src: "/pwa-admin-192.png", sizes: "192x192", type: "image/png" }]
           }
         ]
       : isWorker
@@ -3411,19 +3565,22 @@ function generatePwaManifest(role: string = "guest", tenantName?: string, worker
             name: "Check In / Out",
             short_name: "Check-In",
             description: "Scan terminal QR code or submit attendance code",
-            url: "/?pwa=worker&action=checkin"
+            url: "/?pwa=worker&action=checkin",
+            icons: [{ src: "/pwa-worker-192.png", sizes: "192x192", type: "image/png" }]
           },
           {
             name: "My Shift History",
             short_name: "My Logs",
             description: "Inspect personal attendance records",
-            url: "/?pwa=worker&tab=logs"
+            url: "/?pwa=worker&tab=logs",
+            icons: [{ src: "/pwa-worker-192.png", sizes: "192x192", type: "image/png" }]
           },
           {
             name: "Request Permission",
             short_name: "Permission",
             description: "Submit leave / exemption request",
-            url: "/?pwa=worker&action=permission"
+            url: "/?pwa=worker&action=permission",
+            icons: [{ src: "/pwa-worker-192.png", sizes: "192x192", type: "image/png" }]
           }
         ]
       : []

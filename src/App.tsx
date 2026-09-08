@@ -330,6 +330,22 @@ export default function App() {
               }
             })
             .catch((err) => console.warn("Failed to sync settings on restore:", err));
+
+          fetch(`/api/tenant?tenant_id=${parsed.tenant.id}`)
+            .then((res) => {
+              if (res.ok) return res.json();
+            })
+            .then((data) => {
+              if (data && data.tenant) {
+                setSession((prev) => {
+                  if (!prev) return prev;
+                  const next = { ...prev, tenant: { ...prev.tenant, ...data.tenant } };
+                  localStorage.setItem("clock_it_session", JSON.stringify(next));
+                  return next;
+                });
+              }
+            })
+            .catch((err) => console.warn("Failed to sync tenant on restore:", err));
         }
       } catch (e) {
         localStorage.removeItem("clock_it_session");
@@ -606,6 +622,11 @@ export default function App() {
               setSession(updated);
               localStorage.setItem("clock_it_session", JSON.stringify(updated));
             }}
+            onTenantChange={(newTenant) => {
+              const updated = { ...session, tenant: { ...session.tenant, ...newTenant } };
+              setSession(updated);
+              localStorage.setItem("clock_it_session", JSON.stringify(updated));
+            }}
           />
         ) : (
           <WorkerDashboard 
@@ -616,6 +637,11 @@ export default function App() {
             translations={translations}
             onLogout={handleLogout}
             onNotifyAdmin={addToastNotification}
+            onTenantChange={(newTenant) => {
+              const updated = { ...session, tenant: { ...session.tenant, ...newTenant } };
+              setSession(updated);
+              localStorage.setItem("clock_it_session", JSON.stringify(updated));
+            }}
             onSettingsChange={(newSettings) => {
               const updated = { ...session, settings: newSettings };
               setSession(updated);

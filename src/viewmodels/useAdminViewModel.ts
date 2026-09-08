@@ -52,6 +52,7 @@ interface UseAdminViewModelProps {
   onNotifyAdmin: (title: string, msg: string) => void;
   onSettingsChange?: (newSettings: any) => void;
   onSubscriptionChange?: (newSubscription: any) => void;
+  onTenantChange?: (newTenant: any) => void;
 }
 
 export function useAdminViewModel({
@@ -62,16 +63,44 @@ export function useAdminViewModel({
   translations,
   onNotifyAdmin,
   onSettingsChange,
-  onSubscriptionChange
+  onSubscriptionChange,
+  onTenantChange
 }: UseAdminViewModelProps) {
   // Main UI Tabs
   const [activeTab, setActiveTab] = useState<"attendance" | "analytics" | "permissions" | "profiles" | "billing">("attendance");
   
-  // Real-time Database arrays
-  const [workers, setWorkers] = useState<any[]>([]);
-  const [attendanceRecords, setAttendanceRecords] = useState<any[]>([]);
+  // Real-time Database arrays - initialized from local storage cache for instant offline viewing
+  const [workers, setWorkers] = useState<any[]>(() => {
+    try {
+      const cached = localStorage.getItem(`cached_admin_workers_${tenant.id}`);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {}
+    return [];
+  });
+  const [attendanceRecords, setAttendanceRecords] = useState<any[]>(() => {
+    try {
+      const cached = localStorage.getItem(`cached_admin_attendance_${tenant.id}`);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {}
+    return [];
+  });
   const [permissions, setPermissions] = useState<any[]>([]);
-  const [departments, setDepartments] = useState<any[]>([]);
+  const [departments, setDepartments] = useState<any[]>(() => {
+    try {
+      const cached = localStorage.getItem(`cached_admin_depts_${tenant.id}`);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {}
+    return [];
+  });
   const [leadHistory, setLeadHistory] = useState<any[]>([]);
   const [settings, setSettings] = useState(initialSettings);
   const [subscription, setSubscription] = useState(initialSub);
@@ -173,6 +202,7 @@ export function useAdminViewModel({
   const [filterName, setFilterName] = useState("");
   const [filterDept, setFilterDept] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [filterStatusOut, setFilterStatusOut] = useState("all");
   const [filterDateStart, setFilterDateStart] = useState("");
   const [filterDateEnd, setFilterDateEnd] = useState("");
 
@@ -248,11 +278,21 @@ export function useAdminViewModel({
     try {
       const resW = await fetch(`/api/tenant/workers?tenant_id=${tenant.id}`);
       const dataW = await resW.json();
-      if (resW.ok) setWorkers(dataW.workers);
+      if (resW.ok && Array.isArray(dataW.workers)) {
+        setWorkers(dataW.workers);
+        try {
+          localStorage.setItem(`cached_admin_workers_${tenant.id}`, JSON.stringify(dataW.workers));
+        } catch (e) {}
+      }
 
       const resAtt = await fetch(`/api/attendance/records?tenant_id=${tenant.id}`);
       const dataAtt = await resAtt.json();
-      if (resAtt.ok) setAttendanceRecords(dataAtt.records);
+      if (resAtt.ok && Array.isArray(dataAtt.records)) {
+        setAttendanceRecords(dataAtt.records);
+        try {
+          localStorage.setItem(`cached_admin_attendance_${tenant.id}`, JSON.stringify(dataAtt.records));
+        } catch (e) {}
+      }
 
       const resPerm = await fetch(`/api/permissions?tenant_id=${tenant.id}`);
       const dataPerm = await resPerm.json();
@@ -266,6 +306,9 @@ export function useAdminViewModel({
         );
         setDepartments(sortedDepts);
         setLeadHistory(dataDepts.leadHistory);
+        try {
+          localStorage.setItem(`cached_admin_depts_${tenant.id}`, JSON.stringify(sortedDepts));
+        } catch (e) {}
       }
 
       const resJobs = await fetch(`/api/reports/jobs?tenant_id=${tenant.id}`);
@@ -282,7 +325,16 @@ export function useAdminViewModel({
         setNotifications(dataNotifs.notifications || dataNotifs || []);
       }
     } catch (e) {
-      console.warn("Express synchronization anomaly:", e);
+      console.warn("Express synchronization anomaly (restoring cached data if available):", e);
+      try {
+        const cachedAtt = localStorage.getItem(`cached_admin_attendance_${tenant.id}`);
+        if (cachedAtt) {
+          const parsed = JSON.parse(cachedAtt);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setAttendanceRecords(parsed);
+          }
+        }
+      } catch (err) {}
     }
   };
 
@@ -327,6 +379,16 @@ export function useAdminViewModel({
     eventSource.addEventListener("ATTENDANCE_UPDATED", (e: any) => {
       const payload = JSON.parse(e.data);
       onNotifyAdmin(payload.notification.title, payload.notification.message);
+      syncAdminResources();
+    });
+
+    eventSource.addEventListener("ATTENDANCE_DELETED", (e: any) => {
+      try {
+        const payload = JSON.parse(e.data);
+        if (payload.notification) {
+          onNotifyAdmin(payload.notification.title, payload.notification.message);
+        }
+      } catch (err) {}
       syncAdminResources();
     });
 
@@ -426,6 +488,27 @@ export function useAdminViewModel({
         }
       } catch (err) {
         console.warn("Error parsing SETTINGS_SAVED event on admin side:", err);
+      }
+    });
+
+    eventSource.addEventListener("TENANT_UPDATED", (e: any) => {
+      try {
+        const payload = JSON.parse(e.data);
+        if (payload) {
+          if (onTenantChange) {
+            onTenantChange(payload);
+          }
+          try {
+            const saved = localStorage.getItem("clock_it_session");
+            if (saved) {
+              const parsed = JSON.parse(saved);
+              parsed.tenant = { ...parsed.tenant, ...payload };
+              localStorage.setItem("clock_it_session", JSON.stringify(parsed));
+            }
+          } catch (e) {}
+        }
+      } catch (err) {
+        console.warn("Error parsing TENANT_UPDATED event on admin side:", err);
       }
     });
 
@@ -698,6 +781,25 @@ export function useAdminViewModel({
       result = result.filter(r => r.statusIn === filterStatus);
     }
 
+    if (filterStatusOut !== "all" && filterStatusOut) {
+      result = result.filter(r => {
+        if (!r.statusOut) return false;
+        if (filterStatusOut === "Normal Checkout") {
+          return r.statusOut === "Normal Checkout" || r.statusOut === "Normal";
+        }
+        if (filterStatusOut === "Closing Time") {
+          return r.statusOut === "Closing Time" || r.statusOut === "Auto Checkout" || r.statusOut.includes("Closing Time");
+        }
+        if (filterStatusOut === "Early Departure") {
+          return r.statusOut.toLowerCase().includes("early");
+        }
+        if (filterStatusOut === "Overtime") {
+          return r.statusOut.toLowerCase().includes("overtime");
+        }
+        return r.statusOut.toLowerCase() === filterStatusOut.toLowerCase();
+      });
+    }
+
     if (filterDateStart) {
       result = result.filter(r => r.date >= filterDateStart);
     }
@@ -826,6 +928,8 @@ export function useAdminViewModel({
     setFilterDept,
     filterStatus,
     setFilterStatus,
+    filterStatusOut,
+    setFilterStatusOut,
     filterDateStart,
     setFilterDateStart,
     filterDateEnd,

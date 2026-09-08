@@ -99,7 +99,7 @@ export const WorkerCentralAnnouncementModal: React.FC<WorkerCentralAnnouncementM
       await fetch(`/api/tenant/announcements/${announcement.id}/acknowledge`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tenant_id: tenantId, worker_id: workerId })
+        body: JSON.stringify({ tenant_id: tenantId, worker_id: workerId, worker_name: workerName })
       });
       setIsSubmittedSuccess(true);
       setTimeout(() => {

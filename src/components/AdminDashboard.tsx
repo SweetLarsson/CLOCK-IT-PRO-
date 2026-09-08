@@ -33,6 +33,8 @@ import {
   Calendar,
   ChevronLeft,
   ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   ChevronDown,
   ChevronUp,
   X,
@@ -114,6 +116,7 @@ interface AdminDashboardProps {
   onNotifyAdmin: (title: string, msg: string) => void;
   onSettingsChange?: (newSettings: any) => void;
   onSubscriptionChange?: (newSubscription: any) => void;
+  onTenantChange?: (newTenant: any) => void;
 }
 
 const generateBezierPaths = (
@@ -147,6 +150,7 @@ export default function AdminDashboard({
   onNotifyAdmin,
   onSettingsChange,
   onSubscriptionChange,
+  onTenantChange,
 }: AdminDashboardProps) {
   const [showSplash, setShowSplash] = React.useState(true);
 
@@ -190,6 +194,15 @@ export default function AdminDashboard({
     lastTapRef.current[field] = now;
   };
 
+  React.useEffect(() => {
+    if (tenant) {
+      setCurrentTenant(tenant);
+      setCompanyProfileName(tenant.name || "");
+      setCompanyProfileEmail(tenant.email || "");
+      setCompanyProfilePhone(tenant.phone || "");
+    }
+  }, [tenant]);
+
   const handleSaveCompanyProfile = async () => {
     setIsSavingCompanyProfile(true);
     setCompanyProfileSuccess(null);
@@ -204,9 +217,30 @@ export default function AdminDashboard({
           phone: companyProfilePhone,
         }),
       });
-      const data = await res.json();
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch (parseErr) {
+        console.error("Failed to parse JSON response:", parseErr, "Response text:", text);
+        throw new Error("Invalid response received from server.");
+      }
       if (!res.ok) {
         throw new Error(data.error || "Failed to update company profile.");
+      }
+      if (data.tenant) {
+        setCurrentTenant(data.tenant);
+        if (onTenantChange) {
+          onTenantChange(data.tenant);
+        }
+        try {
+          const saved = localStorage.getItem("clock_it_session");
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            parsed.tenant = { ...parsed.tenant, ...data.tenant };
+            localStorage.setItem("clock_it_session", JSON.stringify(parsed));
+          }
+        } catch (e) {}
       }
       setCompanyProfileSuccess("Company profile updated and synchronized successfully.");
       onNotifyAdmin("Company Profile", "Company profile updated and synchronized successfully.");
@@ -275,6 +309,8 @@ export default function AdminDashboard({
     setFilterDept,
     filterStatus,
     setFilterStatus,
+    filterStatusOut,
+    setFilterStatusOut,
     filterDateStart,
     setFilterDateStart,
     filterDateEnd,
@@ -320,6 +356,7 @@ export default function AdminDashboard({
     onNotifyAdmin,
     onSettingsChange,
     onSubscriptionChange,
+    onTenantChange,
   });
 
   // Update Attendance Feature States (Declared here AFTER useAdminViewModel)
@@ -335,9 +372,6 @@ export default function AdminDashboard({
         <div className="flex items-center space-x-2 py-0.5">
           <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
           <span className="font-semibold text-xs">On Time</span>
-          <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-            Punctual
-          </span>
         </div>
       )
     },
@@ -346,10 +380,7 @@ export default function AdminDashboard({
       label: (
         <div className="flex items-center space-x-2 py-0.5">
           <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
-          <span className="font-semibold text-xs">Late Arrival</span>
-          <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-400 border border-amber-500/30">
-            Tardy
-          </span>
+          <span className="font-semibold text-xs">Late</span>
         </div>
       )
     }
@@ -362,9 +393,6 @@ export default function AdminDashboard({
         <div className="flex items-center space-x-2 py-0.5">
           <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
           <span className="font-semibold text-xs">Normal Checkout</span>
-          <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-            Standard
-          </span>
         </div>
       )
     },
@@ -374,9 +402,6 @@ export default function AdminDashboard({
         <div className="flex items-center space-x-2 py-0.5">
           <Clock className="h-4 w-4 text-cyan-400 shrink-0" />
           <span className="font-semibold text-xs">Overtime</span>
-          <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
-            Extra Hours
-          </span>
         </div>
       )
     },
@@ -386,9 +411,6 @@ export default function AdminDashboard({
         <div className="flex items-center space-x-2 py-0.5">
           <ShieldCheck className="h-4 w-4 text-indigo-400 shrink-0" />
           <span className="font-semibold text-xs">Closing Time</span>
-          <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
-            Closing Window
-          </span>
         </div>
       )
     },
@@ -398,20 +420,58 @@ export default function AdminDashboard({
         <div className="flex items-center space-x-2 py-0.5">
           <AlertTriangle className="h-4 w-4 text-rose-400 shrink-0" />
           <span className="font-semibold text-xs">Early Departure</span>
-          <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider bg-rose-500/20 text-rose-400 border border-rose-500/30">
-            Early Exit
-          </span>
         </div>
       )
     }
   ], []);
+
+  // Determine arrival status according to preset functions: 08:00:00 = On Time, 08:01:00+ = Late
+  const calculateArrivalStatus = React.useCallback((timeStr: string, settingsObj?: any): AttendanceStatus => {
+    if (!timeStr) return AttendanceStatus.PRESENT;
+    const targetTime = settingsObj?.checkIn?.time || "08:00";
+    const [tH, tM] = targetTime.split(":").map(Number);
+    const targetSecs = (tH || 8) * 3600 + (tM || 0) * 60; // 08:00:00 = 28800s
+
+    const parts = timeStr.trim().split(":");
+    const inH = parseInt(parts[0], 10) || 0;
+    const inM = parseInt(parts[1], 10) || 0;
+    const inS = parseInt(parts[2], 10) || 0;
+    const inSecs = inH * 3600 + inM * 60 + inS;
+
+    return inSecs <= targetSecs ? AttendanceStatus.PRESENT : AttendanceStatus.LATE;
+  }, []);
+
+  // Determine checkout status according to preset functions
+  const calculateCheckoutStatus = React.useCallback((timeOutStr: string, settingsObj?: any): string => {
+    if (!timeOutStr) return "Normal Checkout";
+    const closingTime = settingsObj?.checkOut?.time || "17:00";
+    const [cH, cM] = closingTime.split(":").map(Number);
+    const closingSecs = (cH || 17) * 3600 + (cM || 0) * 60;
+
+    const parts = timeOutStr.trim().split(":");
+    const outH = parseInt(parts[0], 10) || 0;
+    const outM = parseInt(parts[1], 10) || 0;
+    const outS = parseInt(parts[2], 10) || 0;
+    const outSecs = outH * 3600 + outM * 60 + outS;
+
+    const overtimeEnabled = settingsObj ? settingsObj.overtimeEnabled === true : false;
+
+    if (outSecs > closingSecs) {
+      return overtimeEnabled ? "Overtime" : "Closing Time";
+    } else if (outSecs === closingSecs) {
+      return "Normal Checkout";
+    } else {
+      return "Early Departure";
+    }
+  }, []);
+
   const [attendanceFormMode, setAttendanceFormMode] = React.useState<"create" | "edit">("create");
   const [attendanceFormRecordId, setAttendanceFormRecordId] = React.useState<string>("");
   const [attendanceFormDate, setAttendanceFormDate] = React.useState<string>(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   });
-  const [attendanceFormTimeIn, setAttendanceFormTimeIn] = React.useState<string>("08:30:00");
+  const [attendanceFormTimeIn, setAttendanceFormTimeIn] = React.useState<string>("07:00:00");
   const [attendanceFormStatusIn, setAttendanceFormStatusIn] = React.useState<AttendanceStatus>(AttendanceStatus.PRESENT);
   const [attendanceFormTimeOut, setAttendanceFormTimeOut] = React.useState<string>("17:00:00");
   const [attendanceFormStatusOut, setAttendanceFormStatusOut] = React.useState<string>("Normal Checkout");
@@ -420,7 +480,7 @@ export default function AdminDashboard({
   // Confirmation modal state for Update Attendance actions
   const [attendanceConfirmData, setAttendanceConfirmData] = React.useState<{
     isOpen: boolean;
-    actionType: "create" | "update" | "delete";
+    actionType: "create" | "update" | "edit" | "delete";
     workerId: string;
     workerName: string;
     recordId?: string;
@@ -429,6 +489,7 @@ export default function AdminDashboard({
     statusIn: AttendanceStatus;
     timeOut?: string;
     statusOut?: string;
+    coveredTime?: number;
   } | null>(null);
   const [isProcessingAttendanceAction, setIsProcessingAttendanceAction] = React.useState(false);
   const [attendanceActionSuccess, setAttendanceActionSuccess] = React.useState<string | null>(null);
@@ -440,27 +501,41 @@ export default function AdminDashboard({
     }
     const d = new Date();
     const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const initialTimeIn = "07:00:00";
+    const initialStatusIn = calculateArrivalStatus(initialTimeIn, settings);
+    const initialTimeOut = "17:00:00";
+    const initialStatusOut = calculateCheckoutStatus(initialTimeOut, settings);
+
     setAttendanceFormMode("create");
     setAttendanceFormRecordId("");
     setAttendanceFormDate(todayStr);
-    setAttendanceFormTimeIn("08:30:00");
-    setAttendanceFormStatusIn(AttendanceStatus.PRESENT);
-    setAttendanceFormTimeOut("17:00:00");
-    setAttendanceFormStatusOut("Normal Checkout");
+    setAttendanceFormTimeIn(initialTimeIn);
+    setAttendanceFormStatusIn(initialStatusIn);
+    setAttendanceFormTimeOut(initialTimeOut);
+    setAttendanceFormStatusOut(initialStatusOut);
     setAttendanceFormHasCheckout(false);
     setShowAttendanceFormModal(true);
   };
 
   // Open Edit Attendance modal for a specific record
   const handleOpenEditAttendance = (rec: any) => {
+    const rawTimeIn = rec.timeIn || "07:00:00";
+    const formattedTimeIn = rawTimeIn.length === 5 ? `${rawTimeIn}:00` : rawTimeIn;
+    const computedStatusIn = calculateArrivalStatus(formattedTimeIn, settings);
+
+    const hasCheckout = !!rec.timeOut;
+    const rawTimeOut = rec.timeOut || "17:00:00";
+    const formattedTimeOut = rawTimeOut.length === 5 ? `${rawTimeOut}:00` : rawTimeOut;
+    const computedStatusOut = hasCheckout ? calculateCheckoutStatus(formattedTimeOut, settings) : (rec.statusOut || "Normal Checkout");
+
     setAttendanceFormMode("edit");
     setAttendanceFormRecordId(rec.id);
     setAttendanceFormDate(rec.date);
-    setAttendanceFormTimeIn(rec.timeIn || "08:30:00");
-    setAttendanceFormStatusIn(rec.statusIn || AttendanceStatus.PRESENT);
-    setAttendanceFormTimeOut(rec.timeOut || "17:00:00");
-    setAttendanceFormStatusOut(rec.statusOut || "Normal Checkout");
-    setAttendanceFormHasCheckout(!!rec.timeOut);
+    setAttendanceFormTimeIn(formattedTimeIn);
+    setAttendanceFormStatusIn(computedStatusIn);
+    setAttendanceFormTimeOut(formattedTimeOut);
+    setAttendanceFormStatusOut(computedStatusOut);
+    setAttendanceFormHasCheckout(hasCheckout);
     setShowAttendanceFormModal(true);
   };
 
@@ -470,6 +545,11 @@ export default function AdminDashboard({
     const targetWorkerId = selectedAttendanceWorkerId || workers[0]?.id;
     const targetWorker = workers.find((w) => w.id === targetWorkerId);
     const workerName = targetWorker ? `${targetWorker.firstName} ${targetWorker.lastName}` : "Selected Employee";
+
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      alert("Internet connection required. Attendance records can only be created or updated when you have an active internet connection. Existing records remain accessible for viewing.");
+      return;
+    }
 
     if (!attendanceFormDate) {
       alert("Please specify a valid shift date.");
@@ -493,7 +573,7 @@ export default function AdminDashboard({
         alert(`An attendance record already exists for ${workerName} on ${attendanceFormDate}. Duplicate records for the same date are not allowed. Please edit the existing record instead.`);
         return;
       }
-    } else if (attendanceFormMode === "update") {
+    } else if (attendanceFormMode === "edit") {
       const isDuplicate = (attendanceRecords || []).some(
         (r: any) => r.worker_id === targetWorkerId && r.date === attendanceFormDate && r.id !== attendanceFormRecordId
       );
@@ -508,6 +588,12 @@ export default function AdminDashboard({
       return;
     }
 
+    const finalStatusIn = calculateArrivalStatus(attendanceFormTimeIn, settings);
+    const finalStatusOut = attendanceFormHasCheckout ? calculateCheckoutStatus(attendanceFormTimeOut, settings) : undefined;
+    const finalCoveredTime = attendanceFormHasCheckout 
+      ? calculateShiftSeconds({ date: attendanceFormDate, timeIn: attendanceFormTimeIn, timeOut: attendanceFormTimeOut }, settings)
+      : 0;
+
     setAttendanceConfirmData({
       isOpen: true,
       actionType: attendanceFormMode,
@@ -516,13 +602,19 @@ export default function AdminDashboard({
       recordId: attendanceFormRecordId,
       date: attendanceFormDate,
       timeIn: attendanceFormTimeIn,
-      statusIn: attendanceFormStatusIn,
+      statusIn: finalStatusIn,
       timeOut: attendanceFormHasCheckout ? attendanceFormTimeOut : undefined,
-      statusOut: attendanceFormHasCheckout ? attendanceFormStatusOut : undefined,
+      statusOut: finalStatusOut,
+      coveredTime: finalCoveredTime,
     });
   };
 
   const handlePromptDeleteAttendanceConfirm = (rec: any) => {
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      alert("Internet connection required. Attendance records can only be deleted when you have an active internet connection. Existing records remain accessible for viewing.");
+      return;
+    }
+
     const targetWorker = workers.find((w) => w.id === rec.worker_id);
     const workerName = targetWorker ? `${targetWorker.firstName} ${targetWorker.lastName}` : "Employee";
 
@@ -543,6 +635,15 @@ export default function AdminDashboard({
   // Execute the confirmed Attendance Action against the Backend API
   const handleExecuteAttendanceAction = async () => {
     if (!attendanceConfirmData) return;
+
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      onNotifyAdmin(
+        "Internet Connection Required",
+        "Attendance records can only be created, edited, or deleted when connected to the internet. Existing records remain accessible for offline viewing."
+      );
+      return;
+    }
+
     setIsProcessingAttendanceAction(true);
     try {
       if (attendanceConfirmData.actionType === "create") {
@@ -558,15 +659,19 @@ export default function AdminDashboard({
             statusIn: attendanceConfirmData.statusIn,
             timeOut: attendanceConfirmData.timeOut || null,
             statusOut: attendanceConfirmData.statusOut || null,
+            coveredTime: attendanceConfirmData.coveredTime,
           }),
         });
         const data = await res.json();
         if (!res.ok) {
           throw new Error(data.error || "Failed to create attendance record.");
         }
+        if (data.record) {
+          setAttendanceRecords((prev: any[]) => [data.record, ...prev.filter((r: any) => r.id !== data.record.id)]);
+        }
         setAttendanceActionSuccess(`Shift record created successfully for ${attendanceConfirmData.workerName}.`);
         onNotifyAdmin("Attendance Created", `Shift record created for ${attendanceConfirmData.workerName}.`);
-      } else if (attendanceConfirmData.actionType === "update") {
+      } else if (attendanceConfirmData.actionType === "update" || attendanceConfirmData.actionType === "edit") {
         const res = await fetch("/api/attendance/manual-update", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -582,11 +687,15 @@ export default function AdminDashboard({
             statusIn: attendanceConfirmData.statusIn,
             timeOut: attendanceConfirmData.timeOut || null,
             statusOut: attendanceConfirmData.statusOut || null,
+            coveredTime: attendanceConfirmData.coveredTime,
           }),
         });
         const data = await res.json();
         if (!res.ok) {
           throw new Error(data.error || "Failed to update attendance record.");
+        }
+        if (data.record) {
+          setAttendanceRecords((prev: any[]) => prev.map((r: any) => (r.id === data.record.id ? data.record : r)));
         }
         setAttendanceActionSuccess(`Shift record updated successfully for ${attendanceConfirmData.workerName}.`);
         onNotifyAdmin("Attendance Updated", `Shift record updated for ${attendanceConfirmData.workerName}.`);
@@ -607,6 +716,8 @@ export default function AdminDashboard({
         if (!res.ok) {
           throw new Error(data.error || "Failed to delete attendance record.");
         }
+        const delId = attendanceConfirmData.recordId;
+        setAttendanceRecords((prev: any[]) => prev.filter((r: any) => r.id !== delId));
         setAttendanceActionSuccess(`Shift record deleted successfully.`);
         onNotifyAdmin("Attendance Deleted", "Shift record deleted successfully.");
       }
@@ -676,6 +787,13 @@ export default function AdminDashboard({
   const [isSideNavExpanded, setIsSideNavExpanded] = React.useState<boolean>(true);
   const [showMobileSideDrawer, setShowMobileSideDrawer] = React.useState<boolean>(false);
   const [isQrSecondaryOptionsExpanded, setIsQrSecondaryOptionsExpanded] = React.useState<boolean>(false);
+
+  React.useEffect(() => {
+    if (showQrModal) {
+      setIsQrSecondaryOptionsExpanded(false);
+      setShowAltCode(false);
+    }
+  }, [showQrModal]);
   const [calendarViewYear, setCalendarViewYear] = React.useState(new Date().getFullYear());
   const [calendarViewMonth, setCalendarViewMonth] = React.useState(new Date().getMonth());
   const [selectedCalendarDay, setSelectedCalendarDay] = React.useState<any>(null);
@@ -804,7 +922,7 @@ export default function AdminDashboard({
 
   // Alternative 6-character code copied and visibility states
   const [copiedAltCode, setCopiedAltCode] = React.useState(false);
-  const [showAltCode, setShowAltCode] = React.useState(true);
+  const [showAltCode, setShowAltCode] = React.useState(false);
 
   React.useEffect(() => {
     if (selectedLeaderboardWorker) {
@@ -1185,9 +1303,29 @@ export default function AdminDashboard({
     });
   }, [workers, profilesSearchQuery, departments, profilesSortField, profilesSortOrder]);
 
+  // Shift Register Table Pagination (Max 200 items per page)
+  const [shiftRegisterPage, setShiftRegisterPage] = React.useState<number>(1);
+  const shiftRegisterPageSize = 200;
+  const shiftRegisterTotalRecords = filteredLogsList.length;
+  const shiftRegisterTotalPages = Math.max(1, Math.ceil(shiftRegisterTotalRecords / shiftRegisterPageSize));
+  const shiftRegisterRemainingPages = Math.max(0, shiftRegisterTotalPages - shiftRegisterPage);
+
+  // Automatically adjust current page if total pages change due to filters
+  React.useEffect(() => {
+    if (shiftRegisterPage > shiftRegisterTotalPages) {
+      setShiftRegisterPage(1);
+    }
+  }, [shiftRegisterTotalPages, shiftRegisterPage]);
+
+  // Paginated records for active page
+  const paginatedLogsList = React.useMemo(() => {
+    const startIndex = (shiftRegisterPage - 1) * shiftRegisterPageSize;
+    return filteredLogsList.slice(startIndex, startIndex + shiftRegisterPageSize);
+  }, [filteredLogsList, shiftRegisterPage, shiftRegisterPageSize]);
+
   const groupedLogs = React.useMemo(() => {
-    const groups: { [date: string]: typeof filteredLogsList } = {};
-    filteredLogsList.forEach((r) => {
+    const groups: { [date: string]: typeof paginatedLogsList } = {};
+    paginatedLogsList.forEach((r) => {
       if (!groups[r.date]) {
         groups[r.date] = [];
       }
@@ -1199,7 +1337,7 @@ export default function AdminDashboard({
         date,
         records: groups[date],
       }));
-  }, [filteredLogsList]);
+  }, [paginatedLogsList]);
 
   const availableYears = React.useMemo(() => {
     const yearsSet = new Set<string>();
@@ -2155,11 +2293,7 @@ export default function AdminDashboard({
               className={`group h-9 w-9 sm:h-10 sm:w-10 rounded-xl border flex items-center justify-center cursor-pointer transition-all duration-200 hover:scale-105 active:scale-95 ${adminThemeClass.inputBg}`}
               title={isFullscreen ? "Exit Fullscreen (ESC)" : "Enter Fullscreen (CTRL+F)"}
             >
-              {isFullscreen ? (
-                <Minimize className="h-4 w-4 text-cyan-400 group-hover:scale-115 group-active:scale-95 transition-transform duration-300" />
-              ) : (
-                <Maximize className="h-4 w-4 text-cyan-400 group-hover:scale-115 group-active:scale-95 transition-transform duration-300" />
-              )}
+              <AnimatedFullscreenIcon isFullscreen={isFullscreen} className="h-4 w-4 sm:h-4.5 sm:w-4.5 text-cyan-400" />
             </button>
 
             {/* QR Code Action Button Beside Settings */}
@@ -2365,11 +2499,7 @@ export default function AdminDashboard({
                 title={isFullscreen ? "Exit Fullscreen (ESC)" : "Enter Fullscreen (CTRL+F)"}
               >
                 <div className="relative w-10 h-10 rounded-xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center shrink-0 transition-colors duration-300 group-hover/btn:bg-cyan-500/20">
-                  {isFullscreen ? (
-                    <Minimize className="h-4.5 w-4.5 transition-transform duration-300 group-hover/btn:scale-115 group-hover/btn:-rotate-6" />
-                  ) : (
-                    <Maximize className="h-4.5 w-4.5 transition-transform duration-300 group-hover/btn:scale-115 group-hover/btn:rotate-6" />
-                  )}
+                  <AnimatedFullscreenIcon isFullscreen={isFullscreen} className="h-4.5 w-4.5 text-cyan-400" />
                 </div>
                 {isSideNavExpanded && (
                   <div className="flex-1 text-left min-w-0">
@@ -2927,7 +3057,7 @@ export default function AdminDashboard({
                   </div>
                 </div>
                 <div className="flex items-center space-x-2 shrink-0">
-                  {(filterName || filterDept !== "all" || filterStatus !== "all" || filterDateStart || filterDateEnd) && (
+                  {(filterName || filterDept !== "all" || filterStatus !== "all" || (filterStatusOut && filterStatusOut !== "all") || filterDateStart || filterDateEnd) && (
                     <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/10 text-cyan-500 border border-cyan-500/20">
                       Active Filters
                     </span>
@@ -2947,7 +3077,7 @@ export default function AdminDashboard({
                     transition={{ duration: 0.25, ease: "easeInOut" }}
                     className="overflow-hidden p-6 space-y-4"
                   >
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
                       <div className="flex flex-col space-y-1">
                         <label
                           className={`text-[10px] font-bold uppercase ${adminThemeClass.textMuted}`}
@@ -3010,6 +3140,28 @@ export default function AdminDashboard({
                             { value: "all", label: "Any Status Flag" },
                             { value: AttendanceStatus.PRESENT, label: "On Time" },
                             { value: AttendanceStatus.LATE, label: "Late Arrivals" },
+                          ]}
+                          theme={theme}
+                        />
+                      </div>
+
+                      <div className="flex flex-col space-y-1">
+                        <label
+                          className={`text-[10px] font-bold uppercase ${adminThemeClass.textMuted}`}
+                        >
+                          Departure Flag
+                        </label>
+                        <CustomSelect
+                          value={filterStatusOut}
+                          onChange={(val) => setFilterStatusOut(val)}
+                          className={`border rounded-xl px-4 py-2.5 text-xs outline-none focus:border-cyan-500 min-h-[44px] ${adminThemeClass.inputBg}`}
+                          placeholder="All Departure Flags"
+                          options={[
+                            { value: "all", label: "All Departure Flags" },
+                            { value: "Early Departure", label: "Early Departure" },
+                            { value: "Normal Checkout", label: "Normal Checkout" },
+                            { value: "Closing Time", label: "Closing Time" },
+                            { value: "Overtime", label: "Overtime" },
                           ]}
                           theme={theme}
                         />
@@ -3512,11 +3664,153 @@ export default function AdminDashboard({
                 </button>
               </div>
 
+              {/* Shift Register Table Pagination Controls Bar */}
               <div
-                className={`p-4 border-t text-[10px] font-semibold text-right ${adminThemeClass.innerBg} ${adminThemeClass.textMuted} ${adminThemeClass.accentBorder}`}
+                className={`px-4 sm:px-6 py-4 border-t flex flex-col md:flex-row items-center justify-between gap-4 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
               >
-                Records pagination active: Showing up to 200 records per
-                dashboard requirement bounds.
+                {/* Information: Record Range, Current Page, Total Pages, Remaining Pages */}
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs">
+                  <span className={`font-semibold ${adminThemeClass.textTitle}`}>
+                    Showing {shiftRegisterTotalRecords === 0 ? 0 : (shiftRegisterPage - 1) * shiftRegisterPageSize + 1}–{Math.min(shiftRegisterPage * shiftRegisterPageSize, shiftRegisterTotalRecords)} of {shiftRegisterTotalRecords} {shiftRegisterTotalRecords === 1 ? "record" : "records"}
+                  </span>
+                  <span className={adminThemeClass.textMuted}>•</span>
+                  <div className="flex items-center space-x-1.5">
+                    <span className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border ${adminThemeClass.inputBg} ${adminThemeClass.accentBorder} ${adminThemeClass.accentText}`}>
+                      Page {shiftRegisterPage} of {shiftRegisterTotalPages}
+                    </span>
+                    <span className={`px-2 py-1 rounded-lg text-[11px] font-medium ${adminThemeClass.innerBg} ${adminThemeClass.textMuted}`}>
+                      {shiftRegisterRemainingPages} {shiftRegisterRemainingPages === 1 ? "page" : "pages"} remaining
+                    </span>
+                  </div>
+                </div>
+
+                {/* Pagination Navigation Controls */}
+                <div className="flex items-center space-x-1.5 sm:space-x-2">
+                  {/* First Page Button */}
+                  <button
+                    type="button"
+                    disabled={shiftRegisterPage <= 1}
+                    onClick={() => {
+                      setShiftRegisterPage(1);
+                      attendanceTableContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+                    }}
+                    className={`h-9 px-2.5 sm:px-3 rounded-xl text-xs font-semibold flex items-center space-x-1 border transition-all cursor-pointer ${
+                      shiftRegisterPage <= 1
+                        ? "opacity-40 cursor-not-allowed border-transparent text-neutral-400"
+                        : `${adminThemeClass.inputBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle} hover:border-cyan-500/40 active:scale-95`
+                    }`}
+                    title="First Page"
+                  >
+                    <ChevronsLeft className="h-4 w-4" />
+                    <span className="hidden sm:inline">First</span>
+                  </button>
+
+                  {/* Previous Page Button */}
+                  <button
+                    type="button"
+                    disabled={shiftRegisterPage <= 1}
+                    onClick={() => {
+                      setShiftRegisterPage((prev) => Math.max(1, prev - 1));
+                      attendanceTableContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+                    }}
+                    className={`h-9 px-2.5 sm:px-3 rounded-xl text-xs font-semibold flex items-center space-x-1 border transition-all cursor-pointer ${
+                      shiftRegisterPage <= 1
+                        ? "opacity-40 cursor-not-allowed border-transparent text-neutral-400"
+                        : `${adminThemeClass.inputBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle} hover:border-cyan-500/40 active:scale-95`
+                    }`}
+                    title="Previous Page"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    <span className="hidden sm:inline">Prev</span>
+                  </button>
+
+                  {/* Dynamic Visible Page Number Buttons */}
+                  <div className="flex items-center space-x-1">
+                    {(() => {
+                      const pages: (number | string)[] = [];
+                      const total = shiftRegisterTotalPages;
+                      const current = shiftRegisterPage;
+
+                      if (total <= 5) {
+                        for (let i = 1; i <= total; i++) pages.push(i);
+                      } else {
+                        pages.push(1);
+                        if (current > 3) pages.push("...");
+                        const start = Math.max(2, current - 1);
+                        const end = Math.min(total - 1, current + 1);
+                        for (let i = start; i <= end; i++) pages.push(i);
+                        if (current < total - 2) pages.push("...");
+                        pages.push(total);
+                      }
+
+                      return pages.map((p, idx) => {
+                        if (p === "...") {
+                          return (
+                            <span key={`dots-${idx}`} className={`px-1 text-xs ${adminThemeClass.textMuted}`}>
+                              •••
+                            </span>
+                          );
+                        }
+                        const isCurrent = p === current;
+                        return (
+                          <button
+                            key={`page-${p}`}
+                            type="button"
+                            onClick={() => {
+                              setShiftRegisterPage(Number(p));
+                              attendanceTableContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+                            }}
+                            className={`h-9 min-w-[36px] px-2 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                              isCurrent
+                                ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white border-cyan-400 shadow-md scale-105"
+                                : `${adminThemeClass.inputBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle} hover:border-cyan-500/40 active:scale-95`
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        );
+                      });
+                    })()}
+                  </div>
+
+                  {/* Next Page Button */}
+                  <button
+                    type="button"
+                    disabled={shiftRegisterPage >= shiftRegisterTotalPages}
+                    onClick={() => {
+                      setShiftRegisterPage((prev) => Math.min(shiftRegisterTotalPages, prev + 1));
+                      attendanceTableContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+                    }}
+                    className={`h-9 px-2.5 sm:px-3 rounded-xl text-xs font-semibold flex items-center space-x-1 border transition-all cursor-pointer ${
+                      shiftRegisterPage >= shiftRegisterTotalPages
+                        ? "opacity-40 cursor-not-allowed border-transparent text-neutral-400"
+                        : `${adminThemeClass.inputBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle} hover:border-cyan-500/40 active:scale-95`
+                    }`}
+                    title="Next Page"
+                  >
+                    <span className="hidden sm:inline">Next</span>
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+
+                  {/* Last Page Button */}
+                  <button
+                    type="button"
+                    disabled={shiftRegisterPage >= shiftRegisterTotalPages}
+                    onClick={() => {
+                      setShiftRegisterPage(shiftRegisterTotalPages);
+                      attendanceTableContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+                    }}
+                    className={`h-9 px-2.5 sm:px-3 rounded-xl text-xs font-semibold flex items-center space-x-1 border transition-all cursor-pointer ${
+                      shiftRegisterPage >= shiftRegisterTotalPages
+                        ? "opacity-40 cursor-not-allowed border-transparent text-neutral-400"
+                        : `${adminThemeClass.inputBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle} hover:border-cyan-500/40 active:scale-95`
+                    }`}
+                    title="Last Page"
+                  >
+                    <span className="hidden sm:inline">Last</span>
+                    <ChevronsRight className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
                   </motion.div>
                 )}
@@ -6029,19 +6323,6 @@ export default function AdminDashboard({
                         </button>
                       </div>
 
-                      {/* PWA INSTALLATION & STANDALONE APP SECTION */}
-                      <div className="space-y-2">
-                        <span className={`text-[10px] uppercase font-bold tracking-wider font-mono ${adminThemeClass.textMuted}`}>
-                          PWA Mobile & Desktop Application
-                        </span>
-                        <PwaInstallComponent
-                          role="admin"
-                          tenantName={tenant?.companyName || tenant?.name}
-                          theme={currentSettings.theme || "dark"}
-                          variant="menu-item"
-                        />
-                      </div>
-
                       {/* LAYOUT SETTING */}
                       <div className="space-y-2">
                         <span className={`text-[10px] uppercase font-bold tracking-wider font-mono ${adminThemeClass.textMuted}`}>
@@ -6477,18 +6758,12 @@ export default function AdminDashboard({
                             type="button"
                             disabled={isSavingCompanyProfile}
                             onClick={handleSaveCompanyProfile}
-                            className="w-full py-3.5 px-6 bg-gradient-to-r from-cyan-500 via-cyan-600 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-cyan-950/45 cursor-pointer disabled:opacity-50 flex items-center justify-center space-x-2 active:scale-[0.99]"
+                            className="w-full py-3.5 px-6 bg-gradient-to-r from-cyan-500 via-cyan-600 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-cyan-950/45 cursor-pointer disabled:opacity-50 flex items-center justify-center active:scale-[0.99]"
                           >
                             {isSavingCompanyProfile ? (
-                              <>
-                                <RefreshCw className="h-4 w-4 animate-spin" />
-                                <span>Synchronizing Profile...</span>
-                              </>
+                              <span>Saving Company Profile...</span>
                             ) : (
-                              <>
-                                <CheckCircle2 className="h-4 w-4" />
-                                <span>Save & Synchronize Company Profile</span>
-                              </>
+                              <span>Save Company Profile</span>
                             )}
                           </button>
                         </div>{/* Update Attendance Setting Card */}
@@ -7299,7 +7574,7 @@ export default function AdminDashboard({
 
 
                         {/* Sign-Out Button placed inside the menu drawer, below department lead historical log */}
-                        <div className="pt-2 pb-12">
+                        <div className="pt-2 pb-3">
                           <button
                             type="button"
                             onClick={() => {
@@ -7312,6 +7587,20 @@ export default function AdminDashboard({
                             <LogOut className="h-4 w-4" />
                             <span>{translations.logout}</span>
                           </button>
+                        </div>
+
+                        {/* MOBILE & DESKTOP APPLICATION - Repositioned to bottom of Menu Settings directly below Sign Out */}
+                        <div className="pt-2 pb-12 space-y-2">
+                          <span className={`text-[10px] uppercase font-bold tracking-wider font-mono ${adminThemeClass.textMuted}`}>
+                            Mobile &amp; Desktop Application
+                          </span>
+                          <PwaInstallComponent
+                            role="admin"
+                            tenantName={tenant?.companyName || tenant?.name}
+                            theme={currentSettings.theme || "dark"}
+                            variant="menu-item"
+                            buttonText="Install App"
+                          />
                         </div>
                     </>
                   );
@@ -7758,7 +8047,12 @@ export default function AdminDashboard({
                     </label>
                     <CustomTimePicker
                       value={attendanceFormTimeIn}
-                      onChange={(newTime) => setAttendanceFormTimeIn(newTime.length === 5 ? `${newTime}:00` : newTime)}
+                      onChange={(newTime) => {
+                        const formatted = newTime.length === 5 ? `${newTime}:00` : newTime;
+                        setAttendanceFormTimeIn(formatted);
+                        const computed = calculateArrivalStatus(formatted, settings);
+                        setAttendanceFormStatusIn(computed);
+                      }}
                       theme={theme === "light" ? "light" : theme === "army" ? "army" : theme === "navy" ? "navy" : "dark"}
                       className="w-full"
                     />
@@ -7802,7 +8096,12 @@ export default function AdminDashboard({
                       </label>
                       <CustomTimePicker
                         value={attendanceFormTimeOut}
-                        onChange={(newTime) => setAttendanceFormTimeOut(newTime.length === 5 ? `${newTime}:00` : newTime)}
+                        onChange={(newTime) => {
+                          const formatted = newTime.length === 5 ? `${newTime}:00` : newTime;
+                          setAttendanceFormTimeOut(formatted);
+                          const computed = calculateCheckoutStatus(formatted, settings);
+                          setAttendanceFormStatusOut(computed);
+                        }}
                         theme={theme === "light" ? "light" : theme === "army" ? "army" : theme === "navy" ? "navy" : "dark"}
                         className="w-full"
                       />
@@ -9815,10 +10114,10 @@ export default function AdminDashboard({
                           >
                             <div className="flex-1 min-w-0">
                               <span className={`text-[9px] uppercase font-bold tracking-wider font-mono block truncate ${adminThemeClass.textMuted}`}>
-                                6-Char Alternative Code (24h Dynamic)
+                                Alternative Code
                               </span>
                               <span className={`text-lg font-mono font-black tracking-[0.25em] block truncate transition-all duration-150 ${adminThemeClass.accentText}`}>
-                                {showAltCode ? altCode : "&bull;&bull;&bull;&bull;&bull;&bull;"}
+                                {showAltCode ? altCode : "******"}
                               </span>
                             </div>
 
@@ -9875,10 +10174,9 @@ export default function AdminDashboard({
                       <a
                         href={qrDataUrl}
                         download={`clock_it_qr_${tenant.id}.png`}
-                        className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-xs rounded-xl active:scale-95 transition-all cursor-pointer text-center flex items-center justify-center space-x-1.5 shadow-md"
+                        className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-xs rounded-xl active:scale-95 transition-all cursor-pointer text-center flex items-center justify-center shadow-md"
                       >
-                        <Download className="h-3.5 w-3.5" />
-                        <span>Download QR Image</span>
+                        <span>Download QR Code</span>
                       </a>
                     </motion.div>
                   )}
@@ -11431,7 +11729,7 @@ export default function AdminDashboard({
           id="admin_floating_announcement_btn"
           type="button"
           onClick={() => setIsAnnouncementModalOpen(true)}
-          className="h-13 w-13 sm:h-14 sm:w-14 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-2xl shadow-cyan-950/60 hover:shadow-cyan-500/40 active:scale-95 transition-all cursor-pointer flex items-center justify-center border border-cyan-400/40"
+          className="h-13 w-13 sm:h-14 sm:w-14 rounded-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-2xl shadow-cyan-950/60 hover:shadow-cyan-500/40 active:scale-95 transition-all cursor-pointer flex items-center justify-center border border-cyan-400/40"
           title="Application Central Announcement"
           aria-label="Application Central Announcement"
         >

@@ -67,6 +67,7 @@ interface WorkerDashboardProps {
   onNotifyAdmin: (title: string, msg: string) => void;
   onSettingsChange?: (newSettings: any) => void;
   onSubscriptionChange?: (newSubscription: any) => void;
+  onTenantChange?: (newTenant: any) => void;
   onUserUpdate?: (updatedUser: any) => void;
 }
 
@@ -121,6 +122,7 @@ export default function WorkerDashboard({
   onNotifyAdmin,
   onSettingsChange,
   onSubscriptionChange,
+  onTenantChange,
   onUserUpdate
 }: WorkerDashboardProps) {
   
@@ -184,6 +186,7 @@ export default function WorkerDashboard({
     onUserUpdate,
     onSettingsChange,
     onSubscriptionChange,
+    onTenantChange,
     settings
   });
 

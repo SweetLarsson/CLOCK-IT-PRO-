@@ -30,6 +30,7 @@ interface UseWorkerViewModelProps {
   onUserUpdate?: (updatedUser: any) => void;
   onSettingsChange?: (newSettings: any) => void;
   onSubscriptionChange?: (newSubscription: any) => void;
+  onTenantChange?: (newTenant: any) => void;
   settings?: any;
 }
 
@@ -45,14 +46,24 @@ export function useWorkerViewModel({
   onUserUpdate,
   onSettingsChange,
   onSubscriptionChange,
+  onTenantChange,
   settings
 }: UseWorkerViewModelProps) {
   const [user, setUser] = useState(initialUser);
   const [showSplash, setShowSplash] = useState(true);
   const [activeTab, setActiveTab] = useState<"scan" | "history" | "permission">("scan");
   
-  // Model Synchronization state
-  const [attendanceRecords, setAttendanceRecords] = useState<any[]>([]);
+  // Model Synchronization state - initialized from localStorage cache for instant offline viewing
+  const [attendanceRecords, setAttendanceRecords] = useState<any[]>(() => {
+    try {
+      const cached = localStorage.getItem(`cached_attendance_${tenant.id}_${user.id}`);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {}
+    return [];
+  });
   const [notifications, setNotifications] = useState<any[]>([]);
   const [permissions, setPermissions] = useState<any[]>([]);
   const [showNotifDrawer, setShowNotifDrawer] = useState(false);
@@ -99,8 +110,12 @@ export function useWorkerViewModel({
     try {
       const resLogs = await fetch(`/api/attendance/records?tenant_id=${tenant.id}&worker_id=${user.id}`);
       const dataLogs = await resLogs.json();
-      if (resLogs.ok) {
-        setAttendanceRecords(dataLogs.records.filter((r: any) => r.worker_id === user.id));
+      if (resLogs.ok && Array.isArray(dataLogs.records)) {
+        const userRecords = dataLogs.records.filter((r: any) => r.worker_id === user.id);
+        setAttendanceRecords(userRecords);
+        try {
+          localStorage.setItem(`cached_attendance_${tenant.id}_${user.id}`, JSON.stringify(userRecords));
+        } catch (e) {}
       }
 
       const resW = await fetch(`/api/tenant/workers?tenant_id=${tenant.id}&worker_id=${user.id}`);
@@ -154,7 +169,16 @@ export function useWorkerViewModel({
         setPermissions(dataPerms.permissions || []);
       }
     } catch (e) {
-      console.warn("ViewModel offline sync caution:", e);
+      console.warn("Worker offline cache fallback:", e);
+      try {
+        const cached = localStorage.getItem(`cached_attendance_${tenant.id}_${user.id}`);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setAttendanceRecords(parsed);
+          }
+        }
+      } catch (err) {}
     } finally {
       setIsRefreshingLogs(false);
     }
@@ -163,7 +187,7 @@ export function useWorkerViewModel({
   useEffect(() => {
     syncWorkerLogs();
     
-    // Subscribe to SSE for real-time adjustments if role changes or updates
+    // Subscribe to SSE for real-time adjustments if records, roles or settings change
     const eventSource = new EventSource(`/api/events/subscribe?tenant_id=${tenant.id}`);
     
     eventSource.addEventListener("SETTINGS_SAVED", (e: any) => {
@@ -175,6 +199,27 @@ export function useWorkerViewModel({
         syncWorkerLogs();
       } catch (err) {
         console.warn("Error parsing SETTINGS_SAVED event on worker side:", err);
+      }
+    });
+
+    eventSource.addEventListener("TENANT_UPDATED", (e: any) => {
+      try {
+        const payload = JSON.parse(e.data);
+        if (payload) {
+          if (onTenantChange) {
+            onTenantChange(payload);
+          }
+          try {
+            const saved = localStorage.getItem("clock_it_session");
+            if (saved) {
+              const parsed = JSON.parse(saved);
+              parsed.tenant = { ...parsed.tenant, ...payload };
+              localStorage.setItem("clock_it_session", JSON.stringify(parsed));
+            }
+          } catch (e) {}
+        }
+      } catch (err) {
+        console.warn("Error parsing TENANT_UPDATED event on worker side:", err);
       }
     });
 
@@ -215,6 +260,10 @@ export function useWorkerViewModel({
       syncWorkerLogs();
     });
 
+    eventSource.addEventListener("ATTENDANCE_DELETED", (e: any) => {
+      syncWorkerLogs();
+    });
+
     eventSource.addEventListener("SUBSCRIPTION_UPDATED", (e: any) => {
       try {
         const payload = JSON.parse(e.data);
@@ -226,7 +275,15 @@ export function useWorkerViewModel({
       }
     });
 
+    // 3-second polling interval alongside SSE ensures immediate updates on worker terminals
+    const pollInterval = setInterval(() => {
+      if (typeof navigator === "undefined" || navigator.onLine) {
+        syncWorkerLogs();
+      }
+    }, 3000);
+
     return () => {
+      clearInterval(pollInterval);
       eventSource.close();
     };
   }, [user.id, tenant.id]);
@@ -386,33 +443,12 @@ export function useWorkerViewModel({
     const localDate = new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0') + '-' + String(new Date().getDate()).padStart(2, '0');
     const localTime = new Date().toTimeString().split(" ")[0];
 
-    // If device is offline, immediately queue offline
+    // If device is offline, new attendance records cannot be created/updated without internet connection
     if (typeof navigator !== "undefined" && !navigator.onLine) {
-      addOfflineAttendanceAction({
-        type: "check-in",
-        tenant_id: tenant.id,
-        worker_id: user.id,
-        localDate,
-        localTime
-      });
-      setPendingOfflineCount(getPendingQueueCount());
-      
-      const optimisticRec: any = {
-        id: `offline-temp-${Date.now()}`,
-        tenant_id: tenant.id,
-        worker_id: user.id,
-        department_id: user.department_id || "unassigned",
-        date: localDate,
-        timeIn: localTime,
-        statusIn: AttendanceStatus.PRESENT,
-        coveredTime: 0
-      };
-      setAttendanceRecords((prev: any[]) => [...prev.filter((r) => !(r.date === localDate && r.worker_id === user.id)), optimisticRec]);
-      
-      playCheckInSound("beep");
-      setIsSuccessScan(true);
-      setScannerFeedback("Offline Check-In Queued! (Saved locally & will sync when online)");
-      onNotifyAdmin("Offline Check-In Queued", `${user.firstName} checked in locally while offline.`);
+      setIsSuccessScan(false);
+      const msg = "Internet connection required. New attendance records can only be recorded when connected to the internet. Existing records remain available for offline viewing.";
+      setScannerFeedback(msg);
+      onNotifyAdmin("Network Connection Required", msg);
       return;
     }
 
@@ -452,32 +488,11 @@ export function useWorkerViewModel({
 
       onNotifyAdmin("Check-In Registered", `${user.firstName} authorized entry check-in`);
       syncWorkerLogs();
-    } catch (e) {
-      // Network failure during fetch -> queue offline
-      addOfflineAttendanceAction({
-        type: "check-in",
-        tenant_id: tenant.id,
-        worker_id: user.id,
-        localDate,
-        localTime
-      });
-      setPendingOfflineCount(getPendingQueueCount());
-      
-      const optimisticRec: any = {
-        id: `offline-temp-${Date.now()}`,
-        tenant_id: tenant.id,
-        worker_id: user.id,
-        department_id: user.department_id || "unassigned",
-        date: localDate,
-        timeIn: localTime,
-        statusIn: AttendanceStatus.PRESENT,
-        coveredTime: 0
-      };
-      setAttendanceRecords((prev: any[]) => [...prev.filter((r) => !(r.date === localDate && r.worker_id === user.id)), optimisticRec]);
-
-      playCheckInSound("beep");
-      setIsSuccessScan(true);
-      setScannerFeedback("Offline Check-In Queued! (Saved locally & will sync when online)");
+    } catch (e: any) {
+      setIsSuccessScan(false);
+      const msg = "Internet connection failed. New attendance records can only be updated when connected to the internet. Please reconnect and try again.";
+      setScannerFeedback(msg);
+      onNotifyAdmin("Network Required", msg);
     }
   };
 
@@ -486,34 +501,13 @@ export function useWorkerViewModel({
     const localDate = new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0') + '-' + String(new Date().getDate()).padStart(2, '0');
     const localTime = new Date().toTimeString().split(" ")[0];
 
-    // If device is offline, immediately queue offline
+    // If device is offline, attendance check-out cannot be recorded without internet connection
     if (typeof navigator !== "undefined" && !navigator.onLine) {
-      addOfflineAttendanceAction({
-        type: "check-out",
-        tenant_id: tenant.id,
-        worker_id: user.id,
-        localDate,
-        localTime
-      });
-      setPendingOfflineCount(getPendingQueueCount());
-
-      setAttendanceRecords((prev: any[]) =>
-        prev.map((rec) => {
-          if (rec.date === localDate && rec.worker_id === user.id) {
-            return {
-              ...rec,
-              timeOut: localTime,
-              statusOut: "Normal Checkout"
-            };
-          }
-          return rec;
-        })
-      );
-
-      setIsSuccessScan(true);
-      setScannerFeedback("Offline Check-Out Queued! (Saved locally & will sync when online)");
-      onNotifyAdmin("Offline Check-Out Queued", `${user.firstName} checked out locally while offline.`);
-      return { localDate, localTime, offline: true };
+      setIsSuccessScan(false);
+      const msg = "Internet connection required. Attendance records can only be updated when connected to the internet. Existing records remain available for offline viewing.";
+      setScannerFeedback(msg);
+      onNotifyAdmin("Network Connection Required", msg);
+      return null;
     }
 
     try {
@@ -532,33 +526,12 @@ export function useWorkerViewModel({
       onNotifyAdmin("Check-Out Registered", `${user.firstName} authorized exit signout`);
       syncWorkerLogs();
       return data.attendance;
-    } catch (e) {
-      // Network failure -> queue offline
-      addOfflineAttendanceAction({
-        type: "check-out",
-        tenant_id: tenant.id,
-        worker_id: user.id,
-        localDate,
-        localTime
-      });
-      setPendingOfflineCount(getPendingQueueCount());
-
-      setAttendanceRecords((prev: any[]) =>
-        prev.map((rec) => {
-          if (rec.date === localDate && rec.worker_id === user.id) {
-            return {
-              ...rec,
-              timeOut: localTime,
-              statusOut: "Normal Checkout"
-            };
-          }
-          return rec;
-        })
-      );
-
-      setIsSuccessScan(true);
-      setScannerFeedback("Offline Check-Out Queued! (Saved locally & will sync when online)");
-      return { localDate, localTime, offline: true };
+    } catch (e: any) {
+      setIsSuccessScan(false);
+      const msg = "Internet connection failed. Attendance check-out requires an active internet connection to update. Please reconnect and try again.";
+      setScannerFeedback(msg);
+      onNotifyAdmin("Network Required", msg);
+      return null;
     }
   };
 

@@ -75,7 +75,6 @@ export const ApplicationCentralAnnouncementModal: React.FC<ApplicationCentralAnn
   // Fetch announcements
   const fetchAnnouncements = React.useCallback(async () => {
     try {
-      setIsLoading(true);
       const res = await fetch(`/api/tenant/announcements?tenant_id=${tenantId}`);
       if (res.ok) {
         const data = await res.json();
@@ -90,10 +89,45 @@ export const ApplicationCentralAnnouncementModal: React.FC<ApplicationCentralAnn
   }, [tenantId]);
 
   React.useEffect(() => {
-    if (isOpen) {
+    if (!isOpen || !tenantId) return;
+    setIsLoading(true);
+    fetchAnnouncements();
+
+    // Live fast-polling fallback (every 2 seconds) so acknowledgments reflect immediately
+    const interval = setInterval(() => {
       fetchAnnouncements();
+    }, 2000);
+
+    // Live Server-Sent Events listener for immediate real-time response updates
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource(`/api/events?tenant_id=${tenantId}`);
+      const handleLiveUpdate = (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data?.announcement) {
+            setActiveAnnouncement(data.announcement);
+          }
+          fetchAnnouncements();
+        } catch (err) {
+          fetchAnnouncements();
+        }
+      };
+
+      es.addEventListener("ANNOUNCEMENT_ACKNOWLEDGED", handleLiveUpdate);
+      es.addEventListener("ANNOUNCEMENT_FEEDBACK_RECEIVED", handleLiveUpdate);
+      es.addEventListener("ANNOUNCEMENT_UPDATED", handleLiveUpdate);
+    } catch (err) {
+      console.error("Failed to connect SSE for announcements:", err);
     }
-  }, [isOpen, fetchAnnouncements]);
+
+    return () => {
+      clearInterval(interval);
+      if (es) {
+        es.close();
+      }
+    };
+  }, [isOpen, tenantId, fetchAnnouncements]);
 
   const handleImageFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -222,7 +256,7 @@ export const ApplicationCentralAnnouncementModal: React.FC<ApplicationCentralAnn
   return (
     <div
       id="admin_central_announcement_overlay"
-      className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
+      className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
       onClick={onClose}
     >
       <motion.div
@@ -231,28 +265,28 @@ export const ApplicationCentralAnnouncementModal: React.FC<ApplicationCentralAnn
         exit={{ opacity: 0, scale: 0.95, y: 15 }}
         transition={{ duration: 0.2 }}
         onClick={(e) => e.stopPropagation()}
-        className={`w-full max-w-4xl max-h-[92vh] flex flex-col rounded-3xl border shadow-2xl overflow-hidden ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+        className={`w-full max-w-md max-h-[82vh] flex flex-col rounded-3xl border shadow-2xl overflow-hidden ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
       >
         {/* Modal Header */}
-        <div className={`p-5 sm:p-6 border-b flex items-center justify-between shrink-0 ${adminThemeClass.accentBorder} ${adminThemeClass.innerBg}`}>
-          <div className="flex items-center space-x-3.5">
-            <div className="h-11 w-11 rounded-2xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-white shadow-md shadow-cyan-500/25">
-              <Megaphone className="h-5 w-5" />
+        <div className={`p-4 sm:p-5 border-b flex items-center justify-between shrink-0 ${adminThemeClass.accentBorder} ${adminThemeClass.innerBg}`}>
+          <div className="flex items-center space-x-3 min-w-0">
+            <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-white shadow-md shadow-cyan-500/25 shrink-0">
+              <Megaphone className="h-4 w-4" />
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center space-x-2">
-                <h2 className={`font-display font-bold text-lg sm:text-xl ${adminThemeClass.textTitle}`}>
-                  Application Central Announcement
+                <h2 className={`font-display font-bold text-sm sm:text-base truncate ${adminThemeClass.textTitle}`}>
+                  Central Announcement
                 </h2>
                 {activeAnnouncement && (
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center space-x-1">
+                  <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center space-x-1 shrink-0">
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping mr-1" />
-                    Live Active
+                    Live
                   </span>
                 )}
               </div>
-              <p className={`text-xs font-light mt-0.5 ${adminThemeClass.textMuted}`}>
-                Broadcast picture, text, or interactive feedback & rating forms to all workers.
+              <p className={`text-[11px] font-light mt-0.5 truncate ${adminThemeClass.textMuted}`}>
+                Broadcast announcements & interactive feedback to workers.
               </p>
             </div>
           </div>
@@ -260,31 +294,31 @@ export const ApplicationCentralAnnouncementModal: React.FC<ApplicationCentralAnn
           <button
             id="admin_announcement_close_btn"
             onClick={onClose}
-            className={`h-9 w-9 rounded-xl flex items-center justify-center cursor-pointer border transition-colors ${adminThemeClass.inputBg} ${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`}
+            className={`h-8 w-8 rounded-xl flex items-center justify-center cursor-pointer border transition-colors shrink-0 ${adminThemeClass.inputBg} ${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`}
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
         {/* Navigation Tabs */}
-        <div className={`px-5 sm:px-6 pt-3 pb-2 border-b flex items-center space-x-2 shrink-0 ${adminThemeClass.accentBorder} ${adminThemeClass.innerBg}`}>
+        <div className={`px-3.5 pt-2 pb-2 border-b flex items-center space-x-1.5 overflow-x-auto scrollbar-none shrink-0 ${adminThemeClass.accentBorder} ${adminThemeClass.innerBg}`}>
           <button
             id="announcement_tab_create"
             onClick={() => setActiveTab("create")}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-2 ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 shrink-0 whitespace-nowrap ${
               activeTab === "create"
                 ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/30"
                 : `${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`
             }`}
           >
             <Plus className="h-3.5 w-3.5" />
-            <span>Create / Broadcast</span>
+            <span>Create</span>
           </button>
 
           <button
             id="announcement_tab_feedback"
             onClick={() => setActiveTab("feedback")}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-2 ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 shrink-0 whitespace-nowrap ${
               activeTab === "feedback"
                 ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/30"
                 : `${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`
@@ -297,19 +331,19 @@ export const ApplicationCentralAnnouncementModal: React.FC<ApplicationCentralAnn
           <button
             id="announcement_tab_history"
             onClick={() => setActiveTab("history")}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-2 ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 shrink-0 whitespace-nowrap ${
               activeTab === "history"
                 ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/30"
                 : `${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`
             }`}
           >
             <Clock className="h-3.5 w-3.5" />
-            <span>Archive History ({announcements.length})</span>
+            <span>Archive ({announcements.length})</span>
           </button>
         </div>
 
         {/* Modal Body */}
-        <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
           {feedbackSuccessMsg && (
             <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-medium flex items-center space-x-2.5">
               <CheckCircle2 className="h-4 w-4 shrink-0" />
@@ -685,8 +719,8 @@ export const ApplicationCentralAnnouncementModal: React.FC<ApplicationCentralAnn
                     )}
 
                     {/* Stats Metrics */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
-                      <div className={`p-3 rounded-xl border ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}>
+                    <div className="grid grid-cols-2 gap-2.5 pt-1">
+                      <div className={`p-2.5 rounded-xl border ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}>
                         <span className={`text-[10px] font-mono uppercase tracking-wider block ${adminThemeClass.textMuted}`}>
                           Total Responses
                         </span>

@@ -197,40 +197,42 @@ export function updatePwaManifest(config: PwaManifestConfig) {
   const icon512 = getPwaIconSvg(role, 512);
 
   const manifestData = {
+    id: "/",
     name: manifestName,
     short_name: shortName,
     description,
     start_url: startUrl,
     scope: "/",
     display: "standalone",
+    display_override: ["window-controls-overlay", "standalone", "minimal-ui"],
     orientation: role === "worker" ? "portrait-primary" : "any",
     theme_color: themeColor,
     background_color: bgColor,
     categories: ["business", "productivity", "utilities"],
     icons: [
       {
-        src: icon192,
+        src: role === "admin" ? "/pwa-admin-192.png" : role === "worker" ? "/pwa-worker-192.png" : "/pwa-192x192.png",
         sizes: "192x192",
-        type: "image/svg+xml",
-        purpose: "any maskable",
-      },
-      {
-        src: icon512,
-        sizes: "512x512",
-        type: "image/svg+xml",
-        purpose: "any maskable",
-      },
-      {
-        src: `/api/pwa-icon?role=${role}&size=192`,
-        sizes: "192x192",
-        type: "image/svg+xml",
+        type: "image/png",
         purpose: "any",
       },
       {
-        src: `/api/pwa-icon?role=${role}&size=512`,
+        src: role === "admin" ? "/pwa-admin-512.png" : role === "worker" ? "/pwa-worker-512.png" : "/pwa-512x512.png",
         sizes: "512x512",
-        type: "image/svg+xml",
+        type: "image/png",
         purpose: "any",
+      },
+      {
+        src: role === "admin" ? "/pwa-admin-maskable-512.png" : role === "worker" ? "/pwa-worker-maskable-512.png" : "/pwa-maskable-512x512.png",
+        sizes: "512x512",
+        type: "image/png",
+        purpose: "maskable",
+      },
+      {
+        src: "/pwa-maskable-192x192.png",
+        sizes: "192x192",
+        type: "image/png",
+        purpose: "maskable",
       },
     ],
     shortcuts:
@@ -241,21 +243,21 @@ export function updatePwaManifest(config: PwaManifestConfig) {
               short_name: "Logs",
               description: "View real-time attendance logs",
               url: "/?pwa=admin&tab=logs",
-              icons: [{ src: icon192, sizes: "192x192" }],
+              icons: [{ src: "/pwa-admin-192.png", sizes: "192x192", type: "image/png" }],
             },
             {
               name: "Shift Register",
               short_name: "Register",
               description: "View daily shift roster & roll calls",
               url: "/?pwa=admin&tab=register",
-              icons: [{ src: icon192, sizes: "192x192" }],
+              icons: [{ src: "/pwa-admin-192.png", sizes: "192x192", type: "image/png" }],
             },
             {
               name: "Terminal QR Code",
               short_name: "QR Code",
               description: "Display live check-in terminal QR code",
               url: "/?pwa=admin&action=qr",
-              icons: [{ src: icon192, sizes: "192x192" }],
+              icons: [{ src: "/pwa-admin-192.png", sizes: "192x192", type: "image/png" }],
             },
           ]
         : role === "worker"
@@ -265,31 +267,28 @@ export function updatePwaManifest(config: PwaManifestConfig) {
               short_name: "Check-In",
               description: "Scan terminal QR code or submit attendance code",
               url: "/?pwa=worker&action=checkin",
-              icons: [{ src: icon192, sizes: "192x192" }],
+              icons: [{ src: "/pwa-worker-192.png", sizes: "192x192", type: "image/png" }],
             },
             {
               name: "My Shift History",
               short_name: "My Logs",
               description: "Inspect personal attendance records",
               url: "/?pwa=worker&tab=logs",
-              icons: [{ src: icon192, sizes: "192x192" }],
+              icons: [{ src: "/pwa-worker-192.png", sizes: "192x192", type: "image/png" }],
             },
             {
               name: "Request Permission",
               short_name: "Permission",
               description: "Submit leave / exemption request",
               url: "/?pwa=worker&action=permission",
-              icons: [{ src: icon192, sizes: "192x192" }],
+              icons: [{ src: "/pwa-worker-192.png", sizes: "192x192", type: "image/png" }],
             },
           ]
         : [],
   };
 
-  // Convert to Blob and set manifest link href
-  const stringManifest = JSON.stringify(manifestData);
-  const blob = new Blob([stringManifest], { type: "application/manifest+json" });
-  const manifestUrl = URL.createObjectURL(blob);
-
+  // Set manifest link href to server-backed manifest URL so Chrome & WebAPK engines recognize it
+  const manifestEndpoint = `/manifest.webmanifest?role=${role}&tenant=${encodeURIComponent(tenantName || "")}&worker=${encodeURIComponent(workerName || "")}&theme=${theme}`;
   let linkEl = document.querySelector<HTMLLinkElement>("#app-manifest");
   if (!linkEl) {
     linkEl = document.createElement("link");
@@ -297,7 +296,7 @@ export function updatePwaManifest(config: PwaManifestConfig) {
     linkEl.rel = "manifest";
     document.head.appendChild(linkEl);
   }
-  linkEl.href = manifestUrl;
+  linkEl.href = manifestEndpoint;
 
   // Update theme-color and apple-mobile-web-app-title
   let themeColorMeta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
@@ -332,14 +331,14 @@ export function updatePwaManifest(config: PwaManifestConfig) {
     document.head.appendChild(appleStatusMeta);
   }
 
-  // Update Apple touch icon
+  // Update Apple touch icon with static PNG so iOS adds clean icon without browser badge
   let appleIcon = document.querySelector<HTMLLinkElement>('link[rel="apple-touch-icon"]');
   if (!appleIcon) {
     appleIcon = document.createElement("link");
     appleIcon.rel = "apple-touch-icon";
     document.head.appendChild(appleIcon);
   }
-  appleIcon.href = icon192;
+  appleIcon.href = role === "admin" ? "/pwa-admin-192.png" : role === "worker" ? "/pwa-worker-192.png" : "/apple-touch-icon.png";
 
   // Update page title
   document.title = manifestName;

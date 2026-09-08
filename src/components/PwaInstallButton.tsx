@@ -32,6 +32,7 @@ interface PwaInstallProps {
   theme?: string;
   variant?: "button" | "banner" | "menu-item" | "header-pill";
   className?: string;
+  buttonText?: string;
 }
 
 export function PwaInstallComponent({
@@ -41,6 +42,7 @@ export function PwaInstallComponent({
   theme = "dark",
   variant = "button",
   className = "",
+  buttonText,
 }: PwaInstallProps) {
   const [canInstallNative, setCanInstallNative] = useState(false);
   const [isInstalled, setIsInstalled] = useState(false);
@@ -119,7 +121,7 @@ export function PwaInstallComponent({
             </div>
             <div>
               <span className="block text-xs font-bold font-mono uppercase tracking-wider">
-                {isInstalled ? "App Installed (PWA Active)" : `Install ${isAdmin ? "Admin" : "Worker"} App`}
+                {isInstalled ? "App Installed" : (buttonText || (isAdmin ? "Install App" : "Install Worker App"))}
               </span>
               <span className="block text-[10px] opacity-75">
                 {isInstalled ? "Running in Standalone App Mode" : "Add to Home Screen & Desktop"}
@@ -127,7 +129,7 @@ export function PwaInstallComponent({
             </div>
           </div>
           <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-black/30 border border-white/10">
-            {isInstalled ? "Installed" : "PWA"}
+            {isInstalled ? "Installed" : "Install"}
           </span>
         </button>
 

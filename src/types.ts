@@ -40,6 +40,7 @@ export interface ThumbnailSet {
 export interface Tenant {
   id: string;
   name: string;
+  companyName?: string;
   email: string;
   phone: string;
   fingerprint?: string;
