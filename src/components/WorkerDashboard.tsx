@@ -274,8 +274,9 @@ export default function WorkerDashboard({
     };
 
     const fetchAnnouncements = async () => {
+      const effectiveTenantId = tenant?.id || "default-tenant";
       try {
-        const res = await fetch(`/api/tenant/announcements?tenant_id=${tenant.id}`);
+        const res = await fetch(`/api/tenant/announcements?tenant_id=${encodeURIComponent(effectiveTenantId)}`);
         if (res.ok) {
           const data = await res.json();
           if (data.activeAnnouncement) {
@@ -285,9 +286,30 @@ export default function WorkerDashboard({
               setShowAnnouncementModal(true);
             }
           }
+          try {
+            if (data.activeAnnouncement) {
+              localStorage.setItem(`app_active_announcement_${effectiveTenantId}`, JSON.stringify(data.activeAnnouncement));
+            } else {
+              localStorage.removeItem(`app_active_announcement_${effectiveTenantId}`);
+            }
+          } catch (e) {}
         }
       } catch (err) {
-        console.error("Failed to fetch central announcements", err);
+        // Fallback to cache if available
+        try {
+          const cached = localStorage.getItem(`app_active_announcement_${effectiveTenantId}`);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (parsed && parsed.isActive) {
+              setActiveAnnouncement(parsed);
+              const isAlreadyAck = parsed.acknowledgedWorkerIds?.includes(user.id);
+              if (!isAlreadyAck) {
+                setShowAnnouncementModal(true);
+              }
+            }
+          }
+        } catch (e) {}
+        console.warn("Notice: Could not fetch central announcements, using cached state if available:", err);
       }
     };
 
@@ -1450,7 +1472,12 @@ export default function WorkerDashboard({
           <div className="space-y-6">
             
             {isCheckedOutToday ? (
-              <div className={`rounded-3xl p-8 text-center space-y-6 flex flex-col items-center border shadow-md bg-emerald-500/5 border-emerald-500/25 dark:bg-emerald-500/5 dark:border-emerald-500/10`}>
+              <motion.div
+                initial={{ opacity: 0, y: 14 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, ease: "easeOut" }}
+                className={`rounded-3xl p-8 text-center space-y-6 flex flex-col items-center border shadow-md bg-emerald-500/5 border-emerald-500/25 dark:bg-emerald-500/5 dark:border-emerald-500/10`}
+              >
                 <div className={`h-16 w-16 rounded-2xl flex items-center justify-center border bg-emerald-500/10 text-emerald-500 border-emerald-500/25 dark:bg-emerald-500/10 dark:border-emerald-500/15`}>
                   <CheckCircle2 className="h-8 w-8 animate-pulse" />
                 </div>
@@ -1460,7 +1487,7 @@ export default function WorkerDashboard({
                     {translations.shiftCompletedDesc || "You have successfully checked out for today. You are automatically exempted from checking in or checking out again for the rest of today until tomorrow."}
                   </p>
                 </div>
-              </div>
+              </motion.div>
             ) : isAltCheckIn ? (
               /* ALTERNATIVE 6-CHARACTER CODE CHECK-IN MODE */
               <div className={`rounded-3xl p-6 sm:p-8 text-center space-y-6 flex flex-col items-center border shadow-md relative ${themeClass.cardBg}`}>
@@ -1697,7 +1724,12 @@ export default function WorkerDashboard({
             )}
 
             {/* Static shift state log panels */}
-            <div className={`rounded-3xl p-6 border shadow-sm space-y-4 ${themeClass.cardBg}`}>
+            <motion.div
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, ease: "easeOut" }}
+              className={`rounded-3xl p-6 border shadow-sm space-y-4 ${themeClass.cardBg}`}
+            >
               <div className="flex flex-col sm:flex-row justify-between items-center text-center sm:text-left gap-3 border-b border-neutral-100 dark:border-neutral-850 pb-3">
                 <div className="w-full sm:w-auto">
                   <span className={`text-[10px] uppercase font-bold tracking-wider font-mono block ${themeClass.textMuted}`}>{translations.loggedShiftSession || "Logged Shift Session"}</span>
@@ -1718,19 +1750,34 @@ export default function WorkerDashboard({
               </div>
 
               <div className="grid grid-cols-3 gap-4 text-center">
-                <div className="space-y-1">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.96 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.35, delay: 0.05 }}
+                  className="space-y-1"
+                >
                   <span className="text-[10px] font-semibold text-neutral-400 block uppercase">{translations.clockInTime || "Clock In Time"}</span>
                   <p className={`text-sm font-mono font-bold ${todayRecord?.timeIn ? (isDark ? themeClass.textTitle : 'text-slate-900') : 'text-neutral-400'}`}>
                     {todayRecord?.timeIn ? todayRecord.timeIn : "--:--:--"}
                   </p>
-                </div>
-                <div className="space-y-1">
+                </motion.div>
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.96 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.35, delay: 0.1 }}
+                  className="space-y-1"
+                >
                   <span className="text-[10px] font-semibold text-neutral-400 block uppercase">{translations.clockOutTime || "Clock Out Time"}</span>
                   <p className={`text-sm font-mono font-bold ${todayRecord?.timeOut ? (isDark ? themeClass.textTitle : 'text-slate-900') : 'text-neutral-400'}`}>
                     {todayRecord?.timeOut ? todayRecord.timeOut : (todayRecord?.timeIn ? (translations.activeShift || "Active Shift") : "--:--:--")}
                   </p>
-                </div>
-                <div className="space-y-1">
+                </motion.div>
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.96 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.35, delay: 0.15 }}
+                  className="space-y-1"
+                >
                   <span className="text-[10px] font-semibold text-neutral-400 block uppercase">{translations.workHours || "Work Hours"}</span>
                   <p className={`text-sm font-mono font-bold ${todayRecord?.coveredTime ? 'text-cyan-405' : (todayRecord?.timeIn ? 'text-emerald-400' : 'text-neutral-450')}`}>
                     {(() => {
@@ -1762,9 +1809,9 @@ export default function WorkerDashboard({
                       return "00:00";
                     })()}
                   </p>
-                </div>
+                </motion.div>
               </div>
-            </div>
+            </motion.div>
 
           </div>
         )}
@@ -2411,14 +2458,25 @@ export default function WorkerDashboard({
 
               return (
                 <div className="space-y-5 font-sans">
-                  <div className={`p-6 rounded-3xl border shadow-md ${themeClass.cardBg}`}>
+                  <motion.div
+                    initial={{ opacity: 0, y: 14 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.4, ease: "easeOut" }}
+                    className={`p-6 rounded-3xl border shadow-md ${themeClass.cardBg}`}
+                  >
                     <span className={`text-[10px] uppercase font-bold tracking-wider font-mono block mb-3 ${themeClass.textMuted}`}>{translations.assignedWorkDays || "Assigned Work Days & Schedule"}</span>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {daysList.map(d => {
+                      {daysList.map((d, dIdx) => {
                         const isScheduled = activeDays[d] === true;
                         const shiftTime = getShiftTimeForDay(d);
                         return (
-                          <div key={d} className={`p-3 rounded-xl border flex items-center justify-between text-xs ${isScheduled ? `${themeClass.innerBg} border-cyan-500/20` : "opacity-50 border-neutral-200/10"}`}>
+                          <motion.div
+                            key={d}
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.3, delay: dIdx * 0.04 }}
+                            className={`p-3 rounded-xl border flex items-center justify-between text-xs ${isScheduled ? `${themeClass.innerBg} border-cyan-500/20` : "opacity-50 border-neutral-200/10"}`}
+                          >
                             <div className="flex items-center space-x-2">
                               <span className={`h-2 w-2 rounded-full ${isScheduled ? "bg-emerald-400 shadow-sm" : "bg-neutral-500"}`} />
                               <span className="font-bold">{translations[d] || d}</span>
@@ -2426,13 +2484,18 @@ export default function WorkerDashboard({
                             <span className="font-mono font-medium text-[11px]">
                               {isScheduled ? shiftTime : (translations.offDay || "Off-Day")}
                             </span>
-                          </div>
+                          </motion.div>
                         );
                       })}
                     </div>
-                  </div>
+                  </motion.div>
 
-                  <div className={`p-6 rounded-3xl border shadow-md ${themeClass.cardBg}`}>
+                  <motion.div
+                    initial={{ opacity: 0, y: 14 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.4, delay: 0.1, ease: "easeOut" }}
+                    className={`p-6 rounded-3xl border shadow-md ${themeClass.cardBg}`}
+                  >
                     <span className={`text-[10px] uppercase font-bold tracking-wider font-mono block mb-3 ${themeClass.textMuted}`}>{translations.approvedLeavePermissions || "Approved Leave Permissions"}</span>
                     {personalPermissions.length > 0 ? (
                       <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
@@ -2453,7 +2516,7 @@ export default function WorkerDashboard({
                         {translations.noApprovedPermissions || "No approved permission records."}
                       </div>
                     )}
-                  </div>
+                  </motion.div>
                 </div>
               );
             })()}
@@ -2548,7 +2611,12 @@ export default function WorkerDashboard({
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                       {/* Work Hours Logged */}
-                      <div className={`p-4 rounded-2xl border flex flex-col justify-between ${themeClass.innerBg} ${themeClass.accentBorder}`}>
+                      <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.35, delay: 0.05 }}
+                        className={`p-4 rounded-2xl border flex flex-col justify-between ${themeClass.innerBg} ${themeClass.accentBorder}`}
+                      >
                         <div className="flex items-center justify-between">
                           <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${themeClass.textMuted}`}>
                             {translations.loggedWorkHours || "Logged Work Hours"}
@@ -2564,10 +2632,15 @@ export default function WorkerDashboard({
                         <span className={`text-[10px] font-mono mt-1 ${themeClass.textMuted}`}>
                           {translations.duration || "Duration"}: {selectedM.workHoursFormatted || "00:00:00"}
                         </span>
-                      </div>
+                      </motion.div>
 
                       {/* Performance Score */}
-                      <div className={`p-4 rounded-2xl border flex flex-col justify-between ${themeClass.innerBg} ${themeClass.accentBorder}`}>
+                      <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.35, delay: 0.1 }}
+                        className={`p-4 rounded-2xl border flex flex-col justify-between ${themeClass.innerBg} ${themeClass.accentBorder}`}
+                      >
                         <div className="flex items-center justify-between">
                           <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${themeClass.textMuted}`}>
                             {translations.performanceScore || "Performance Score"}
@@ -2587,10 +2660,15 @@ export default function WorkerDashboard({
                             style={{ width: `${Math.min(100, Math.max(0, selectedM.performancePercentage))}%` }}
                           />
                         </div>
-                      </div>
+                      </motion.div>
 
                       {/* Attended vs Expected Days */}
-                      <div className={`p-4 rounded-2xl border flex flex-col justify-between ${themeClass.innerBg} ${themeClass.accentBorder}`}>
+                      <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.35, delay: 0.15 }}
+                        className={`p-4 rounded-2xl border flex flex-col justify-between ${themeClass.innerBg} ${themeClass.accentBorder}`}
+                      >
                         <div className="flex items-center justify-between">
                           <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${themeClass.textMuted}`}>
                             {translations.shiftAttendance || "Shift Attendance"}
@@ -2606,10 +2684,15 @@ export default function WorkerDashboard({
                         <span className={`text-[10px] font-mono mt-1 ${themeClass.textMuted}`}>
                           {selectedM.attendancePercentage.toFixed(1)}% {translations.attendanceRate || "attendance rate"}
                         </span>
-                      </div>
+                      </motion.div>
 
                       {/* Punctuality / Late Status */}
-                      <div className={`p-4 rounded-2xl border flex flex-col justify-between ${themeClass.innerBg} ${themeClass.accentBorder}`}>
+                      <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.35, delay: 0.2 }}
+                        className={`p-4 rounded-2xl border flex flex-col justify-between ${themeClass.innerBg} ${themeClass.accentBorder}`}
+                      >
                         <div className="flex items-center justify-between">
                           <span className={`text-[9px] uppercase font-bold font-mono tracking-wider ${themeClass.textMuted}`}>
                             {translations.punctualityRecord || "Punctuality Record"}
@@ -2625,7 +2708,7 @@ export default function WorkerDashboard({
                         <span className={`text-[10px] font-mono mt-1 ${selectedM.lateCount > 0 ? "text-amber-400" : themeClass.textMuted}`}>
                           {selectedM.lateCount} {translations.latePunches || "late punch(es)"}
                         </span>
-                      </div>
+                      </motion.div>
                     </div>
                   </div>
 
@@ -2642,7 +2725,10 @@ export default function WorkerDashboard({
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                       {/* Daily Card */}
-                      <div 
+                      <motion.div 
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.3, delay: 0.05 }}
                         onClick={() => setWorkerTimeframe("daily")}
                         className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between ${themeClass.innerBg} ${
                           workerTimeframe === "daily" 
@@ -2668,10 +2754,13 @@ export default function WorkerDashboard({
                           <span>{dailyM.attendedDays}/{dailyM.expectedDays} {translations.days || "days"}</span>
                           <span>{dailyM.lateCount} {translations.late || "late"}</span>
                         </div>
-                      </div>
+                      </motion.div>
 
                       {/* Weekly Card */}
-                      <div 
+                      <motion.div 
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.3, delay: 0.1 }}
                         onClick={() => setWorkerTimeframe("weekly")}
                         className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between ${themeClass.innerBg} ${
                           workerTimeframe === "weekly" 
@@ -2697,10 +2786,13 @@ export default function WorkerDashboard({
                           <span>{weeklyM.attendedDays}/{weeklyM.expectedDays} {translations.days || "days"}</span>
                           <span>{weeklyM.lateCount} {translations.late || "late"}</span>
                         </div>
-                      </div>
+                      </motion.div>
 
                       {/* Monthly Card */}
-                      <div 
+                      <motion.div 
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.3, delay: 0.15 }}
                         onClick={() => setWorkerTimeframe("monthly")}
                         className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between ${themeClass.innerBg} ${
                           workerTimeframe === "monthly" 
@@ -2726,10 +2818,13 @@ export default function WorkerDashboard({
                           <span>{monthlyM.attendedDays}/{monthlyM.expectedDays} {translations.days || "days"}</span>
                           <span>{monthlyM.lateCount} {translations.late || "late"}</span>
                         </div>
-                      </div>
+                      </motion.div>
 
                       {/* Yearly Card */}
-                      <div 
+                      <motion.div 
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.3, delay: 0.2 }}
                         onClick={() => setWorkerTimeframe("yearly")}
                         className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between ${themeClass.innerBg} ${
                           workerTimeframe === "yearly" 
@@ -2755,7 +2850,7 @@ export default function WorkerDashboard({
                           <span>{yearlyM.attendedDays}/{yearlyM.expectedDays} {translations.days || "days"}</span>
                           <span>{yearlyM.lateCount} {translations.late || "late"}</span>
                         </div>
-                      </div>
+                      </motion.div>
 
                       {/* Cumulative All-Time Card */}
                       <div className={`p-4 rounded-2xl border flex flex-col justify-between sm:col-span-2 lg:col-span-2 ${themeClass.innerBg} ${themeClass.accentBorder}`}>

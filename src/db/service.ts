@@ -493,6 +493,18 @@ export async function getUserByUid(uid: string): Promise<User | undefined> {
   }
 }
 
+export async function getUserByEmail(email: string): Promise<User | undefined> {
+  if (!isPgConfigured()) return undefined;
+  try {
+    const clean = email.trim().toLowerCase();
+    const all = await db.select().from(users);
+    return all.find(u => u.email && u.email.toLowerCase() === clean) as User | undefined;
+  } catch (error) {
+    console.error(`Failed to fetch user by email ${email}:`, error);
+    return undefined;
+  }
+}
+
 export async function upsertUser(userData: User): Promise<User> {
   try {
     const val = mapUser(userData);

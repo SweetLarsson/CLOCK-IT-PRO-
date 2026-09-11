@@ -28,11 +28,47 @@ import {
   CentralAnnouncement,
   AnnouncementFeedbackSubmission
 } from "./src/types.js";
+import crypto from "crypto";
+import { isPgConfigured } from "./src/db/index.js";
 import { 
   seedPostgresDatabase, 
   syncStateToPostgres, 
-  getFullDBStateFromPostgres 
+  getFullDBStateFromPostgres,
+  getUserByEmail,
+  upsertUser
 } from "./src/db/service.js";
+
+// Cryptographically secure password hashing (scrypt) & verification
+// Ensures passwords are NEVER stored in plain text and prevents unauthorized alterations
+function hashPassword(password: string): string {
+  if (!password) return "";
+  if (password.startsWith("scrypt:")) return password;
+  const salt = crypto.randomBytes(16).toString("hex");
+  const hash = crypto.scryptSync(password, salt, 64).toString("hex");
+  return `scrypt:${salt}:${hash}`;
+}
+
+function verifyPassword(password: string, storedHash: string): boolean {
+  if (!password || !storedHash) return false;
+  if (storedHash.startsWith("scrypt:")) {
+    const parts = storedHash.split(":");
+    if (parts.length === 3) {
+      const salt = parts[1];
+      const expectedHash = parts[2];
+      try {
+        const derivedHash = crypto.scryptSync(password, salt, 64).toString("hex");
+        return crypto.timingSafeEqual(
+          Buffer.from(expectedHash, "hex"),
+          Buffer.from(derivedHash, "hex")
+        );
+      } catch (e) {
+        return false;
+      }
+    }
+  }
+  // Safe comparison for legacy plain-text passwords during seamless migration
+  return password === storedHash;
+}
 
 const app = express();
 const PORT = 3000;
@@ -96,10 +132,91 @@ function loadDB(): DBState {
 }
 
 function saveDB(state: DBState) {
-  fs.writeFileSync(DB_FILE, JSON.stringify(state, null, 2), "utf8");
-  syncStateToPostgres(state).catch((err) => {
-    console.error("Error in background PostgreSQL sync:", err);
-  });
+  try {
+    fs.writeFileSync(DB_FILE, JSON.stringify(state, null, 2), "utf8");
+  } catch (err) {
+    console.error("Error writing DB_FILE:", err);
+  }
+  if (isPgConfigured()) {
+    syncStateToPostgres(state).catch((err) => {
+      console.error("Error in background PostgreSQL sync:", err);
+    });
+  }
+}
+
+// Awaited database persistence for critical auth & worker registration records
+async function persistDB(state: DBState): Promise<void> {
+  try {
+    fs.writeFileSync(DB_FILE, JSON.stringify(state, null, 2), "utf8");
+  } catch (err) {
+    console.error("Error writing DB_FILE in persistDB:", err);
+  }
+  if (isPgConfigured()) {
+    try {
+      await syncStateToPostgres(state);
+    } catch (err) {
+      console.error("Error syncing state to PostgreSQL in persistDB:", err);
+    }
+  }
+}
+
+// Seamlessly merges database states without ever deleting users or overwriting valid passwords
+function mergeDBStates(local: DBState, remote: DBState): DBState {
+  const merged: DBState = { ...local };
+
+  // 1. Merge users safely - never overwrite an existing password with null or undefined
+  const userMap = new Map<string, User>();
+  for (const u of local.users || []) {
+    userMap.set(u.id, u);
+  }
+  for (const u of remote.users || []) {
+    const existing = userMap.get(u.id);
+    if (!existing) {
+      userMap.set(u.id, u);
+    } else {
+      userMap.set(u.id, {
+        ...existing,
+        ...u,
+        password: (u.password && u.password.trim()) ? u.password : existing.password
+      });
+    }
+  }
+  merged.users = Array.from(userMap.values());
+
+  // 2. Merge tenants
+  const tenantMap = new Map<string, Tenant>();
+  for (const t of local.tenants || []) tenantMap.set(t.id, t);
+  for (const t of remote.tenants || []) tenantMap.set(t.id, t);
+  merged.tenants = Array.from(tenantMap.values());
+
+  // 3. Merge departments
+  const deptMap = new Map<string, Department>();
+  for (const d of local.departments || []) deptMap.set(d.id, d);
+  for (const d of remote.departments || []) deptMap.set(d.id, d);
+  merged.departments = Array.from(deptMap.values());
+
+  // 4. Merge attendance
+  const attMap = new Map<string, Attendance>();
+  for (const a of local.attendance || []) attMap.set(a.id, a);
+  for (const a of remote.attendance || []) attMap.set(a.id, a);
+  merged.attendance = Array.from(attMap.values());
+
+  // 5. Merge notifications
+  const notifMap = new Map<string, Notification>();
+  for (const n of local.notifications || []) notifMap.set(n.id, n);
+  for (const n of remote.notifications || []) notifMap.set(n.id, n);
+  merged.notifications = Array.from(notifMap.values());
+
+  // 6. Merge permissions
+  const permMap = new Map<string, Permission>();
+  for (const p of local.permissions || []) permMap.set(p.id, p);
+  for (const p of remote.permissions || []) permMap.set(p.id, p);
+  merged.permissions = Array.from(permMap.values());
+
+  if (remote.settings && remote.settings.length > 0) merged.settings = remote.settings;
+  if (remote.subscriptions && remote.subscriptions.length > 0) merged.subscriptions = remote.subscriptions;
+
+  return merged;
 }
 
 function formatDurationHHMMSS(totalSeconds: number | null | undefined): string {
@@ -493,18 +610,54 @@ function getInitialState(): DBState {
 // Ensure database file loaded and sync/seed with PostgreSQL
 let db = loadDB();
 
-seedPostgresDatabase(db).then(async () => {
-  try {
-    const pgState = await getFullDBStateFromPostgres(db.tenants[0]?.id || "default-tenant");
-    if (pgState && pgState.tenants && pgState.tenants.length > 0) {
-      db = pgState;
-      saveDB(db);
-    }
-  } catch (e: any) {
-    console.warn("Initial load from PostgreSQL skipped:", e?.message || e);
+let dbReadyPromise: Promise<void> | null = null;
+function ensureDbReady(): Promise<void> {
+  if (!dbReadyPromise) {
+    dbReadyPromise = (async () => {
+      if (isPgConfigured()) {
+        try {
+          await seedPostgresDatabase(db);
+          const pgState = await getFullDBStateFromPostgres(db.tenants[0]?.id || "default-tenant");
+          if (pgState && pgState.tenants && pgState.tenants.length > 0) {
+            db = mergeDBStates(db, pgState);
+            // Migrate any plain text passwords to secure scrypt hashes
+            let migrated = false;
+            for (const u of db.users) {
+              if (u.password && !u.password.startsWith("scrypt:")) {
+                u.password = hashPassword(u.password);
+                migrated = true;
+              }
+            }
+            if (migrated) {
+              await persistDB(db);
+            } else {
+              saveDB(db);
+            }
+          }
+        } catch (e: any) {
+          console.warn("ensureDbReady initial PostgreSQL load:", e?.message || e);
+        }
+      } else {
+        // Even without Postgres, migrate plain text passwords to scrypt hashes locally
+        let migrated = false;
+        for (const u of db.users) {
+          if (u.password && !u.password.startsWith("scrypt:")) {
+            u.password = hashPassword(u.password);
+            migrated = true;
+          }
+        }
+        if (migrated) {
+          saveDB(db);
+        }
+      }
+    })();
   }
-}).catch((err) => {
-  console.warn("PostgreSQL boot sync skipped (database connection unavailable):", err?.message || err);
+  return dbReadyPromise;
+}
+
+// Trigger initialization on startup
+ensureDbReady().catch((err) => {
+  console.warn("Database initialization caught error:", err?.message || err);
 });
 
 // ---------------- SERVER ENDPOINTS ----------------
@@ -548,7 +701,7 @@ app.get("/api/admin/system-health", async (req, res) => {
 });
 
 // SERVER-SENT EVENTS
-app.get("/api/events/subscribe", (req, res) => {
+app.get(["/api/events", "/api/events/subscribe"], (req, res) => {
   const tenant_id = req.query.tenant_id as string;
   if (!tenant_id) {
     res.status(400).send("tenant_id required");
@@ -607,12 +760,13 @@ app.post("/api/billing/pre-register", (req, res) => {
   return res.json({ success: true, token: tokenId });
 });
 
-app.post("/api/auth/register-company", (req, res) => {
+app.post("/api/auth/register-company", async (req, res) => {
   const { companyName, email, phone, password, subscriptionToken } = req.body;
   if (!companyName || !email || !phone || !password) {
     return res.status(400).json({ error: "All registration fields are required" });
   }
 
+  await ensureDbReady();
   db = loadDB();
   db.pendingSubscriptions = db.pendingSubscriptions || [];
 
@@ -670,6 +824,8 @@ app.post("/api/auth/register-company", (req, res) => {
     createdAt: new Date().toISOString()
   };
 
+  const hashedPassword = hashPassword(password);
+
   const newAdmin: User = {
     id: user_id,
     tenant_id,
@@ -679,7 +835,7 @@ app.post("/api/auth/register-company", (req, res) => {
     phone,
     role: UserRole.COMPANY_ADMIN,
     status: "active",
-    password,
+    password: hashedPassword,
     createdAt: new Date().toISOString()
   };
 
@@ -768,17 +924,26 @@ app.post("/api/auth/register-company", (req, res) => {
     details: `Registered company ${companyName} with active subscription plan ${chosenPlan}`
   });
 
-  saveDB(db);
+  await persistDB(db);
+  if (isPgConfigured()) {
+    try {
+      await upsertUser(newAdmin);
+    } catch (e) {
+      console.warn("Could not direct-upsert admin in register-company:", e);
+    }
+  }
 
-  return res.json({ success: true, user: newAdmin, tenant: newTenant, subscription: newSub });
+  const { password: _pwd, ...safeAdmin } = newAdmin;
+  return res.json({ success: true, user: safeAdmin, tenant: newTenant, subscription: newSub });
 });
 
-app.post("/api/auth/register-worker", (req, res) => {
+app.post("/api/auth/register-worker", async (req, res) => {
   const { firstName, lastName, phone, email, password, companyId, registeredViaQr, department_id, gender } = req.body;
   if (!firstName || !lastName || !phone || !email || !password || !companyId) {
     return res.status(400).json({ error: "All worker registration fields are required" });
   }
 
+  await ensureDbReady();
   db = loadDB();
 
   // Validate company existence with robust fuzzy name OR correct ID lookup
@@ -791,8 +956,15 @@ app.post("/api/auth/register-worker", (req, res) => {
   }
   const actualCompanyId = parentTenant.id;
 
-  // Validate emails
-  const emailExists = db.users.some(u => u.email.toLowerCase() === email.toLowerCase());
+  // Validate emails across both local memory and PostgreSQL
+  const cleanEmail = email.trim().toLowerCase();
+  let emailExists = db.users.some(u => u.email.toLowerCase() === cleanEmail);
+  if (!emailExists && isPgConfigured()) {
+    try {
+      const pgUser = await getUserByEmail(cleanEmail);
+      if (pgUser) emailExists = true;
+    } catch (e) {}
+  }
   if (emailExists) {
     return res.status(400).json({ error: "Email address already exists in database" });
   }
@@ -818,6 +990,7 @@ app.post("/api/auth/register-worker", (req, res) => {
     return res.status(400).json({ error: "Password fails security matrix policies" });
   }
 
+  const hashedPassword = hashPassword(password);
   const user_id = "user-" + Math.random().toString(36).substring(2, 11);
   const defaultDept = db.departments.find(d => d.tenant_id === actualCompanyId);
 
@@ -840,7 +1013,7 @@ app.post("/api/auth/register-worker", (req, res) => {
     role: UserRole.TEAM_MEMBER,
     department_id: assignedDeptId || (defaultDept ? defaultDept.id : undefined),
     status: "active",
-    password,
+    password: hashedPassword,
     gender,
     title: "Associated Worker",
     createdAt: new Date().toISOString(),
@@ -923,7 +1096,14 @@ app.post("/api/auth/register-worker", (req, res) => {
     details: `Worker ${firstName} ${lastName} auto checked-in upon successful portal registration (audited against Active Admin settings).`
   });
 
-  saveDB(db);
+  await persistDB(db);
+  if (isPgConfigured()) {
+    try {
+      await upsertUser(newWorker);
+    } catch (e) {
+      console.warn("Could not direct-upsert worker in register-worker:", e);
+    }
+  }
 
   // Broadcast real-time entry sync to admin dashboard
   broadcastToTenant(actualCompanyId, "WORKER_REGISTERED", {
@@ -944,27 +1124,67 @@ app.post("/api/auth/register-worker", (req, res) => {
     notification: notif
   });
 
-  return res.json({ success: true, user: newWorker });
+  const { password: _wPwd, ...safeWorker } = newWorker;
+  return res.json({ success: true, user: safeWorker });
 });
 
-app.post("/api/auth/login", (req, res) => {
+app.post("/api/auth/login", async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
     return res.status(400).json({ error: "Email and password are required" });
   }
 
+  await ensureDbReady();
   db = loadDB();
+  const cleanEmail = email.trim().toLowerCase();
 
   // Find user by email (case-insensitive)
-  const user = db.users.find(u => u.email.toLowerCase() === email.toLowerCase());
+  let user = db.users.find(u => u.email.toLowerCase() === cleanEmail);
+
+  // Fallback: If not found in local memory or file store, query PostgreSQL directly
+  if (!user && isPgConfigured()) {
+    try {
+      const pgUser = await getUserByEmail(cleanEmail);
+      if (pgUser) {
+        user = pgUser;
+        db.users.push(user);
+        saveDB(db);
+      }
+    } catch (e) {
+      console.warn("Direct PostgreSQL lookup error during login:", e);
+    }
+  }
+
   if (!user) {
     return res.status(401).json({ error: "Invalid credentials recorded" });
   }
 
-  // Strictly validate assigned password
+  // Strictly validate assigned password using secure scrypt verification
   const expectedPassword = user.password || "Password123!";
-  if (password !== expectedPassword) {
+  let isMatch = verifyPassword(password, expectedPassword);
+
+  // If match failed, verify if PostgreSQL has an updated password for this user
+  if (!isMatch && isPgConfigured()) {
+    try {
+      const pgUser = await getUserByEmail(cleanEmail);
+      if (pgUser && pgUser.password && verifyPassword(password, pgUser.password)) {
+        isMatch = true;
+        user.password = pgUser.password;
+        saveDB(db);
+      }
+    } catch (e) {
+      console.warn("PostgreSQL re-check lookup error during login:", e);
+    }
+  }
+
+  if (!isMatch) {
     return res.status(401).json({ error: "Invalid email or password. Please verify your credentials and try again." });
+  }
+
+  // Auto-upgrade plain-text password to scrypt hash for persistent security
+  if (user.password && !user.password.startsWith("scrypt:")) {
+    user.password = hashPassword(password);
+    await persistDB(db);
   }
 
   if (user.status !== "active") {
@@ -991,13 +1211,28 @@ app.post("/api/auth/login", (req, res) => {
     timestamp: new Date().toISOString()
   });
 
+  // Never leak password hash to client session
+  const { password: _p, ...safeUser } = user;
+
   return res.json({
     success: true,
-    user,
+    user: safeUser,
     tenant,
     settings,
     subscription
   });
+});
+
+// Explicit session termination endpoint
+app.post("/api/auth/logout", (req, res) => {
+  const { user_id, tenant_id } = req.body || {};
+  if (user_id && tenant_id) {
+    broadcastToTenant(tenant_id, "USER_SIGNED_OUT", {
+      user_id,
+      timestamp: new Date().toISOString()
+    });
+  }
+  return res.json({ success: true, message: "Session terminated successfully" });
 });
 
 // Resend Email Client Lazy Initializer
@@ -1164,7 +1399,7 @@ app.post("/api/auth/forgot-password", async (req, res) => {
 });
 
 // RESEND API: RESET PASSWORD VERIFY & COMMIT
-app.post("/api/auth/reset-password", (req, res) => {
+app.post("/api/auth/reset-password", async (req, res) => {
   const { email, resetCode, newPassword } = req.body;
   if (!email || !resetCode || !newPassword) {
     return res.status(400).json({ error: "Email, 6-digit reset PIN, and new password are all required." });
@@ -1201,13 +1436,28 @@ app.post("/api/auth/reset-password", (req, res) => {
     });
   }
 
+  await ensureDbReady();
   db = loadDB();
-  const user = db.users.find(u => u.email.toLowerCase() === cleanEmail);
+  let user = db.users.find(u => u.email.toLowerCase() === cleanEmail);
+
+  if (!user && isPgConfigured()) {
+    try {
+      const pgUser = await getUserByEmail(cleanEmail);
+      if (pgUser) {
+        user = pgUser;
+        db.users.push(user);
+      }
+    } catch (e) {
+      console.warn("PostgreSQL lookup error during reset-password:", e);
+    }
+  }
+
   if (!user) {
     return res.status(404).json({ error: "User account not found." });
   }
 
-  user.password = newPassword;
+  // Cryptographically hash new password before storage
+  user.password = hashPassword(newPassword);
   pendingResets.delete(cleanEmail);
 
   db.auditLogs.push({
@@ -1218,7 +1468,15 @@ app.post("/api/auth/reset-password", (req, res) => {
     timestamp: new Date().toISOString(),
     details: `Password was successfully reset for account ${cleanEmail}.`
   });
-  saveDB(db);
+
+  await persistDB(db);
+  if (isPgConfigured()) {
+    try {
+      await upsertUser(user);
+    } catch (e) {
+      console.warn("Direct upsertUser on reset-password:", e);
+    }
+  }
 
   return res.json({
     success: true,
@@ -1666,22 +1924,35 @@ app.get("/api/tenant/workers", (req, res) => {
     }
   }
 
-  return res.json({ workers });
+  const safeWorkers = workers.map(w => {
+    const { password: _p, ...safe } = w;
+    return safe;
+  });
+  return res.json({ workers: safeWorkers });
 });
 
 // WORKER CRUD ENDPOINTS
-app.post("/api/tenant/workers/add", (req, res) => {
+app.post("/api/tenant/workers/add", async (req, res) => {
   const { tenant_id, firstName, lastName, email, phone, role, department_id, gender, activityDays } = req.body;
   if (!tenant_id || !firstName || !lastName || !email) {
     return res.status(400).json({ error: "Required fields: tenant_id, firstName, lastName, email" });
   }
 
+  await ensureDbReady();
   db = loadDB();
-  const emailExists = db.users.some(u => u.email.toLowerCase() === email.toLowerCase());
+  const cleanEmail = email.trim().toLowerCase();
+  let emailExists = db.users.some(u => u.email.toLowerCase() === cleanEmail);
+  if (!emailExists && isPgConfigured()) {
+    try {
+      const pgUser = await getUserByEmail(cleanEmail);
+      if (pgUser) emailExists = true;
+    } catch (e) {}
+  }
   if (emailExists) {
     return res.status(400).json({ error: "Email address already exists" });
   }
 
+  const hashedPassword = hashPassword(req.body.password || "Password123!");
   const user_id = "user-" + Math.random().toString(36).substring(2, 11);
   const newWorker: User = {
     id: user_id,
@@ -1693,7 +1964,7 @@ app.post("/api/tenant/workers/add", (req, res) => {
     role: role || UserRole.TEAM_MEMBER,
     department_id: department_id || undefined,
     status: "active",
-    password: req.body.password || "Password123!",
+    password: hashedPassword,
     gender: gender || "Not Specified",
     createdAt: new Date().toISOString(),
     activityDays: activityDays || undefined,
@@ -1711,18 +1982,27 @@ app.post("/api/tenant/workers/add", (req, res) => {
     details: `Admin added worker ${firstName} ${lastName} (${email})`
   });
 
-  saveDB(db);
+  await persistDB(db);
+  if (isPgConfigured()) {
+    try {
+      await upsertUser(newWorker);
+    } catch (e) {
+      console.warn("Direct upsertUser on workers/add:", e);
+    }
+  }
 
-  broadcastToTenant(tenant_id, "WORKERS_UPDATED", { action: "add", worker: newWorker });
-  return res.json({ success: true, worker: newWorker });
+  const { password: _p, ...safeWorker } = newWorker;
+  broadcastToTenant(tenant_id, "WORKERS_UPDATED", { action: "add", worker: safeWorker });
+  return res.json({ success: true, worker: safeWorker });
 });
 
-app.post("/api/tenant/workers/update", (req, res) => {
+app.post("/api/tenant/workers/update", async (req, res) => {
   const { tenant_id, worker_id, firstName, lastName, email, phone, role, department_id, status, gender, activityDays, profilePhoto, profilePhotos } = req.body;
   if (!tenant_id || !worker_id) {
     return res.status(400).json({ error: "tenant_id and worker_id are required" });
   }
 
+  await ensureDbReady();
   db = loadDB();
   const workerIdx = db.users.findIndex(u => u.id === worker_id && u.tenant_id === tenant_id);
   if (workerIdx === -1) {
@@ -1759,7 +2039,9 @@ app.post("/api/tenant/workers/update", (req, res) => {
   }
   if (status !== undefined) existing.status = status;
   if (gender !== undefined) existing.gender = gender;
-  if (req.body.password !== undefined && req.body.password) existing.password = req.body.password;
+  if (req.body.password !== undefined && req.body.password) {
+    existing.password = hashPassword(req.body.password);
+  }
   if (activityDays !== undefined) existing.activityDays = activityDays;
   if (profilePhoto !== undefined) existing.profilePhoto = profilePhoto;
   if (profilePhotos !== undefined) existing.profilePhoto = profilePhotos;
@@ -1805,10 +2087,18 @@ app.post("/api/tenant/workers/update", (req, res) => {
     details: `Admin updated worker ${existing.firstName} ${existing.lastName}`
   });
 
-  saveDB(db);
+  await persistDB(db);
+  if (isPgConfigured()) {
+    try {
+      await upsertUser(existing);
+    } catch (e) {
+      console.warn("Direct upsertUser on workers/update:", e);
+    }
+  }
 
-  broadcastToTenant(tenant_id, "WORKERS_UPDATED", { action: "update", worker: existing });
-  return res.json({ success: true, worker: existing });
+  const { password: _p, ...safeWorker } = existing;
+  broadcastToTenant(tenant_id, "WORKERS_UPDATED", { action: "update", worker: safeWorker });
+  return res.json({ success: true, worker: safeWorker });
 });
 
 app.post("/api/tenant/workers/delete", (req, res) => {
@@ -3145,13 +3435,20 @@ function runAutoCheckout() {
 // Get announcements for a tenant
 app.get("/api/tenant/announcements", (req, res) => {
   try {
-    const tenant_id = (req.query.tenant_id as string) || "default-tenant";
+    let tenant_id = (req.query.tenant_id as string) || "default-tenant";
+    if (tenant_id === "undefined" || !tenant_id) {
+      tenant_id = db.tenants?.[0]?.id || "default-tenant";
+    }
     db.announcements = db.announcements || [];
-    const tenantAnnouncements = db.announcements
-      .filter((a) => a.tenant_id === tenant_id)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const tenantAnnouncements = (db.announcements || [])
+      .filter((a) => a && (a.tenant_id === tenant_id || (!a.tenant_id && (tenant_id === "default-tenant" || tenant_id === "demo_tenant"))))
+      .sort((a, b) => {
+        const timeB = b?.createdAt ? new Date(b.createdAt).getTime() : 0;
+        const timeA = a?.createdAt ? new Date(a.createdAt).getTime() : 0;
+        return timeB - timeA;
+      });
     
-    const activeAnnouncement = tenantAnnouncements.find((a) => a.isActive) || null;
+    const activeAnnouncement = tenantAnnouncements.find((a) => a && a.isActive) || null;
     res.json({
       success: true,
       announcements: tenantAnnouncements,
@@ -3337,7 +3634,12 @@ app.post("/api/tenant/announcements/:id/respond", (req, res) => {
     broadcastToTenant(tenant_id, "ANNOUNCEMENT_FEEDBACK_RECEIVED", {
       announcement_id: id,
       submission,
-      totalSubmissions: announcement.feedbackSubmissions.length
+      totalSubmissions: announcement.feedbackSubmissions.length,
+      announcement
+    });
+    broadcastToTenant(tenant_id, "ANNOUNCEMENT_UPDATED", {
+      action: "respond",
+      announcement
     });
 
     res.json({

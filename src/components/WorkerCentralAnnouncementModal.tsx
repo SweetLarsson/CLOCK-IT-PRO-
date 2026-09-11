@@ -49,6 +49,15 @@ export const WorkerCentralAnnouncementModal: React.FC<WorkerCentralAnnouncementM
   const [isSubmittedSuccess, setIsSubmittedSuccess] = React.useState(false);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
 
+  React.useEffect(() => {
+    if (!announcement || !announcement.isActive) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [announcement]);
+
   if (!announcement || !announcement.isActive) return null;
 
   const isFormType = announcement.type === "form";
@@ -124,10 +133,10 @@ export const WorkerCentralAnnouncementModal: React.FC<WorkerCentralAnnouncementM
         exit={{ opacity: 0, scale: 0.92, y: 20 }}
         transition={{ duration: 0.25 }}
         onClick={(e) => e.stopPropagation()}
-        className={`w-full max-w-lg rounded-3xl border shadow-2xl overflow-hidden ${themeClass.cardBg} ${themeClass.accentBorder}`}
+        className={`w-full max-w-lg max-h-[calc(100dvh-4rem)] flex flex-col rounded-3xl border shadow-2xl overflow-hidden ${themeClass.cardBg} ${themeClass.accentBorder}`}
       >
         {/* Header Bar */}
-        <div className={`p-5 sm:p-6 border-b flex items-center justify-between ${themeClass.innerBg} ${themeClass.accentBorder}`}>
+        <div className={`p-5 sm:p-6 border-b flex items-center justify-between shrink-0 ${themeClass.innerBg} ${themeClass.accentBorder}`}>
           <div className="flex items-center space-x-3">
             <div className="h-10 w-10 rounded-2xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-white shadow-md shadow-cyan-500/25">
               <Megaphone className="h-5 w-5" />
@@ -145,7 +154,7 @@ export const WorkerCentralAnnouncementModal: React.FC<WorkerCentralAnnouncementM
           <button
             id="worker_announcement_dismiss_btn"
             onClick={onDismiss}
-            className={`h-8 w-8 rounded-xl flex items-center justify-center border transition-colors cursor-pointer ${themeClass.inputBg} ${themeClass.textMuted} hover:${themeClass.textTitle}`}
+            className={`h-8 w-8 rounded-xl flex items-center justify-center border transition-colors cursor-pointer shrink-0 ${themeClass.inputBg} ${themeClass.textMuted} hover:${themeClass.textTitle}`}
             title="Dismiss"
           >
             <X className="h-4 w-4" />
@@ -153,7 +162,7 @@ export const WorkerCentralAnnouncementModal: React.FC<WorkerCentralAnnouncementM
         </div>
 
         {/* Modal Body */}
-        <div className="p-5 sm:p-6 space-y-5">
+        <div className="p-5 sm:p-6 space-y-5 overflow-y-auto flex-1">
           {/* Priority indicator if urgent or important */}
           {announcement.priority && announcement.priority !== "normal" && (
             <div className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center space-x-2 ${

@@ -11723,17 +11723,18 @@ export default function AdminDashboard({
         })()}
       </AnimatePresence>
 
-      {/* Floating Application Central Announcement Button (Bottom Right - Icon only) */}
+      {/* Floating Application Central Announcement Button (Bottom Right - Circular, stationary container with no border, animated icon on hover) */}
       <div className="fixed bottom-6 right-6 z-40">
         <button
           id="admin_floating_announcement_btn"
           type="button"
           onClick={() => setIsAnnouncementModalOpen(true)}
-          className="h-13 w-13 sm:h-14 sm:w-14 rounded-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-2xl shadow-cyan-950/60 hover:shadow-cyan-500/40 active:scale-95 transition-all cursor-pointer flex items-center justify-center border border-cyan-400/40"
+          className="group relative w-14 h-14 aspect-square rounded-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-2xl shadow-cyan-950/60 hover:shadow-cyan-500/50 cursor-pointer flex items-center justify-center border-0 border-none select-none overflow-hidden shrink-0 outline-none"
           title="Application Central Announcement"
           aria-label="Application Central Announcement"
         >
-          <Megaphone className="h-5 w-5 sm:h-6 sm:w-6" />
+          <span className="absolute inset-0 rounded-full bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+          <Megaphone className="h-6 w-6 relative z-10 transition-transform duration-300 ease-out group-hover:scale-125 group-hover:-rotate-12 shrink-0" />
         </button>
       </div>
 
@@ -11741,7 +11742,7 @@ export default function AdminDashboard({
       <ApplicationCentralAnnouncementModal
         isOpen={isAnnouncementModalOpen}
         onClose={() => setIsAnnouncementModalOpen(false)}
-        tenantId={tenant.id}
+        tenantId={tenant?.id || currentTenant?.id || "default-tenant"}
         adminThemeClass={adminThemeClass}
         isDarkMode={isDark}
         theme={theme}

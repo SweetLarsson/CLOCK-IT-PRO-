@@ -14,6 +14,7 @@ import {
   Globe, 
   Smartphone, 
   ShieldAlert, 
+  Megaphone,
   ChevronDown, 
   ArrowRight,
   Play,
@@ -109,6 +110,11 @@ export default function LandingPage({ onStartTrial, onNavigateLogin, translation
       desc: translations.featQrDesc
     },
     {
+      icon: <Megaphone className="h-6 w-6 text-cyan-400" />,
+      title: "Central Announcement & Live Pulse",
+      desc: "Broadcast company-wide bulletins, image alerts, and interactive feedback forms with instant real-time worker response synchronization."
+    },
+    {
       icon: <BarChart3 className="h-6 w-6 text-teal-500" />,
       title: translations.featAnalytics,
       desc: translations.featAnalyticsDesc
@@ -146,6 +152,15 @@ export default function LandingPage({ onStartTrial, onNavigateLogin, translation
   ];
 
   const faqs = [
+    {
+      q: "How do Central Announcements work and how are worker responses synchronized?",
+      solutions: [
+        "Instant Workforce Broadcasts: Administrators can broadcast rich notices, image bulletins, or structured feedback forms with 1-5 star ratings directly from the dashboard.",
+        "Live Real-Time Synchronization: Worker responses, qualitative feedback, and rating submissions synchronize immediately to the Admin Active Live tab via Server-Sent Events.",
+        "Acknowledge & Engagement Counters: Real-time statistics track worker acknowledgments and compute live satisfaction averages without page refreshes.",
+        "Historical Broadcast Archive: Past announcements remain securely archived and can be reviewed, reactivated, or audited at any time."
+      ]
+    },
     {
       q: "How often do authentication QR codes rotate & what are the security solutions?",
       solutions: [
@@ -249,6 +264,16 @@ export default function LandingPage({ onStartTrial, onNavigateLogin, translation
             "Anti-Geolocation spoofing: Integrates cellular grid validations to ensure workers check in inside geo-bounded workspace radii."
           ],
           outcomes: "Eliminate manual check-in overhead, bypass buddy-punching fraud entirely, and guarantee absolute payroll consistency."
+        };
+      case "Central Announcement & Live Pulse":
+        return {
+          subtitle: "Multi-Format Broadcast Engine & Instant Response Synchronization",
+          bullets: [
+            "Flexible Communication Formats: Broadcast rich company announcements with text, image notices, or interactive survey forms.",
+            "Instant Real-Time Synchronization: Worker acknowledgments, custom feedback, and 1-5 star ratings appear on the admin dashboard with zero delay.",
+            "Complete Archival Management: Manage active live announcements, toggle statuses, and audit historical employee feedback submissions."
+          ],
+          outcomes: "Bridge communication across dispersed workforces, assess operational sentiment instantaneously, and maintain verified acknowledgment trails."
         };
       case translations.featAnalytics:
         return {
@@ -555,7 +580,7 @@ export default function LandingPage({ onStartTrial, onNavigateLogin, translation
                   </li>
                   <li className="flex items-start space-x-2.5">
                     <span className="h-5 w-5 rounded-full bg-cyan-950 text-cyan-400 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5 border border-cyan-500/10">3</span>
-                    <span><strong className="text-white">Assess worker presence grids.</strong> Evaluate metrics & leaderboard statistics, and approve permission exemptions.</span>
+                    <span><strong className="text-white">Assess presence grids & broadcast announcements.</strong> Evaluate metrics, broadcast central announcements with interactive ratings, and approve permission exemptions.</span>
                   </li>
                 </ul>
               </div>
@@ -591,7 +616,7 @@ export default function LandingPage({ onStartTrial, onNavigateLogin, translation
                   </li>
                   <li className="flex items-start space-x-2.5">
                     <span className="h-5 w-5 rounded-full bg-blue-950 text-blue-400 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5 border border-blue-500/10">3</span>
-                    <span><strong className="text-white">Track metrics and request exemptions.</strong> View personal analytics, and upload optimized profile cards.</span>
+                    <span><strong className="text-white">Track metrics & respond to central announcements.</strong> View personal analytics, acknowledge broadcasts with real-time feedback, and request exemptions.</span>
                   </li>
                 </ul>
               </div>

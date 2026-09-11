@@ -72,41 +72,129 @@ export const ApplicationCentralAnnouncementModal: React.FC<ApplicationCentralAnn
   ]);
   const [selectedSubmission, setSelectedSubmission] = React.useState<AnnouncementFeedbackSubmission | null>(null);
 
+  // Helper to load offline cached announcements from localStorage
+  const loadCachedAnnouncements = React.useCallback((tId: string) => {
+    try {
+      const cachedList = localStorage.getItem(`app_announcements_${tId}`);
+      const cachedActive = localStorage.getItem(`app_active_announcement_${tId}`);
+      if (cachedList) {
+        const parsed = JSON.parse(cachedList);
+        if (Array.isArray(parsed)) {
+          setAnnouncements(parsed);
+        }
+      }
+      if (cachedActive) {
+        const parsed = JSON.parse(cachedActive);
+        if (parsed) {
+          setActiveAnnouncement(parsed);
+        }
+      }
+    } catch (e) {
+      // ignore parsing error
+    }
+  }, []);
+
   // Fetch announcements
   const fetchAnnouncements = React.useCallback(async () => {
+    const effectiveTenantId = tenantId || "default-tenant";
     try {
-      const res = await fetch(`/api/tenant/announcements?tenant_id=${tenantId}`);
+      const res = await fetch(`/api/tenant/announcements?tenant_id=${encodeURIComponent(effectiveTenantId)}`);
       if (res.ok) {
         const data = await res.json();
-        setAnnouncements(data.announcements || []);
-        setActiveAnnouncement(data.activeAnnouncement || null);
+        const annList = data.announcements || [];
+        const actAnn = data.activeAnnouncement || null;
+        setAnnouncements(annList);
+        setActiveAnnouncement(actAnn);
+
+        try {
+          localStorage.setItem(`app_announcements_${effectiveTenantId}`, JSON.stringify(annList));
+          if (actAnn) {
+            localStorage.setItem(`app_active_announcement_${effectiveTenantId}`, JSON.stringify(actAnn));
+          } else {
+            localStorage.removeItem(`app_active_announcement_${effectiveTenantId}`);
+          }
+        } catch (e) {}
+      } else {
+        loadCachedAnnouncements(effectiveTenantId);
       }
     } catch (err) {
-      console.error("Failed to load announcements:", err);
+      // Graceful offline fallback: load cached state without throwing unhandled error
+      loadCachedAnnouncements(effectiveTenantId);
     } finally {
       setIsLoading(false);
     }
-  }, [tenantId]);
+  }, [tenantId, loadCachedAnnouncements]);
+
+  const modalBodyRef = React.useRef<HTMLDivElement>(null);
+
+  const handleTabChange = (tab: "create" | "feedback" | "history") => {
+    setActiveTab(tab);
+    if (modalBodyRef.current) {
+      modalBodyRef.current.scrollTop = 0;
+    }
+  };
 
   React.useEffect(() => {
-    if (!isOpen || !tenantId) return;
+    if (!isOpen) return;
+    const effectiveTenantId = tenantId || "default-tenant";
+    loadCachedAnnouncements(effectiveTenantId);
     setIsLoading(true);
     fetchAnnouncements();
 
-    // Live fast-polling fallback (every 2 seconds) so acknowledgments reflect immediately
+    // Polling fallback every 5s while modal is open to ensure synchronization
     const interval = setInterval(() => {
-      fetchAnnouncements();
-    }, 2000);
+      if (document.visibilityState === "visible") {
+        fetchAnnouncements();
+      }
+    }, 5000);
 
     // Live Server-Sent Events listener for immediate real-time response updates
     let es: EventSource | null = null;
     try {
-      es = new EventSource(`/api/events?tenant_id=${tenantId}`);
+      es = new EventSource(`/api/events/subscribe?tenant_id=${encodeURIComponent(effectiveTenantId)}`);
+      es.onerror = () => {
+        // Handled gracefully: EventSource reconnects automatically
+      };
       const handleLiveUpdate = (e: MessageEvent) => {
         try {
           const data = JSON.parse(e.data);
           if (data?.announcement) {
-            setActiveAnnouncement(data.announcement);
+            setActiveAnnouncement((prev) => {
+              if (data.announcement.isActive) {
+                return data.announcement;
+              }
+              if (prev && prev.id === data.announcement.id) {
+                return null;
+              }
+              return prev;
+            });
+            setAnnouncements((prev) => {
+              const idx = prev.findIndex((a) => a.id === data.announcement.id);
+              if (idx >= 0) {
+                const next = [...prev];
+                next[idx] = data.announcement;
+                return next;
+              }
+              return [data.announcement, ...prev];
+            });
+          } else if (data?.submission && data?.announcement_id) {
+            setActiveAnnouncement((prev) => {
+              if (!prev || prev.id !== data.announcement_id) return prev;
+              const subs = prev.feedbackSubmissions || [];
+              const existsIdx = subs.findIndex(
+                (s) => s.id === data.submission.id || s.worker_id === data.submission.worker_id
+              );
+              const updatedSubs = existsIdx >= 0
+                ? subs.map((s, i) => (i === existsIdx ? data.submission : s))
+                : [data.submission, ...subs];
+              return {
+                ...prev,
+                feedbackSubmissions: updatedSubs,
+                acknowledgedWorkerIds: prev.acknowledgedWorkerIds?.includes(data.submission.worker_id)
+                  ? prev.acknowledgedWorkerIds
+                  : [...(prev.acknowledgedWorkerIds || []), data.submission.worker_id]
+              };
+            });
           }
           fetchAnnouncements();
         } catch (err) {
@@ -117,8 +205,9 @@ export const ApplicationCentralAnnouncementModal: React.FC<ApplicationCentralAnn
       es.addEventListener("ANNOUNCEMENT_ACKNOWLEDGED", handleLiveUpdate);
       es.addEventListener("ANNOUNCEMENT_FEEDBACK_RECEIVED", handleLiveUpdate);
       es.addEventListener("ANNOUNCEMENT_UPDATED", handleLiveUpdate);
+      es.onmessage = handleLiveUpdate;
     } catch (err) {
-      console.error("Failed to connect SSE for announcements:", err);
+      // Gracefully handle SSE connection failure
     }
 
     return () => {
@@ -127,7 +216,7 @@ export const ApplicationCentralAnnouncementModal: React.FC<ApplicationCentralAnn
         es.close();
       }
     };
-  }, [isOpen, tenantId, fetchAnnouncements]);
+  }, [isOpen, tenantId, fetchAnnouncements, loadCachedAnnouncements]);
 
   const handleImageFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -215,30 +304,45 @@ export const ApplicationCentralAnnouncementModal: React.FC<ApplicationCentralAnn
 
   const handleDeleteAnnouncement = async (id: string) => {
     if (!window.confirm("Are you sure you want to delete this announcement?")) return;
+    const effectiveTenantId = tenantId || "default-tenant";
+    // Optimistic local update
+    setAnnouncements((prev) => prev.filter((a) => a.id !== id));
+    setActiveAnnouncement((prev) => (prev && prev.id === id ? null : prev));
     try {
-      const res = await fetch(`/api/tenant/announcements/${id}?tenant_id=${tenantId}`, {
+      const res = await fetch(`/api/tenant/announcements/${id}?tenant_id=${encodeURIComponent(effectiveTenantId)}`, {
         method: "DELETE"
       });
       if (res.ok) {
         fetchAnnouncements();
       }
     } catch (err) {
-      console.error("Failed to delete announcement:", err);
+      console.warn("Notice: Delete announcement network issue, local deletion retained:", err);
     }
   };
 
   const handleToggleActive = async (id: string) => {
+    const effectiveTenantId = tenantId || "default-tenant";
+    // Optimistic local toggle
+    setAnnouncements((prev) =>
+      prev.map((a) => {
+        if (a.id === id) {
+          const newActive = !a.isActive;
+          return { ...a, isActive: newActive };
+        }
+        return a;
+      })
+    );
     try {
       const res = await fetch(`/api/tenant/announcements/${id}/toggle-active`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tenant_id: tenantId })
+        body: JSON.stringify({ tenant_id: effectiveTenantId })
       });
       if (res.ok) {
         fetchAnnouncements();
       }
     } catch (err) {
-      console.error("Failed to toggle announcement status:", err);
+      console.warn("Notice: Toggle announcement network issue:", err);
     }
   };
 
@@ -251,21 +355,30 @@ export const ApplicationCentralAnnouncementModal: React.FC<ApplicationCentralAnn
     ? (ratings.reduce((acc, curr) => acc + curr, 0) / ratings.length).toFixed(1)
     : "N/A";
 
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   return (
     <div
       id="admin_central_announcement_overlay"
-      className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
+      className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-start justify-center pt-8 sm:pt-12 md:pt-16 pb-8 px-3 sm:px-4 overflow-y-auto"
       onClick={onClose}
     >
       <motion.div
-        initial={{ opacity: 0, scale: 0.95, y: 15 }}
+        initial={{ opacity: 0, scale: 0.98, y: -10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.95, y: 15 }}
-        transition={{ duration: 0.2 }}
+        exit={{ opacity: 0, scale: 0.98, y: -10 }}
+        transition={{ duration: 0.22, ease: "easeOut" }}
         onClick={(e) => e.stopPropagation()}
-        className={`w-full max-w-md max-h-[82vh] flex flex-col rounded-3xl border shadow-2xl overflow-hidden ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+        className={`w-full max-w-[94vw] sm:max-w-lg md:max-w-[34rem] max-h-[calc(100dvh-5rem)] sm:max-h-[calc(100dvh-7rem)] md:max-h-[82vh] flex flex-col rounded-3xl border shadow-2xl overflow-hidden ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
       >
         {/* Modal Header */}
         <div className={`p-4 sm:p-5 border-b flex items-center justify-between shrink-0 ${adminThemeClass.accentBorder} ${adminThemeClass.innerBg}`}>
@@ -304,7 +417,7 @@ export const ApplicationCentralAnnouncementModal: React.FC<ApplicationCentralAnn
         <div className={`px-3.5 pt-2 pb-2 border-b flex items-center space-x-1.5 overflow-x-auto scrollbar-none shrink-0 ${adminThemeClass.accentBorder} ${adminThemeClass.innerBg}`}>
           <button
             id="announcement_tab_create"
-            onClick={() => setActiveTab("create")}
+            onClick={() => handleTabChange("create")}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 shrink-0 whitespace-nowrap ${
               activeTab === "create"
                 ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/30"
@@ -317,7 +430,7 @@ export const ApplicationCentralAnnouncementModal: React.FC<ApplicationCentralAnn
 
           <button
             id="announcement_tab_feedback"
-            onClick={() => setActiveTab("feedback")}
+            onClick={() => handleTabChange("feedback")}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 shrink-0 whitespace-nowrap ${
               activeTab === "feedback"
                 ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/30"
@@ -330,7 +443,7 @@ export const ApplicationCentralAnnouncementModal: React.FC<ApplicationCentralAnn
 
           <button
             id="announcement_tab_history"
-            onClick={() => setActiveTab("history")}
+            onClick={() => handleTabChange("history")}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 shrink-0 whitespace-nowrap ${
               activeTab === "history"
                 ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/30"
@@ -343,7 +456,7 @@ export const ApplicationCentralAnnouncementModal: React.FC<ApplicationCentralAnn
         </div>
 
         {/* Modal Body */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
+        <div ref={modalBodyRef} className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
           {feedbackSuccessMsg && (
             <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-medium flex items-center space-x-2.5">
               <CheckCircle2 className="h-4 w-4 shrink-0" />
@@ -653,12 +766,12 @@ export const ApplicationCentralAnnouncementModal: React.FC<ApplicationCentralAnn
                   {isSaving ? (
                     <>
                       <RefreshCw className="h-4 w-4 animate-spin" />
-                      <span>Broadcasting Announcement...</span>
+                      <span>Broadcasting...</span>
                     </>
                   ) : (
                     <>
                       <Send className="h-4 w-4" />
-                      <span>Broadcast Central Announcement</span>
+                      <span>Broadcast</span>
                     </>
                   )}
                 </button>
@@ -835,7 +948,7 @@ export const ApplicationCentralAnnouncementModal: React.FC<ApplicationCentralAnn
                     </p>
                   </div>
                   <button
-                    onClick={() => setActiveTab("create")}
+                    onClick={() => handleTabChange("create")}
                     className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-bold text-xs rounded-xl shadow-md cursor-pointer inline-flex items-center space-x-1.5"
                   >
                     <Plus className="h-3.5 w-3.5" />
