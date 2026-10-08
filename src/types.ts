@@ -64,6 +64,8 @@ export interface User {
   title?: string; // Team member / Team lead title
   createdAt: string;
   activityDays?: { [key: string]: boolean };
+  birthDay?: number; // 1 - 31 (day of birth only for celebrations)
+  birthMonth?: number; // 1 - 12 (month of birth only)
   deviceBinding?: {
     deviceId: string;
     boundAt: string;
@@ -73,6 +75,10 @@ export interface User {
       name: string;
       phone: string;
     };
+  };
+  preferences?: {
+    theme?: "light" | "dark" | "army" | "navy";
+    language?: "en" | "fr" | "es";
   };
 }
 
@@ -136,6 +142,13 @@ export interface Subscription {
   tenant_id: string;
   planCode: SubscriptionPlanCode;
   price: number;
+  originalPrice?: number;
+  discountPercent?: number;
+  discountAmount?: number;
+  durationMonths?: number;
+  durationKey?: string;
+  durationLabel?: string;
+  recurring?: boolean;
   status: "trial" | "active" | "expired";
   startDate: string;
   endDate: string;
@@ -165,6 +178,29 @@ export interface CheckOutSettings {
   soundEnabled: boolean;
 }
 
+export interface InternationalHoliday {
+  id: string;
+  name: string;
+  month: number; // 1 - 12
+  day: number; // 1 - 31
+  description: string;
+  enabled: boolean;
+  category?: string;
+}
+
+export interface CustomHoliday {
+  id: string;
+  name: string;
+  date: string; // YYYY-MM-DD or MM-DD
+  month: number; // 1 - 12
+  day: number; // 1 - 31
+  year?: number; // Optional specific year if not repeating
+  repeatsAnnually: boolean;
+  description: string;
+  enabled: boolean;
+  createdAt?: string;
+}
+
 export interface TenantSettings {
   tenant_id: string;
   theme: "light" | "dark" | "army" | "navy";
@@ -187,6 +223,11 @@ export interface TenantSettings {
   companyLogoUrl?: string;
   layout?: "top" | "side";
   sideNavCollapsed?: boolean;
+  // Holiday Management & Time Zone Configurations
+  holidayManagementEnabled?: boolean;
+  timezone?: string; // e.g. "Africa/Lagos", "America/New_York", "UTC"
+  internationalHolidays?: InternationalHoliday[];
+  customHolidays?: CustomHoliday[];
 }
 
 export interface ReportJob {

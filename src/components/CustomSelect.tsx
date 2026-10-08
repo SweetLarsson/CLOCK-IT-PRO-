@@ -53,19 +53,25 @@ export default function CustomSelect({
     const viewportHeight = window.innerHeight;
     const viewportWidth = window.innerWidth;
 
-    const spaceBelow = viewportHeight - rect.bottom - 16;
-    const spaceAbove = rect.top - 16;
+    // If completely scrolled out of view, close
+    if (rect.bottom < 0 || rect.top > viewportHeight) {
+      setIsOpen(false);
+      return;
+    }
+
+    const spaceBelow = Math.max(0, viewportHeight - rect.bottom - 12);
+    const spaceAbove = Math.max(0, rect.top - 12);
 
     // Determine whether to display above or below
-    // If space below is less than 240px and space above is greater than space below, flip above
-    const isPlacementAbove = spaceBelow < 240 && spaceAbove > spaceBelow;
+    // Intelligently flip above if space below is cramped (< 220px) and there is more space above
+    const isPlacementAbove = spaceBelow < 220 && spaceAbove > spaceBelow;
 
-    const maxHeight = Math.min(
-      300,
-      Math.max(120, isPlacementAbove ? spaceAbove - 12 : spaceBelow - 12)
-    );
+    const availableSpace = isPlacementAbove ? spaceAbove - 8 : spaceBelow - 8;
+    const maxHeight = Math.min(280, Math.max(100, availableSpace));
 
-    const width = rect.width;
+    // Ensure width matches field with minimum 160px for readability on narrow mobile viewports
+    const minWidth = Math.max(rect.width, 160);
+    const width = Math.min(minWidth, viewportWidth - 16);
     const left = Math.max(8, Math.min(rect.left, viewportWidth - width - 8));
 
     if (isPlacementAbove) {
@@ -100,12 +106,20 @@ export default function CustomSelect({
         updatePosition();
       };
 
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === "Escape") {
+          setIsOpen(false);
+        }
+      };
+
       window.addEventListener("scroll", handleScroll, true);
       window.addEventListener("resize", handleResize);
+      window.addEventListener("keydown", handleKeyDown);
 
       return () => {
         window.removeEventListener("scroll", handleScroll, true);
         window.removeEventListener("resize", handleResize);
+        window.removeEventListener("keydown", handleKeyDown);
       };
     }
   }, [isOpen, updatePosition]);
@@ -132,6 +146,16 @@ export default function CustomSelect({
     };
   }, [isOpen]);
 
+  // Scroll to selected option on open
+  useEffect(() => {
+    if (isOpen && dropdownRef.current) {
+      const selectedEl = dropdownRef.current.querySelector<HTMLElement>('[data-selected="true"]');
+      if (selectedEl) {
+        selectedEl.scrollIntoView({ block: "nearest" });
+      }
+    }
+  }, [isOpen]);
+
   const selectedOption = options.find((opt) => opt.value === value);
 
   // Expanded color theme configurations matching application styles perfectly
@@ -144,6 +168,7 @@ export default function CustomSelect({
       optionUnselected: string;
       separator: string;
       checkColor: string;
+      activeTrigger: string;
     }
   > = {
     army: {
@@ -153,7 +178,8 @@ export default function CustomSelect({
       optionHover: "text-[#E5F3DD] hover:bg-[#25361E]/80 rounded-xl",
       optionUnselected: "text-[#A0BCA2]",
       separator: "border-[#2D4222]",
-      checkColor: "text-emerald-400"
+      checkColor: "text-emerald-400",
+      activeTrigger: "border-emerald-500 ring-2 ring-emerald-500/30"
     },
     navy: {
       dropdownBg: "bg-[#111A35] border-[#202E5A] text-[#E1E8F0] shadow-2xl",
@@ -162,7 +188,8 @@ export default function CustomSelect({
       optionHover: "text-[#E1E8F0] hover:bg-[#243361]/70 rounded-xl",
       optionUnselected: "text-[#8DA9C4]",
       separator: "border-[#202E5A]",
-      checkColor: "text-cyan-400"
+      checkColor: "text-cyan-400",
+      activeTrigger: "border-cyan-500 ring-2 ring-cyan-500/30"
     },
     dark: {
       dropdownBg: "bg-[#0D0D0D] border-[#262626] text-white shadow-2xl",
@@ -171,7 +198,8 @@ export default function CustomSelect({
       optionHover: "text-white hover:bg-[#1A1A1A]/80 rounded-xl",
       optionUnselected: "text-neutral-400",
       separator: "border-[#262626]",
-      checkColor: "text-cyan-400"
+      checkColor: "text-cyan-400",
+      activeTrigger: "border-cyan-500 ring-2 ring-cyan-500/30"
     },
     light: {
       dropdownBg: "bg-white border-neutral-200 text-slate-900 shadow-xl",
@@ -180,7 +208,8 @@ export default function CustomSelect({
       optionHover: "text-slate-900 hover:bg-neutral-50 rounded-xl",
       optionUnselected: "text-slate-600",
       separator: "border-neutral-200",
-      checkColor: "text-cyan-600"
+      checkColor: "text-cyan-600",
+      activeTrigger: "border-cyan-500 ring-2 ring-cyan-500/30"
     }
   };
 
@@ -197,9 +226,9 @@ export default function CustomSelect({
         width: `${dropdownPosition.width}px`,
         maxHeight: `${dropdownPosition.maxHeight}px`,
         zIndex: 99999,
-        scrollbarWidth: "none"
+        scrollbarWidth: "thin"
       }}
-      className={`rounded-2xl p-1.5 overflow-y-auto border shadow-2xl select-none [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden ${currentTheme.dropdownBg} ${dropdownClassName}`}
+      className={`rounded-2xl p-1.5 overflow-y-auto border shadow-2xl select-none custom-dropdown-scroll ${currentTheme.dropdownBg} ${dropdownClassName}`}
     >
       {options.length === 0 ? (
         <div className={`text-center py-3 text-xs ${currentTheme.optionUnselected}`}>
@@ -214,6 +243,7 @@ export default function CustomSelect({
               <React.Fragment key={opt.value}>
                 <button
                   type="button"
+                  data-selected={isSelected ? "true" : undefined}
                   onClick={() => {
                     onChange(opt.value);
                     setIsOpen(false);
@@ -251,7 +281,9 @@ export default function CustomSelect({
           }
           setIsOpen(!isOpen);
         }}
-        className={`w-full flex items-center justify-between text-left transition-all relative border outline-none pr-9 cursor-pointer select-none ${className}`}
+        className={`w-full flex items-center justify-between text-left transition-all relative border outline-none pr-9 cursor-pointer select-none ${
+          isOpen ? currentTheme.activeTrigger : ""
+        } ${className}`}
       >
         <div className="truncate pr-1 w-full min-w-0 flex items-center">
           {selectedOption ? selectedOption.label : <span className="truncate">{placeholder}</span>}

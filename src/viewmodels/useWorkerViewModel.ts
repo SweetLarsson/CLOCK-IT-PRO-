@@ -153,7 +153,14 @@ export function useWorkerViewModel({
       if (resSettings.ok) {
         const dataSettings = await resSettings.json();
         if (dataSettings.settings && onSettingsChange) {
-          onSettingsChange(dataSettings.settings);
+          const workerTheme = user?.id ? (localStorage.getItem(`worker_theme_${user.id}`) || user?.preferences?.theme) : null;
+          const workerLang = user?.id ? (localStorage.getItem(`worker_lang_${user.id}`) || user?.preferences?.language) : null;
+          const effectiveSettings = {
+            ...dataSettings.settings,
+            ...(workerTheme ? { theme: workerTheme } : {}),
+            ...(workerLang ? { language: workerLang } : {}),
+          };
+          onSettingsChange(effectiveSettings);
         }
       }
 
@@ -194,7 +201,14 @@ export function useWorkerViewModel({
       try {
         const payload = JSON.parse(e.data);
         if (onSettingsChange) {
-          onSettingsChange(payload);
+          const workerTheme = user?.id ? (localStorage.getItem(`worker_theme_${user.id}`) || user?.preferences?.theme) : null;
+          const workerLang = user?.id ? (localStorage.getItem(`worker_lang_${user.id}`) || user?.preferences?.language) : null;
+          const effectiveSettings = {
+            ...payload,
+            ...(workerTheme ? { theme: workerTheme } : {}),
+            ...(workerLang ? { language: workerLang } : {}),
+          };
+          onSettingsChange(effectiveSettings);
         }
         syncWorkerLogs();
       } catch (err) {

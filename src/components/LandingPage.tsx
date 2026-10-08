@@ -5,6 +5,7 @@
 
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
+import { OfficialAppLogo } from "./OfficialAppLogo.js";
 import { 
   QrCode, 
   BarChart3, 
@@ -250,6 +251,15 @@ export default function LandingPage({ onStartTrial, onNavigateLogin, translation
         "Direct Supervisor Alerts: Real-time emails notify supervisors if worker performance scores drop.",
         "Automated Reminders: Friendly push messages help workers check in promptly on scheduled workdays."
       ]
+    },
+    {
+      q: "How does the platform manage employee leave and permission request approvals?",
+      solutions: [
+        "Self-Service Digital Filing: Workers submit medical, vacation, emergency, or official duty exemptions with optional supporting documentation directly from their portal.",
+        "Department Lead Delegation: Requests route instantly to designated department leads or supervisors for rapid review and one-click authorization.",
+        "Score Protection Automation: Approved leaves automatically adjust activity day benchmarks, preventing unwarranted lateness or absenteeism penalties.",
+        "Audit Trail & Instant Alerts: Real-time notifications alert workers of decisions immediately, while immutable audit logs maintain organizational compliance."
+      ]
     }
   ];
 
@@ -354,16 +364,15 @@ export default function LandingPage({ onStartTrial, onNavigateLogin, translation
 
       {/* Dynamic Header */}
       <nav id="landing_nav" className="sticky top-0 bg-[#0D0D0D]/90 backdrop-blur-md border-b border-[#262626] z-40 px-3 sm:px-4 md:px-6 py-2.5 sm:py-3.5 md:py-4 flex items-center justify-between shadow-xl relative flex-nowrap whitespace-nowrap overflow-x-visible">
-        <div 
+        <OfficialAppLogo
+          size="md"
+          showText
+          appName={translations.appName}
           onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-          className="flex items-center space-x-1.5 sm:space-x-2 md:space-x-3 cursor-pointer group hover:opacity-95 select-none shrink-0"
-          title="Go to Top"
-        >
-          <div className="h-6 w-6 sm:h-8 sm:w-8 md:h-10 md:w-10 rounded-lg sm:rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 flex items-center justify-center text-white shadow-lg shadow-cyan-950/45 group-hover:brightness-110 transition-all">
-            <QrCode className="h-3.5 w-3.5 sm:h-4 sm:w-4 md:h-5 md:w-5" />
-          </div>
-          <span className="font-display font-bold text-xs sm:text-base md:text-xl tracking-tight text-white group-hover:text-cyan-400 transition-colors">{translations.appName}</span>
-        </div>
+          badgeClassName="h-6 w-6 sm:h-8 sm:w-8 md:h-10 md:w-10 rounded-lg sm:rounded-xl"
+          textClassName="text-xs sm:text-base md:text-xl text-white group-hover:text-cyan-400 transition-colors"
+          className="cursor-pointer select-none shrink-0"
+        />
 
         {/* Desktop Navigation Links */}
         <div id="landing_nav_links" className="hidden md:flex items-center space-x-4 lg:space-x-8 text-xs lg:text-sm font-medium text-neutral-400 flex-nowrap shrink">

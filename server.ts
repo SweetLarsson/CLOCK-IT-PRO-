@@ -28,6 +28,7 @@ import {
   CentralAnnouncement,
   AnnouncementFeedbackSubmission
 } from "./src/types.js";
+import { getDateInTimezone, getHolidayForDate } from "./src/utils/holidayUtils.js";
 import crypto from "crypto";
 import { isPgConfigured } from "./src/db/index.js";
 import { 
@@ -636,6 +637,7 @@ function ensureDbReady(): Promise<void> {
           }
         } catch (e: any) {
           console.warn("ensureDbReady initial PostgreSQL load:", e?.message || e);
+          dbReadyPromise = null;
         }
       } else {
         // Even without Postgres, migrate plain text passwords to scrypt hashes locally
@@ -933,12 +935,21 @@ app.post("/api/auth/register-company", async (req, res) => {
     }
   }
 
+  // Dispatch Welcome Email for newly registered company admin
+  sendWelcomeEmail({
+    email: newAdmin.email,
+    firstName: companyName,
+    lastName: "Admin",
+    role: newAdmin.role,
+    tenant_id
+  }).catch((e) => console.warn("Welcome email async notice:", e));
+
   const { password: _pwd, ...safeAdmin } = newAdmin;
   return res.json({ success: true, user: safeAdmin, tenant: newTenant, subscription: newSub });
 });
 
 app.post("/api/auth/register-worker", async (req, res) => {
-  const { firstName, lastName, phone, email, password, companyId, registeredViaQr, department_id, gender } = req.body;
+  const { firstName, lastName, phone, email, password, companyId, registeredViaQr, department_id, gender, birthDay, birthMonth } = req.body;
   if (!firstName || !lastName || !phone || !email || !password || !companyId) {
     return res.status(400).json({ error: "All worker registration fields are required" });
   }
@@ -1017,6 +1028,8 @@ app.post("/api/auth/register-worker", async (req, res) => {
     gender,
     title: "Associated Worker",
     createdAt: new Date().toISOString(),
+    birthDay: birthDay ? Number(birthDay) : undefined,
+    birthMonth: birthMonth ? Number(birthMonth) : undefined,
     deviceBinding: {
       deviceId: `device-bind-${Buffer.from(`${email}:${user_id}:${phone}`).toString("base64").substring(0, 16).toLowerCase()}`,
       boundAt: new Date().toISOString(),
@@ -1123,6 +1136,15 @@ app.post("/api/auth/register-worker", async (req, res) => {
     departmentName: db.departments.find(d => d.id === newWorker.department_id)?.name || "Unassigned",
     notification: notif
   });
+
+  // Dispatch Welcome Email for newly registered worker
+  sendWelcomeEmail({
+    email: newWorker.email,
+    firstName: newWorker.firstName,
+    lastName: newWorker.lastName,
+    role: newWorker.role,
+    tenant_id: actualCompanyId
+  }).catch((e) => console.warn("Welcome email async notice:", e));
 
   const { password: _wPwd, ...safeWorker } = newWorker;
   return res.json({ success: true, user: safeWorker });
@@ -1248,6 +1270,103 @@ function getResendClient(): Resend | null {
     }
   }
   return resendClient;
+}
+
+// In-memory set to prevent duplicate welcome emails within the active server process
+const sentWelcomeEmails = new Set<string>();
+
+/**
+ * Dispatches a Welcome Email to newly registered users (both Admins and Workers).
+ * Graceful error handling ensures registration workflow is never interrupted.
+ */
+async function sendWelcomeEmail(user: { email: string; firstName: string; lastName: string; role: string; tenant_id: string }): Promise<boolean> {
+  const cleanEmail = (user.email || "").trim().toLowerCase();
+  if (!cleanEmail || !cleanEmail.includes("@")) return false;
+
+  // Prevent duplicate welcome emails for the same account registration
+  const dedupeKey = `${cleanEmail}:${user.tenant_id}`;
+  if (sentWelcomeEmails.has(dedupeKey)) return false;
+  sentWelcomeEmails.add(dedupeKey);
+
+  const resend = getResendClient();
+  const tenant = db.tenants.find(t => t.id === user.tenant_id);
+  const companyName = tenant?.name || "Clock-It-Pro Plus";
+  const fullName = `${user.firstName || ""} ${user.lastName || ""}`.trim() || "User";
+  const roleLabel = user.role === UserRole.COMPANY_ADMIN ? "Company Administrator" : "Team Member";
+
+  const rawFrom = (process.env.RESEND_FROM_EMAIL || "").replace(/^["']|["']$/g, "").trim();
+  const publicWebmailDomains = ["gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "icloud.com", "aol.com"];
+  const isPublicWebmail = publicWebmailDomains.some(domain => rawFrom.toLowerCase().includes(domain));
+  const fromEmail = (!rawFrom || !rawFrom.includes("@") || isPublicWebmail)
+    ? "Clock-It-Pro Plus <onboarding@resend.dev>"
+    : rawFrom;
+
+  const htmlContent = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 580px; margin: 0 auto; padding: 32px 24px; background-color: #0f172a; color: #f8fafc; border-radius: 20px; border: 1px solid #1e293b;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <div style="display: inline-block; background: linear-gradient(135deg, #06b6d4, #2563eb); padding: 12px 24px; border-radius: 14px; font-weight: 800; font-size: 18px; color: #ffffff; letter-spacing: 0.5px;">
+          CLOCK-IT-PRO+
+        </div>
+      </div>
+      
+      <div style="background-color: #1e293b; border-radius: 16px; padding: 24px; border: 1px solid #334155; margin-bottom: 20px;">
+        <h2 style="margin: 0 0 12px; font-size: 20px; color: #38bdf8; font-weight: 700;">Welcome to Clock-It-Pro Plus!</h2>
+        <p style="margin: 0 0 14px; font-size: 14px; line-height: 1.6; color: #cbd5e1;">
+          Hello <strong style="color: #f1f5f9;">${fullName}</strong>,
+        </p>
+        <p style="margin: 0 0 14px; font-size: 14px; line-height: 1.6; color: #cbd5e1;">
+          Your account for <strong style="color: #38bdf8;">${companyName}</strong> has been successfully registered. You are assigned as <strong style="color: #f1f5f9;">${roleLabel}</strong>.
+        </p>
+        <div style="background: rgba(6, 182, 212, 0.1); border: 1px solid rgba(6, 182, 212, 0.3); border-radius: 12px; padding: 14px 18px; margin: 18px 0;">
+          <p style="margin: 0; font-size: 12px; font-family: monospace; color: #7dd3fc; line-height: 1.8;">
+            &bull; Registered Email: <strong>${cleanEmail}</strong><br/>
+            &bull; Corporate Account: <strong>${companyName}</strong><br/>
+            &bull; Assigned Role: <strong>${roleLabel}</strong><br/>
+            &bull; Account Status: <strong style="color: #4ade80;">Active</strong>
+          </p>
+        </div>
+        <p style="margin: 0; font-size: 13px; line-height: 1.5; color: #94a3b8;">
+          You can now securely sign in to access your digital check-in terminal, attendance roster, and smart workforce analytics.
+        </p>
+      </div>
+
+      <div style="text-align: center; padding-top: 12px; border-top: 1px solid #1e293b; font-size: 11px; color: #64748b;">
+        <p style="margin: 0;">&copy; ${new Date().getFullYear()} ${companyName} &bull; Powered by Clock-It-Pro Plus</p>
+        <p style="margin: 4px 0 0;">This is an automated welcome notification sent upon successful registration.</p>
+      </div>
+    </div>
+  `;
+
+  if (resend) {
+    try {
+      await resend.emails.send({
+        from: fromEmail,
+        to: [cleanEmail],
+        subject: `Welcome to Clock-It-Pro Plus, ${user.firstName}!`,
+        html: htmlContent
+      });
+      console.log(`[Welcome Email] Successfully sent to ${cleanEmail}`);
+      return true;
+    } catch (err: any) {
+      console.warn(`[Welcome Email] Resend delivery notice for ${cleanEmail}:`, err?.message || err);
+      if (fromEmail !== "Clock-It-Pro Plus <onboarding@resend.dev>") {
+        try {
+          await resend.emails.send({
+            from: "Clock-It-Pro Plus <onboarding@resend.dev>",
+            to: [cleanEmail],
+            subject: `Welcome to Clock-It-Pro Plus, ${user.firstName}!`,
+            html: htmlContent
+          });
+          return true;
+        } catch {
+          // ignore
+        }
+      }
+    }
+  } else {
+    console.log(`[Welcome Email] Simulated dispatch for ${cleanEmail} (RESEND_API_KEY not configured)`);
+  }
+  return true;
 }
 
 // In-memory store for pending password reset PIN codes (valid for 15 minutes)
@@ -1850,27 +1969,52 @@ app.post(["/api/tenant/update", "/api/admin/company-profile"], (req, res) => {
 
 // SETTINGS & WORK DAYS
 app.post("/api/tenant/settings/save", (req, res) => {
-  const { tenant_id, theme, language, layout, sideNavCollapsed, activityDays, checkIn, checkOut, overtimeHours, overtimeEnabled, onlyShowTimeIn, selectedIntervalDays, dailyShiftTimes, dailyShiftOutTimes, companyLogoUrl } = req.body;
+  const { 
+    tenant_id, 
+    theme, 
+    language, 
+    layout, 
+    sideNavCollapsed, 
+    activityDays, 
+    checkIn, 
+    checkOut, 
+    overtimeHours, 
+    overtimeEnabled, 
+    onlyShowTimeIn, 
+    selectedIntervalDays, 
+    dailyShiftTimes, 
+    dailyShiftOutTimes, 
+    companyLogoUrl,
+    holidayManagementEnabled,
+    timezone,
+    internationalHolidays,
+    customHolidays
+  } = req.body;
   if (!tenant_id) return res.status(400).json({ error: "tenant_id required" });
 
   db = loadDB();
   const idx = db.settings.findIndex(s => s.tenant_id === tenant_id);
+  const existing = idx !== -1 ? db.settings[idx] : null;
   const updatedSettings: TenantSettings = {
     tenant_id,
-    theme: theme || "light",
-    language: language || "en",
-    layout: layout || "top",
-    sideNavCollapsed: Boolean(sideNavCollapsed),
-    activityDays: activityDays || {},
-    checkIn: checkIn || { time: "08:00", latenessThreshold: 10, soundEnabled: true },
-    checkOut: checkOut || { time: "17:00", soundEnabled: true },
-    overtimeHours: overtimeHours || 2,
-    overtimeEnabled: overtimeEnabled !== undefined ? overtimeEnabled : false,
-    onlyShowTimeIn: onlyShowTimeIn || false,
-    selectedIntervalDays: selectedIntervalDays !== undefined ? Number(selectedIntervalDays) : 20,
-    dailyShiftTimes: dailyShiftTimes || {},
-    dailyShiftOutTimes: dailyShiftOutTimes || {},
-    companyLogoUrl: companyLogoUrl || ""
+    theme: theme || (existing ? existing.theme : "light"),
+    language: language || (existing ? existing.language : "en"),
+    layout: layout || (existing ? existing.layout : "top"),
+    sideNavCollapsed: sideNavCollapsed !== undefined ? Boolean(sideNavCollapsed) : (existing ? existing.sideNavCollapsed : false),
+    activityDays: activityDays !== undefined ? activityDays : (existing ? existing.activityDays : {}),
+    checkIn: checkIn || (existing ? existing.checkIn : { time: "08:00", latenessThreshold: 10, soundEnabled: true }),
+    checkOut: checkOut || (existing ? existing.checkOut : { time: "17:00", soundEnabled: true }),
+    overtimeHours: overtimeHours !== undefined ? overtimeHours : (existing ? existing.overtimeHours : 2),
+    overtimeEnabled: overtimeEnabled !== undefined ? overtimeEnabled : (existing ? existing.overtimeEnabled : false),
+    onlyShowTimeIn: onlyShowTimeIn !== undefined ? onlyShowTimeIn : (existing ? existing.onlyShowTimeIn : false),
+    selectedIntervalDays: selectedIntervalDays !== undefined ? Number(selectedIntervalDays) : (existing?.selectedIntervalDays ?? 20),
+    dailyShiftTimes: dailyShiftTimes !== undefined ? dailyShiftTimes : (existing ? existing.dailyShiftTimes : {}),
+    dailyShiftOutTimes: dailyShiftOutTimes !== undefined ? dailyShiftOutTimes : (existing ? existing.dailyShiftOutTimes : {}),
+    companyLogoUrl: companyLogoUrl !== undefined ? companyLogoUrl : (existing ? existing.companyLogoUrl : ""),
+    holidayManagementEnabled: holidayManagementEnabled !== undefined ? Boolean(holidayManagementEnabled) : (existing?.holidayManagementEnabled ?? true),
+    timezone: timezone || (existing?.timezone ?? "UTC"),
+    internationalHolidays: internationalHolidays !== undefined ? internationalHolidays : existing?.internationalHolidays,
+    customHolidays: customHolidays !== undefined ? customHolidays : existing?.customHolidays
   };
 
   if (idx !== -1) {
@@ -1896,6 +2040,41 @@ app.get("/api/tenant/settings", (req, res) => {
     language: "en"
   };
   return res.json({ settings });
+});
+
+// USER-SPECIFIC PREFERENCES (THEME, LANGUAGE)
+app.post("/api/user/preferences", (req, res) => {
+  const { user_id, theme, language } = req.body;
+  if (!user_id) return res.status(400).json({ error: "user_id is required" });
+
+  db = loadDB();
+  const userIdx = db.users.findIndex(u => u.id === user_id);
+  if (userIdx === -1) return res.status(404).json({ error: "User not found" });
+
+  const targetUser = db.users[userIdx];
+  if (!targetUser.preferences) {
+    targetUser.preferences = {};
+  }
+  if (theme && ["light", "dark", "army", "navy"].includes(theme)) {
+    targetUser.preferences.theme = theme;
+  }
+  if (language && ["en", "fr", "es"].includes(language)) {
+    targetUser.preferences.language = language;
+  }
+
+  saveDB(db);
+  return res.json({ success: true, preferences: targetUser.preferences });
+});
+
+app.get("/api/user/preferences", (req, res) => {
+  const user_id = req.query.user_id as string;
+  if (!user_id) return res.status(400).json({ error: "user_id is required" });
+
+  db = loadDB();
+  const targetUser = db.users.find(u => u.id === user_id);
+  if (!targetUser) return res.status(404).json({ error: "User not found" });
+
+  return res.json({ success: true, preferences: targetUser.preferences || {} });
 });
 
 // WORKERS & PROFILE PHOTOS
@@ -1933,7 +2112,7 @@ app.get("/api/tenant/workers", (req, res) => {
 
 // WORKER CRUD ENDPOINTS
 app.post("/api/tenant/workers/add", async (req, res) => {
-  const { tenant_id, firstName, lastName, email, phone, role, department_id, gender, activityDays } = req.body;
+  const { tenant_id, firstName, lastName, email, phone, role, department_id, gender, activityDays, birthDay, birthMonth } = req.body;
   if (!tenant_id || !firstName || !lastName || !email) {
     return res.status(400).json({ error: "Required fields: tenant_id, firstName, lastName, email" });
   }
@@ -1968,6 +2147,8 @@ app.post("/api/tenant/workers/add", async (req, res) => {
     gender: gender || "Not Specified",
     createdAt: new Date().toISOString(),
     activityDays: activityDays || undefined,
+    birthDay: birthDay ? Number(birthDay) : undefined,
+    birthMonth: birthMonth ? Number(birthMonth) : undefined,
   };
 
   db.users.push(newWorker);
@@ -1990,6 +2171,15 @@ app.post("/api/tenant/workers/add", async (req, res) => {
       console.warn("Direct upsertUser on workers/add:", e);
     }
   }
+
+  // Dispatch Welcome Email for worker added by Admin
+  sendWelcomeEmail({
+    email: newWorker.email,
+    firstName: newWorker.firstName,
+    lastName: newWorker.lastName,
+    role: newWorker.role,
+    tenant_id
+  }).catch((e) => console.warn("Welcome email async notice:", e));
 
   const { password: _p, ...safeWorker } = newWorker;
   broadcastToTenant(tenant_id, "WORKERS_UPDATED", { action: "add", worker: safeWorker });
@@ -2039,6 +2229,8 @@ app.post("/api/tenant/workers/update", async (req, res) => {
   }
   if (status !== undefined) existing.status = status;
   if (gender !== undefined) existing.gender = gender;
+  if (req.body.birthDay !== undefined) existing.birthDay = req.body.birthDay ? Number(req.body.birthDay) : undefined;
+  if (req.body.birthMonth !== undefined) existing.birthMonth = req.body.birthMonth ? Number(req.body.birthMonth) : undefined;
   if (req.body.password !== undefined && req.body.password) {
     existing.password = hashPassword(req.body.password);
   }
@@ -2261,17 +2453,11 @@ app.post("/api/attendance/check-in", (req, res) => {
 
   db = loadDB();
 
-  // Validate Subscription and free trials
-  const activeSub = db.subscriptions.find(s => s.tenant_id === tenant_id && s.status !== "expired");
-  if (!activeSub) {
-    return res.status(403).json({ error: "All features locked. Unpaid / Expired billing." });
-  }
-
-  // Ensure current time is not expired trial
-  if (activeSub.status === "trial" && new Date(activeSub.endDate).getTime() < Date.now()) {
+  // Subscription status check (Admin billing concern: update DB state if trial expired, without locking worker scanning)
+  const activeSub = db.subscriptions.find(s => s.tenant_id === tenant_id);
+  if (activeSub && activeSub.status === "trial" && new Date(activeSub.endDate).getTime() < Date.now()) {
     activeSub.status = "expired";
     saveDB(db);
-    return res.status(403).json({ error: "trial_expired_lockout" });
   }
 
   const todayStr = localDate || new Date().toISOString().split("T")[0];
@@ -2823,7 +3009,49 @@ app.get("/api/tenant/subscription", (req, res) => {
   if (!tenant_id) return res.status(400).json({ error: "tenant_id required" });
 
   db = loadDB();
-  const subscription = db.subscriptions.find(s => s.tenant_id === tenant_id && s.status !== "expired");
+  // Find active or trial subscription, or fallback to most recent
+  let subscription = db.subscriptions.find(s => s.tenant_id === tenant_id && s.status !== "expired");
+  if (!subscription) {
+    subscription = [...db.subscriptions].reverse().find(s => s.tenant_id === tenant_id);
+  }
+
+  if (subscription) {
+    const now = Date.now();
+    const end = new Date(subscription.endDate).getTime();
+    if (now > end) {
+      if (subscription.recurring && subscription.status === "active") {
+        // Automatically renew recurring subscription according to selected duration
+        const key = subscription.durationKey || (subscription.durationMonths === 0.25 ? "1w" : subscription.durationMonths === 0.5 ? "2w" : subscription.durationMonths === 1 ? "1m" : subscription.durationMonths === 2 ? "2m" : subscription.durationMonths === 3 ? "3m" : subscription.durationMonths === 6 ? "6m" : subscription.durationMonths === 12 ? "12m" : "2m");
+        const days = key === "1w" ? 7 : key === "2w" ? 14 : undefined;
+        const months = key === "1m" ? 1 : key === "2m" ? 2 : key === "3m" ? 3 : key === "6m" ? 6 : key === "12m" ? 12 : (subscription.durationMonths || 2);
+        const newStart = new Date();
+        const newEnd = new Date(newStart);
+        if (days) {
+          newEnd.setDate(newEnd.getDate() + days);
+        } else {
+          newEnd.setMonth(newEnd.getMonth() + months);
+        }
+        subscription.startDate = newStart.toISOString();
+        subscription.endDate = newEnd.toISOString();
+        subscription.status = "active";
+        db.auditLogs.push({
+          id: "log-" + Math.random().toString(36).substring(2, 11),
+          tenant_id,
+          user_id: "system-auto-renew",
+          action: "RECURRING_RENEWAL",
+          timestamp: new Date().toISOString(),
+          details: `Automatic recurring renewal applied for ${subscription.durationLabel || (days ? `${days} Days` : `${months} Months`)} (${subscription.planCode})`
+        });
+        saveDB(db);
+        broadcastToTenant(tenant_id, "SUBSCRIPTION_UPDATED", subscription);
+      } else if (subscription.status !== "expired") {
+        subscription.status = "expired";
+        saveDB(db);
+        broadcastToTenant(tenant_id, "SUBSCRIPTION_UPDATED", subscription);
+      }
+    }
+  }
+
   return res.json({ subscription: subscription || null });
 });
 
@@ -3031,27 +3259,80 @@ app.post("/api/notifications/mark-all-read", (req, res) => {
 
 // SUBSCRIPTION MANAGEMENT (PAYMENT WEBHOOK SIMULATION)
 app.post("/api/billing/subscribe", (req, res) => {
-  const { tenant_id, planCode, paymentMethod } = req.body;
+  const { tenant_id, planCode, paymentMethod, durationMonths, durationKey, durationLabel, recurring, originalPrice, discountPercent, discountAmount, finalPrice } = req.body;
   if (!tenant_id || !planCode || !paymentMethod) {
     return res.status(400).json({ error: "Tenant, plan and verification required" });
   }
 
   db = loadDB();
   
-  let price = 10000;
-  if (planCode === SubscriptionPlanCode.BUSINESS) price = 30000;
-  else if (planCode === SubscriptionPlanCode.GROWTH) price = 50000;
-  else if (planCode === SubscriptionPlanCode.ENTERPRISE) price = 150000;
+  // Resolve duration option among the 7 standard durations:
+  // 1 Week (0%), 2 Weeks (5%), 1 Month (10%), 2 Months (12.5%), 3 Months (15%), 6 Months (20%), 12 Months (25%)
+  const durationMap: Record<string, { label: string; discount: number; days?: number; months?: number; monthsEquiv: number }> = {
+    "1w": { label: "1 Week", discount: 0, days: 7, monthsEquiv: 0.25 },
+    "2w": { label: "2 Weeks", discount: 5, days: 14, monthsEquiv: 0.5 },
+    "1m": { label: "1 Month", discount: 10, months: 1, monthsEquiv: 1 },
+    "2m": { label: "2 Months", discount: 12.5, months: 2, monthsEquiv: 2 },
+    "3m": { label: "3 Months", discount: 15, months: 3, monthsEquiv: 3 },
+    "6m": { label: "6 Months", discount: 20, months: 6, monthsEquiv: 6 },
+    "12m": { label: "12 Months", discount: 25, months: 12, monthsEquiv: 12 },
+  };
 
-  // Set subscription active for 30 days
+  let resolvedKey = durationKey || (
+    durationMonths === 0.25 || durationMonths === 7 ? "1w" :
+    durationMonths === 0.5 || durationMonths === 14 ? "2w" :
+    durationMonths === 1 ? "1m" :
+    durationMonths === 2 ? "2m" :
+    durationMonths === 3 ? "3m" :
+    durationMonths === 6 ? "6m" :
+    durationMonths === 12 ? "12m" : "2m"
+  );
+
+  const selectedOpt = durationMap[resolvedKey] || durationMap["2m"];
+  
+  let monthlyPrice = 10000;
+  if (planCode === SubscriptionPlanCode.BUSINESS) monthlyPrice = 30000;
+  else if (planCode === SubscriptionPlanCode.GROWTH) monthlyPrice = 50050;
+  else if (planCode === SubscriptionPlanCode.ENTERPRISE) monthlyPrice = 150000;
+
+  const appliedDiscountPercent = typeof discountPercent === "number" ? discountPercent : selectedOpt.discount;
+  
+  let defaultOriginalPrice = 0;
+  if (selectedOpt.days === 7) {
+    defaultOriginalPrice = Math.round(monthlyPrice / 4);
+  } else if (selectedOpt.days === 14) {
+    defaultOriginalPrice = Math.round(monthlyPrice / 2);
+  } else {
+    defaultOriginalPrice = monthlyPrice * (selectedOpt.months || 2);
+  }
+
+  const calcOriginalPrice = typeof originalPrice === "number" ? originalPrice : defaultOriginalPrice;
+  const calcDiscountAmount = typeof discountAmount === "number" ? discountAmount : Math.round(calcOriginalPrice * (appliedDiscountPercent / 100));
+  const calcFinalPrice = typeof finalPrice === "number" ? finalPrice : (calcOriginalPrice - calcDiscountAmount);
+
+  const startDate = new Date();
+  const endDate = new Date(startDate);
+  if (selectedOpt.days) {
+    endDate.setDate(endDate.getDate() + selectedOpt.days);
+  } else {
+    endDate.setMonth(endDate.getMonth() + (selectedOpt.months || 2));
+  }
+
   const newSub: Subscription = {
     id: "sub-" + Math.random().toString(36).substring(2, 11),
     tenant_id,
     planCode,
-    price,
+    price: calcFinalPrice,
+    originalPrice: calcOriginalPrice,
+    discountPercent: appliedDiscountPercent,
+    discountAmount: calcDiscountAmount,
+    durationMonths: selectedOpt.monthsEquiv,
+    durationKey: resolvedKey,
+    durationLabel: durationLabel || selectedOpt.label,
+    recurring: Boolean(recurring),
     status: "active",
-    startDate: new Date().toISOString(),
-    endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+    startDate: startDate.toISOString(),
+    endDate: endDate.toISOString(),
     paymentMethod,
     verified: true
   };
@@ -3072,7 +3353,7 @@ app.post("/api/billing/subscribe", (req, res) => {
     user_id: "admin-user",
     action: "SUBSCRIPTION_RENEWAL",
     timestamp: new Date().toISOString(),
-    details: `Successfully verified Opay/Paystack checkout for plan ${planCode}`
+    details: `Verified ${paymentMethod.toUpperCase()} renewal for ${planCode} plan (${newSub.durationLabel}, ${appliedDiscountPercent}% off, Recurring: ${Boolean(recurring) ? "Enabled" : "Disabled"})`
   });
 
   saveDB(db);
@@ -3432,6 +3713,91 @@ function runAutoCheckout() {
 
 // ---------------- APPLICATION CENTRAL ANNOUNCEMENTS ----------------
 
+function syncTenantAutomaticAnnouncements(tenant_id: string) {
+  try {
+    db.announcements = db.announcements || [];
+    const settings = db.settings.find(s => s.tenant_id === tenant_id);
+    const timezone = settings?.timezone || "UTC";
+    const nowTz = getDateInTimezone(new Date(), timezone);
+    const tomorrowDate = new Date(Date.now() + 86400000);
+    const tomorrowTz = getDateInTimezone(tomorrowDate, timezone);
+
+    // 1. Automatic Holiday Announcements
+    if (settings && settings.holidayManagementEnabled !== false) {
+      // Check today's holiday
+      const todayHoliday = getHolidayForDate(nowTz.year, nowTz.monthIndex, nowTz.day, settings);
+      if (todayHoliday) {
+        const todayId = `auto-holiday-today-${todayHoliday.id}-${nowTz.dateString}`;
+        const existing = db.announcements.find(a => a.id === todayId && a.tenant_id === tenant_id);
+        if (!existing) {
+          const autoAnn: CentralAnnouncement = {
+            id: todayId,
+            tenant_id,
+            type: "text",
+            title: `Company Holiday Observed: ${todayHoliday.name}`,
+            content: `Today is an officially recognized company holiday (${todayHoliday.name}).\n\n${todayHoliday.description}\n\nStandard shift attendance requirements are paused in observance. Enjoy your holiday!`,
+            priority: "important",
+            isActive: true,
+            enableRating: false,
+            createdAt: new Date().toISOString()
+          };
+          db.announcements.unshift(autoAnn);
+        }
+      }
+
+      // Check tomorrow's holiday (1 day before)
+      const tomorrowHoliday = getHolidayForDate(tomorrowTz.year, tomorrowTz.monthIndex, tomorrowTz.day, settings);
+      if (tomorrowHoliday) {
+        const advId = `auto-holiday-advance-${tomorrowHoliday.id}-${tomorrowTz.dateString}`;
+        const existingAdv = db.announcements.find(a => a.id === advId && a.tenant_id === tenant_id);
+        if (!existingAdv) {
+          const autoAdvAnn: CentralAnnouncement = {
+            id: advId,
+            tenant_id,
+            type: "text",
+            title: `Upcoming Holiday Notice: ${tomorrowHoliday.name}`,
+            content: `Advance Notice: Tomorrow (${tomorrowTz.dateString}) is an officially recognized company holiday (${tomorrowHoliday.name}).\n\n${tomorrowHoliday.description}\n\nPlease be advised that company operations and shifts will be paused in observance.`,
+            priority: "important",
+            isActive: true,
+            enableRating: false,
+            createdAt: new Date().toISOString()
+          };
+          db.announcements.unshift(autoAdvAnn);
+        }
+      }
+    }
+
+    // 2. Automatic Birthday Announcements for Workers
+    const tenantWorkers = (db.users || []).filter(u => u.tenant_id === tenant_id && u.status === "active");
+    tenantWorkers.forEach(worker => {
+      if (worker.birthMonth === nowTz.month && worker.birthDay === nowTz.day) {
+        const bdayId = `auto-bday-${worker.id}-${nowTz.dateString}`;
+        const existingBday = db.announcements.find(a => a.id === bdayId && a.tenant_id === tenant_id);
+        if (!existingBday) {
+          const dept = db.departments?.find(d => d.id === worker.department_id);
+          const deptStr = dept ? ` • ${dept.name}` : "";
+          const photo = worker.profilePhoto?.original || worker.profilePhoto?.medium || "";
+          const bdayAnn: CentralAnnouncement = {
+            id: bdayId,
+            tenant_id,
+            type: photo ? "picture" : "text",
+            title: `🎉 Happy Birthday, ${worker.firstName} ${worker.lastName}!`,
+            content: `The entire company joins in wishing ${worker.firstName} ${worker.lastName} (${worker.title || "Team Member"}${deptStr}) a very happy birthday today! May your year ahead be filled with happiness, outstanding achievements, and vibrant well-being. Please join us in celebrating our valued colleague!`,
+            imageUrl: photo || undefined,
+            priority: "important",
+            isActive: true,
+            enableRating: false,
+            createdAt: new Date().toISOString()
+          };
+          db.announcements.unshift(bdayAnn);
+        }
+      }
+    });
+  } catch (err) {
+    console.error("Error in syncTenantAutomaticAnnouncements:", err);
+  }
+}
+
 // Get announcements for a tenant
 app.get("/api/tenant/announcements", (req, res) => {
   try {
@@ -3439,6 +3805,7 @@ app.get("/api/tenant/announcements", (req, res) => {
     if (tenant_id === "undefined" || !tenant_id) {
       tenant_id = db.tenants?.[0]?.id || "default-tenant";
     }
+    syncTenantAutomaticAnnouncements(tenant_id);
     db.announcements = db.announcements || [];
     const tenantAnnouncements = (db.announcements || [])
       .filter((a) => a && (a.tenant_id === tenant_id || (!a.tenant_id && (tenant_id === "default-tenant" || tenant_id === "demo_tenant"))))
@@ -3781,7 +4148,7 @@ function generatePwaManifest(role: string = "guest", tenantName?: string, worker
   let short_name = "CLOCK-IT";
   let start_url = "/";
   let description = "Enterprise Workforce Attendance & Shift Operations Management";
-  let theme_color = "#06b6d4";
+  const theme_color = theme === "light" ? "#ffffff" : theme === "army" ? "#182313" : theme === "navy" ? "#111A35" : "#0D0D0D";
   const background_color = theme === "light" ? "#f8fafc" : theme === "army" ? "#141C10" : theme === "navy" ? "#0B132B" : "#0a0a0a";
 
   if (isAdmin) {
@@ -3789,13 +4156,11 @@ function generatePwaManifest(role: string = "guest", tenantName?: string, worker
     short_name = tenantName ? `${tenantName.slice(0, 10)} Admin` : "Admin Portal";
     start_url = "/?pwa=admin";
     description = `Enterprise Admin Dashboard & Workforce Operations Terminal for ${tenantName || "Organization"}`;
-    theme_color = "#06b6d4";
   } else if (isWorker) {
     name = tenantName ? `${tenantName} - Staff Workspace${workerName ? ` (${workerName})` : ""}` : "CLOCK-IT Staff Workspace";
     short_name = tenantName ? `${tenantName.slice(0, 10)} Staff` : "Staff Portal";
     start_url = "/?pwa=worker";
     description = `Worker Attendance Terminal, Shift Check-In & Permission Portal for ${workerName || "Staff"}`;
-    theme_color = "#10b981";
   }
 
   return {
@@ -3964,13 +4329,60 @@ app.get("/api/pwa-icon", (req, res) => {
   res.send(svg);
 });
 
+function checkSubscriptionStatusAll() {
+  try {
+    db = loadDB();
+    const now = Date.now();
+    let changed = false;
+    db.subscriptions.forEach(s => {
+      if (s.status !== "expired" && s.endDate && now > new Date(s.endDate).getTime()) {
+        if (s.recurring) {
+          const key = s.durationKey || (s.durationMonths === 0.25 ? "1w" : s.durationMonths === 0.5 ? "2w" : s.durationMonths === 1 ? "1m" : s.durationMonths === 2 ? "2m" : s.durationMonths === 3 ? "3m" : s.durationMonths === 6 ? "6m" : s.durationMonths === 12 ? "12m" : "2m");
+          const days = key === "1w" ? 7 : key === "2w" ? 14 : undefined;
+          const months = key === "1m" ? 1 : key === "2m" ? 2 : key === "3m" ? 3 : key === "6m" ? 6 : key === "12m" ? 12 : (s.durationMonths || 2);
+          const newStart = new Date();
+          const newEnd = new Date(newStart);
+          if (days) {
+            newEnd.setDate(newEnd.getDate() + days);
+          } else {
+            newEnd.setMonth(newEnd.getMonth() + months);
+          }
+          s.startDate = newStart.toISOString();
+          s.endDate = newEnd.toISOString();
+          s.status = "active";
+          db.auditLogs.push({
+            id: "log-" + Math.random().toString(36).substring(2, 11),
+            tenant_id: s.tenant_id,
+            user_id: "system-auto-renew",
+            action: "RECURRING_RENEWAL",
+            timestamp: new Date().toISOString(),
+            details: `Automatic recurring renewal applied for ${s.durationLabel || (days ? `${days} Days` : `${months} Months`)} (${s.planCode})`
+          });
+          changed = true;
+          broadcastToTenant(s.tenant_id, "SUBSCRIPTION_UPDATED", s);
+        } else {
+          s.status = "expired";
+          changed = true;
+          broadcastToTenant(s.tenant_id, "SUBSCRIPTION_UPDATED", s);
+        }
+      }
+    });
+    if (changed) {
+      saveDB(db);
+    }
+  } catch (err) {
+    console.warn("checkSubscriptionStatusAll error:", err);
+  }
+}
+
 async function startServer() {
   // Start the background checkout monitor
   setInterval(() => {
     try {
       runAutoCheckout();
+      checkSubscriptionStatusAll();
     } catch (e) {
-      console.warn("Background auto checkout exception:", e);
+      console.warn("Background monitor exception:", e);
     }
   }, 10000);
 

@@ -323,13 +323,54 @@ export default function App() {
               if (data && data.settings) {
                 setSession((prev) => {
                   if (!prev) return prev;
-                  const next = { ...prev, settings: data.settings };
+                  const isWorker = prev.user?.role === UserRole.TEAM_MEMBER || prev.user?.role === UserRole.TEAM_LEAD;
+                  const workerTheme = isWorker && prev.user?.id ? (localStorage.getItem(`worker_theme_${prev.user.id}`) || prev.user?.preferences?.theme) : null;
+                  const workerLang = isWorker && prev.user?.id ? (localStorage.getItem(`worker_lang_${prev.user.id}`) || prev.user?.preferences?.language) : null;
+                  const mergedSettings = {
+                    ...data.settings,
+                    ...(workerTheme ? { theme: workerTheme } : {}),
+                    ...(workerLang ? { language: workerLang } : {}),
+                  };
+                  const next = { ...prev, settings: mergedSettings };
                   localStorage.setItem("clock_it_session", JSON.stringify(next));
                   return next;
                 });
               }
             })
             .catch((err) => console.warn("Failed to sync settings on restore:", err));
+
+          if (parsed.user?.id) {
+            fetch(`/api/user/preferences?user_id=${parsed.user.id}`)
+              .then((res) => {
+                if (res.ok) return res.json();
+              })
+              .then((data) => {
+                if (data && data.preferences) {
+                  if (data.preferences.theme) {
+                    localStorage.setItem(`worker_theme_${parsed.user.id}`, data.preferences.theme);
+                  }
+                  if (data.preferences.language) {
+                    localStorage.setItem(`worker_lang_${parsed.user.id}`, data.preferences.language);
+                  }
+                  setSession((prev) => {
+                    if (!prev) return prev;
+                    const updatedUser = {
+                      ...prev.user,
+                      preferences: { ...(prev.user?.preferences || {}), ...data.preferences }
+                    };
+                    const updatedSettings = {
+                      ...prev.settings,
+                      ...(data.preferences.theme ? { theme: data.preferences.theme } : {}),
+                      ...(data.preferences.language ? { language: data.preferences.language } : {}),
+                    };
+                    const next = { ...prev, user: updatedUser, settings: updatedSettings };
+                    localStorage.setItem("clock_it_session", JSON.stringify(next));
+                    return next;
+                  });
+                }
+              })
+              .catch(() => {});
+          }
 
           fetch(`/api/tenant?tenant_id=${parsed.tenant.id}`)
             .then((res) => {
@@ -386,7 +427,9 @@ export default function App() {
       const role = isAdmin ? "admin" : isWorker ? "worker" : "guest";
       const tenantName = session.tenant?.companyName || session.tenant?.name || "";
       const workerName = session.user.firstName ? `${session.user.firstName} ${session.user.lastName}` : "";
-      const theme = session.settings?.theme || "dark";
+      const isWorkerUser = session.user.role === UserRole.TEAM_MEMBER || session.user.role === UserRole.TEAM_LEAD;
+      const workerSavedTheme = isWorkerUser && session.user.id ? (localStorage.getItem(`worker_theme_${session.user.id}`) || session.user.preferences?.theme) : null;
+      const theme = (workerSavedTheme as any) || session.settings?.theme || "dark";
 
       updatePwaManifest({
         role,
@@ -401,17 +444,21 @@ export default function App() {
       });
     }
   }, [
+    session?.user?.id,
     session?.user?.role,
     session?.user?.firstName,
     session?.user?.lastName,
     session?.tenant?.companyName,
     session?.tenant?.name,
-    session?.settings?.theme
+    session?.settings?.theme,
+    session?.user?.preferences?.theme
   ]);
 
   // Theme application on change
   useEffect(() => {
-    const theme = session?.settings?.theme || "dark";
+    const isWorkerUser = session?.user?.role === UserRole.TEAM_MEMBER || session?.user?.role === UserRole.TEAM_LEAD;
+    const workerSavedTheme = isWorkerUser && session?.user?.id ? (localStorage.getItem(`worker_theme_${session.user.id}`) || session?.user?.preferences?.theme) : null;
+    const theme = (workerSavedTheme as any) || session?.settings?.theme || "dark";
     const body = document.body;
     const root = document.documentElement;
     if (theme === "dark" || theme === "army" || theme === "navy") {
@@ -429,7 +476,7 @@ export default function App() {
       root.classList.remove("dark");
       body.style.backgroundColor = "#f9fafb";
     }
-  }, [session?.settings?.theme]);
+  }, [session?.settings?.theme, session?.user?.id, session?.user?.role, session?.user?.preferences?.theme]);
 
   const handleLoginSuccess = (loginData: AppSession) => {
     setSession(loginData);
@@ -473,12 +520,19 @@ export default function App() {
     setAllToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  // Translation lookups based on saved setting
-  const activeLanguage = session?.settings?.language || "en";
+  // Translation lookups based on saved setting (user-specific for workers)
+  const isWorkerUser = session?.user?.role === UserRole.TEAM_MEMBER || session?.user?.role === UserRole.TEAM_LEAD;
+  const workerSavedLang = isWorkerUser && session?.user?.id 
+    ? (localStorage.getItem(`worker_lang_${session.user.id}`) || session.user.preferences?.language) 
+    : null;
+  const activeLanguage = (workerSavedLang as "en" | "fr" | "es") || session?.settings?.language || "en";
   const translations = TRANSLATIONS[activeLanguage as "en" | "fr" | "es"] || TRANSLATIONS.en;
 
-  // Get current active theme
-  const activeTheme = session?.settings?.theme || "dark";
+  // Get current active theme (user-specific for workers)
+  const workerSavedTheme = isWorkerUser && session?.user?.id 
+    ? (localStorage.getItem(`worker_theme_${session.user.id}`) || session.user.preferences?.theme) 
+    : null;
+  const activeTheme = (workerSavedTheme as "light" | "dark" | "army" | "navy") || session?.settings?.theme || "dark";
   const getToastClasses = () => {
     switch (activeTheme) {
       case "army":

@@ -70,6 +70,10 @@ import {
   Edit3,
   ClipboardCheck,
   ShieldCheck,
+  Repeat,
+  Play,
+  Sparkles,
+  Tag,
 } from "lucide-react";
 import { AnimatedMenuIcon } from "./AnimatedMenuIcon.js";
 import { AnimatedQrCodeIcon } from "./AnimatedQrCodeIcon.js";
@@ -77,7 +81,15 @@ import { AnimatedBellIcon } from "./AnimatedBellIcon.js";
 import { AnimatedFullscreenIcon } from "./AnimatedFullscreenIcon.js";
 import { AtAGlanceAttendanceOverlay } from "./AtAGlanceAttendanceOverlay.js";
 import { ApplicationCentralAnnouncementModal } from "./ApplicationCentralAnnouncementModal.js";
+import { AdminHolidaySettings } from "./AdminHolidaySettings.js";
+import { OnboardingTour } from "./OnboardingTour.js";
 import { AttendanceStatus, PermissionStatus, UserRole } from "../types.js";
+import {
+  SUBSCRIPTION_DURATION_OPTIONS,
+  SubscriptionDurationKey,
+  calculateSubscriptionPricing,
+  getDurationOption
+} from "../utils/billingUtils.js";
 import { formatDateToCustomString, groupNotificationsByDate } from "../utils/dateFormatter.js";
 import { formatPhoneNumber } from "../utils/phoneFormatter.js";
 import { playCheckInSound } from "../utils/soundSynth.js";
@@ -92,6 +104,7 @@ import CustomTimePicker from "./CustomTimePicker";
 import CustomSortDropdown from "./CustomSortDropdown";
 import { useAdminViewModel } from "../viewmodels/useAdminViewModel.js";
 import { IMAGES } from "../assets/assets.js";
+import { OfficialAppLogo } from "./OfficialAppLogo.js";
 
 function getLocalDateString(dateInput?: Date): string {
   const d = dateInput || new Date();
@@ -319,6 +332,12 @@ export default function AdminDashboard({
     setSelectedPlanCode,
     gatewaySelected,
     setGatewaySelected,
+    selectedDurationKey,
+    setSelectedDurationKey,
+    selectedDurationMonths,
+    setSelectedDurationMonths,
+    isRecurringSelected,
+    setIsRecurringSelected,
     billingProgress,
     setBillingProgress,
     reportFeedback,
@@ -359,11 +378,38 @@ export default function AdminDashboard({
     onTenantChange,
   });
 
+  // Dynamic Subscription Status Determination
+  const isSubscriptionExpired = React.useMemo(() => {
+    if (!subscription) return false;
+    if (subscription.status === "expired") return true;
+    if (subscription.endDate) {
+      return Date.now() > new Date(subscription.endDate).getTime();
+    }
+    return false;
+  }, [subscription]);
+
   // Update Attendance Feature States (Declared here AFTER useAdminViewModel)
   const [showUpdateAttendanceModal, setShowUpdateAttendanceModal] = React.useState(false);
   const [selectedAttendanceWorkerId, setSelectedAttendanceWorkerId] = React.useState<string>("");
   const [attendanceWorkerSearch, setAttendanceWorkerSearch] = React.useState<string>("");
   const [showAttendanceFormModal, setShowAttendanceFormModal] = React.useState(false);
+
+  // Interactive Onboarding Tour State
+  const [showOnboardingTour, setShowOnboardingTour] = React.useState(false);
+
+  // Auto-launch interactive onboarding tour for new administrators
+  React.useEffect(() => {
+    try {
+      const tourKey = `has_completed_onboarding_admin_${user?.id || "default"}`;
+      const hasCompleted = localStorage.getItem(tourKey);
+      if (!hasCompleted) {
+        const timer = setTimeout(() => {
+          setShowOnboardingTour(true);
+        }, 900);
+        return () => clearTimeout(timer);
+      }
+    } catch (e) {}
+  }, [user?.id]);
 
   const arrivalStatusDropdownOptions = React.useMemo(() => [
     {
@@ -810,6 +856,8 @@ export default function AdminDashboard({
   const [workerFormRole, setWorkerFormRole] = React.useState<any>(UserRole.TEAM_MEMBER);
   const [workerFormDeptId, setWorkerFormDeptId] = React.useState("");
   const [workerFormGender, setWorkerFormGender] = React.useState("Not Specified");
+  const [workerFormBirthDay, setWorkerFormBirthDay] = React.useState<number | "">("");
+  const [workerFormBirthMonth, setWorkerFormBirthMonth] = React.useState<number | "">("");
   const [workerFormActivityDays, setWorkerFormActivityDays] = React.useState<{[key: string]: boolean}>({});
 
   const [leadModalDeptId, setLeadModalDeptId] = React.useState("");
@@ -1949,6 +1997,8 @@ export default function AdminDashboard({
 
   React.useEffect(() => {
     if (showSettingsMenu && settings) {
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
       const cloned = JSON.parse(JSON.stringify(settings));
       if (!cloned.dailyShiftTimes) {
         cloned.dailyShiftTimes = {};
@@ -1973,6 +2023,9 @@ export default function AdminDashboard({
         }
       });
       setLocalSettings(cloned);
+      return () => {
+        document.body.style.overflow = originalOverflow;
+      };
     } else {
       setLocalSettings(null);
     }
@@ -1983,6 +2036,16 @@ export default function AdminDashboard({
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
   }, [activeTab]);
+
+  React.useEffect(() => {
+    if (showAddWorkerModal || showEditWorkerModal || activeLeaderModal) {
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = originalOverflow;
+      };
+    }
+  }, [showAddWorkerModal, showEditWorkerModal, activeLeaderModal]);
 
   const tabRowRef = useRef<HTMLDivElement>(null);
   const summaryTabRowRef = useRef<HTMLDivElement>(null);
@@ -2247,7 +2310,7 @@ export default function AdminDashboard({
                   className="h-full w-full object-cover select-none pointer-events-none"
                 />
               ) : (
-                <Shield className="h-5 w-5" />
+                <QrCode className="h-5 w-5 stroke-[2.2]" />
               )}
             </div>
             <div className="min-w-0">
@@ -2297,14 +2360,27 @@ export default function AdminDashboard({
             </button>
 
             {/* QR Code Action Button Beside Settings */}
-            <button
-              id="admin_open_qr"
-              onClick={() => setShowQrModal(true)}
-              className={`group h-9 w-9 sm:h-10 sm:w-10 rounded-xl border flex items-center justify-center cursor-pointer transition-all duration-200 hover:scale-105 active:scale-95 ${adminThemeClass.inputBg}`}
-              title="Terminal QR Code"
-            >
-              <AnimatedQrCodeIcon className="h-4 w-4 text-cyan-400" />
-            </button>
+            {isSubscriptionExpired ? (
+              <button
+                id="admin_open_qr"
+                type="button"
+                disabled={true}
+                className={`group h-9 w-9 sm:h-10 sm:w-10 rounded-xl border flex items-center justify-center cursor-not-allowed opacity-50 select-none ${adminThemeClass.inputBg}`}
+                title="Terminal QR Code (Disabled - Subscription Expired)"
+              >
+                <Lock className="h-4 w-4 text-neutral-400" />
+              </button>
+            ) : (
+              <button
+                id="admin_open_qr"
+                type="button"
+                onClick={() => setShowQrModal(true)}
+                className={`group h-9 w-9 sm:h-10 sm:w-10 rounded-xl border flex items-center justify-center cursor-pointer transition-all duration-200 hover:scale-105 active:scale-95 ${adminThemeClass.inputBg}`}
+                title="Terminal QR Code"
+              >
+                <AnimatedQrCodeIcon className="h-4 w-4 sm:h-4.5 sm:w-4.5 text-cyan-400" />
+              </button>
+            )}
 
             <button
               id="admin_open_settings"
@@ -2334,7 +2410,7 @@ export default function AdminDashboard({
                     className="h-full w-full object-cover"
                   />
                 ) : (
-                  <Shield className="h-4 w-4" />
+                  <QrCode className="h-4 w-4 stroke-[2.2]" />
                 )}
               </div>
               <div className="min-w-0">
@@ -2373,11 +2449,12 @@ export default function AdminDashboard({
               </button>
 
               <button
-                onClick={() => setShowQrModal(true)}
-                className={`h-8 w-8 rounded-xl border flex items-center justify-center cursor-pointer ${adminThemeClass.inputBg}`}
-                title="Terminal QR Code"
+                type="button"
+                disabled={true}
+                className={`h-8 w-8 rounded-xl border flex items-center justify-center cursor-not-allowed opacity-50 select-none ${adminThemeClass.inputBg}`}
+                title="Terminal QR Code (Disabled)"
               >
-                <AnimatedQrCodeIcon className="h-3.5 w-3.5 text-cyan-400" />
+                <Lock className="h-3.5 w-3.5 text-neutral-400" />
               </button>
 
               <button
@@ -2406,7 +2483,7 @@ export default function AdminDashboard({
                       className="h-full w-full object-cover select-none pointer-events-none"
                     />
                   ) : (
-                    <Shield className="h-5 w-5 animate-pulse" />
+                    <QrCode className="h-5 w-5 stroke-[2.2] animate-pulse" />
                   )}
                 </div>
                 {isSideNavExpanded && (
@@ -2514,29 +2591,65 @@ export default function AdminDashboard({
               </button>
 
               {/* 3. Terminal QR Code */}
-              <button
-                id="side_admin_open_qr"
-                type="button"
-                onClick={() => setShowQrModal(true)}
-                className={`group/btn w-full p-2 rounded-xl border flex items-center transition-all duration-300 cursor-pointer ${
-                  isSideNavExpanded ? "gap-3 px-3" : "justify-center px-1"
-                } ${adminThemeClass.inputBg} hover:border-cyan-500/40 hover:bg-neutral-500/5`}
-                title="Terminal QR Code"
-              >
-                <div className="relative w-10 h-10 rounded-xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center shrink-0 transition-colors duration-300 group-hover/btn:bg-cyan-500/20">
-                  <AnimatedQrCodeIcon className="h-4.5 w-4.5" />
-                </div>
-                {isSideNavExpanded && (
-                  <div className="flex-1 text-left min-w-0">
-                    <span className={`block font-semibold text-xs truncate ${adminThemeClass.textTitle}`}>
-                      Terminal QR Code
-                    </span>
-                    <span className={`block text-[10px] truncate ${adminThemeClass.textMuted}`}>
-                      Mobile Check-In Terminal
-                    </span>
+              {isSubscriptionExpired ? (
+                <button
+                  id="side_admin_open_qr"
+                  type="button"
+                  disabled={true}
+                  className={`group/btn w-full p-2 rounded-xl border flex items-center transition-all duration-300 cursor-not-allowed opacity-50 select-none ${
+                    isSideNavExpanded ? "gap-3 px-3" : "justify-center px-1"
+                  } ${adminThemeClass.inputBg}`}
+                  title="Terminal QR Code (Disabled - Subscription Expired)"
+                >
+                  <div className="relative w-10 h-10 rounded-xl bg-neutral-500/10 text-neutral-400 flex items-center justify-center shrink-0">
+                    <Lock className="h-4 w-4" />
                   </div>
-                )}
-              </button>
+                  {isSideNavExpanded && (
+                    <div className="flex-1 text-left min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`block font-semibold text-xs truncate ${adminThemeClass.textTitle}`}>
+                          Terminal QR Code
+                        </span>
+                        <span className="text-[9px] px-1.5 py-0.2 rounded font-bold uppercase tracking-wider bg-neutral-500/15 text-neutral-400 border border-neutral-500/20">
+                          Disabled
+                        </span>
+                      </div>
+                      <span className={`block text-[10px] truncate ${adminThemeClass.textMuted}`}>
+                        Subscription Expired
+                      </span>
+                    </div>
+                  )}
+                </button>
+              ) : (
+                <button
+                  id="side_admin_open_qr"
+                  type="button"
+                  onClick={() => setShowQrModal(true)}
+                  className={`group/btn w-full p-2 rounded-xl border flex items-center transition-all duration-300 cursor-pointer ${
+                    isSideNavExpanded ? "gap-3 px-3" : "justify-center px-1"
+                  } ${adminThemeClass.inputBg} hover:${adminThemeClass.textHighlight}`}
+                  title="Terminal QR Code"
+                >
+                  <div className="relative w-10 h-10 rounded-xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center shrink-0">
+                    <AnimatedQrCodeIcon className="h-5 w-5 text-cyan-400" />
+                  </div>
+                  {isSideNavExpanded && (
+                    <div className="flex-1 text-left min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`block font-semibold text-xs truncate ${adminThemeClass.textTitle}`}>
+                          Terminal QR Code
+                        </span>
+                        <span className="text-[9px] px-1.5 py-0.2 rounded font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">
+                          Active
+                        </span>
+                      </div>
+                      <span className={`block text-[10px] truncate ${adminThemeClass.textMuted}`}>
+                        Gateway Access
+                      </span>
+                    </div>
+                  )}
+                </button>
+              )}
 
               {/* 4. Menu Settings */}
               <button
@@ -3028,8 +3141,16 @@ export default function AdminDashboard({
         </div>
 
         {/* -------------------- TAB AREA: ATTENDANCE LOGS -------------------- */}
-        {activeTab === "attendance" && (
-          <div className="space-y-6">
+        <AnimatePresence mode="wait">
+          {activeTab === "attendance" && (
+            <motion.div
+              key="attendance"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.18, ease: "easeOut" }}
+              className="space-y-6"
+            >
             {/* Filter Drawer - Expandable and Collapsible */}
             <div
               className={`rounded-3xl border shadow-xl overflow-hidden transition-all duration-300 ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
@@ -3253,41 +3374,35 @@ export default function AdminDashboard({
 
                 <div className="flex flex-wrap items-center gap-2 sm:gap-3" onClick={(e) => e.stopPropagation()}>
                   {/* Auto-Scroll Switch Button */}
-                  <div
-                    id="shift_register_auto_scroll_toggle"
-                    className={`flex items-center space-x-2 px-3 py-1.5 rounded-xl border select-none cursor-pointer transition-all ${
-                      isShiftRegisterAutoScroll
-                        ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-600 dark:text-emerald-400 shadow-sm"
-                        : "bg-neutral-500/10 border-neutral-500/20 text-neutral-500 dark:text-neutral-400 hover:border-neutral-500/40"
-                    }`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setIsShiftRegisterAutoScroll((prev) => !prev);
-                    }}
-                    title="Toggle Auto-Scrolling for Shift Register"
-                  >
-                    <span className="text-xs font-semibold whitespace-nowrap">
-                      Auto-Scroll
-                    </span>
+                  {isSubscriptionExpired ? (
+                    <div
+                      id="shift_register_auto_scroll_toggle"
+                      className="flex items-center space-x-2 px-3 py-1.5 rounded-xl border select-none cursor-not-allowed opacity-50 bg-neutral-500/10 border-neutral-500/20 text-neutral-400"
+                      title="Auto-Scroll is disabled under expired subscription"
+                    >
+                      <Lock className="w-3 h-3 text-neutral-400" />
+                      <span className="text-xs font-semibold whitespace-nowrap">
+                        Auto-Scroll (Disabled)
+                      </span>
+                    </div>
+                  ) : (
                     <button
                       type="button"
-                      role="switch"
-                      aria-checked={isShiftRegisterAutoScroll}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setIsShiftRegisterAutoScroll((prev) => !prev);
-                      }}
-                      className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                        isShiftRegisterAutoScroll ? "bg-emerald-500" : "bg-neutral-400 dark:bg-neutral-700"
+                      id="shift_register_auto_scroll_toggle"
+                      onClick={() => setIsShiftRegisterAutoScroll((prev) => !prev)}
+                      className={`flex items-center space-x-2 px-3 py-1.5 rounded-xl border select-none cursor-pointer transition-all duration-200 shadow-xs ${
+                        isShiftRegisterAutoScroll
+                          ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-600 dark:text-emerald-400"
+                          : `${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`
                       }`}
+                      title={isShiftRegisterAutoScroll ? "Pause shift register auto-scroll" : "Start shift register auto-scroll"}
                     >
-                      <span
-                        className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
-                          isShiftRegisterAutoScroll ? "translate-x-3" : "translate-x-0"
-                        }`}
-                      />
+                      <Play className={`w-3 h-3 ${isShiftRegisterAutoScroll ? "text-emerald-500 fill-emerald-500" : ""}`} />
+                      <span className="text-xs font-semibold whitespace-nowrap">
+                        {isShiftRegisterAutoScroll ? `Auto-Scroll (${shiftRegisterScrollSpeed.toFixed(1)}x)` : "Auto-Scroll"}
+                      </span>
                     </button>
-                  </div>
+                  )}
 
                   {/* Progressive Linear Speed-Control Bar */}
                   <AnimatePresence>
@@ -3381,23 +3496,33 @@ export default function AdminDashboard({
                     )}
                   </AnimatePresence>
 
-                  <button
-                    type="button"
-                    id="at_a_glance_attendance_btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setIsAtAGlanceOpen(!isAtAGlanceOpen);
-                    }}
-                    className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold border transition-all shadow-sm ${
-                      isAtAGlanceOpen
-                        ? "bg-emerald-500 text-white border-emerald-500 shadow-emerald-500/20"
-                        : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20"
-                    }`}
-                    title="A Glance Attendance Overlay"
-                  >
-                    <Eye className="w-4 h-4 shrink-0" />
-                    <span>A Glance</span>
-                  </button>
+                  {isSubscriptionExpired ? (
+                    <button
+                      type="button"
+                      id="at_a_glance_attendance_btn"
+                      disabled={true}
+                      className="flex items-center space-x-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold border transition-all shadow-sm opacity-50 cursor-not-allowed bg-neutral-500/10 text-neutral-400 border-neutral-500/20 select-none"
+                      title="A Glance is disabled under expired subscription"
+                    >
+                      <Lock className="w-3.5 h-3.5 shrink-0 text-neutral-400" />
+                      <span>A Glance (Disabled)</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      id="at_a_glance_attendance_btn"
+                      onClick={() => setIsAtAGlanceOpen(true)}
+                      className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold border transition-all shadow-sm cursor-pointer hover:scale-105 active:scale-95 ${
+                        isAtAGlanceOpen
+                          ? "bg-cyan-500/15 border-cyan-500/40 text-cyan-500"
+                          : `${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle} hover:${adminThemeClass.textHighlight}`
+                      }`}
+                      title="Open At-a-Glance Attendance Intelligence Overlay"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 shrink-0 text-cyan-400 animate-pulse" />
+                      <span>At a Glance</span>
+                    </button>
+                  )}
 
                   <span className={`text-[10px] font-mono font-bold uppercase tracking-wider hidden sm:inline-block ${adminThemeClass.textMuted}`}>
                     {isShiftRegisterExpanded ? "Click to Collapse" : "Click to Expand"}
@@ -3816,12 +3941,19 @@ export default function AdminDashboard({
                 )}
               </AnimatePresence>
             </div>
-          </div>
+          </motion.div>
         )}
 
         {/* -------------------- TAB AREA: ANALYTICS DESK -------------------- */}
         {activeTab === "analytics" && (
-          <div className="space-y-8 select-none">
+          <motion.div
+            key="analytics"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+            className="space-y-8 select-none"
+          >
             {/* Analytics Desk: Executive Summary Metrics & Visual Graphs Container */}
             <div
               className={`rounded-3xl border shadow-xl overflow-hidden transition-all duration-300 ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
@@ -4916,11 +5048,18 @@ export default function AdminDashboard({
                 )}
               </AnimatePresence>
             </div>
-          </div>
+          </motion.div>
         )}
         {/* -------------------- TAB AREA: PERMISSIONS DESK -------------------- */}
         {activeTab === "permissions" && (
-          <div className="space-y-6 select-none font-sans">
+          <motion.div
+            key="permissions"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+            className="space-y-6 select-none font-sans"
+          >
             {/* Verify Active Permission Exemption Requests Container */}
             <div
               className={`rounded-3xl border shadow-xl overflow-hidden transition-all duration-300 ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
@@ -5433,12 +5572,18 @@ export default function AdminDashboard({
                 )}
               </AnimatePresence>
             </div>
-          </div>
+          </motion.div>
         )}
         {/* -------------------- TAB AREA: WORKER PROFILES -------------------- */}
-        {/* -------------------- TAB AREA: WORKER PROFILES -------------------- */}
         {activeTab === "profiles" && (
-          <div className="space-y-6 select-none font-sans">
+          <motion.div
+            key="profiles"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+            className="space-y-6 select-none font-sans"
+          >
             {/* Corporate Directories Roster Container */}
             <div
               className={`rounded-3xl border shadow-xl overflow-hidden transition-all duration-300 ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
@@ -5473,6 +5618,17 @@ export default function AdminDashboard({
                 </div>
 
                 <div className="flex items-center space-x-2 shrink-0 self-end md:self-center">
+                  {isSubscriptionExpired ? (
+                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-neutral-500/15 text-neutral-400 border border-neutral-500/30 flex items-center gap-1.5">
+                      <Lock className="h-3 w-3" />
+                      Feature Disabled
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5">
+                      <ShieldCheck className="h-3 w-3" />
+                      Active Directory
+                    </span>
+                  )}
                   <span className={`text-[10px] font-mono font-bold uppercase tracking-wider hidden sm:inline-block ${adminThemeClass.textMuted}`}>
                     {isCorporateDirectoriesExpanded ? "Click to Collapse" : "Click to Expand"}
                   </span>
@@ -5489,8 +5645,16 @@ export default function AdminDashboard({
                     className="overflow-hidden p-5 sm:p-6"
                   >
 
+              {/* Restriction Notice */}
+              {isSubscriptionExpired && (
+                <div className="mb-4 p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center gap-2.5 text-amber-500 dark:text-amber-400 text-xs">
+                  <Lock className="h-4 w-4 shrink-0" />
+                  <span>Corporate Directory Roster is currently disabled because your subscription has expired. Please renew your subscription to restore full access.</span>
+                </div>
+              )}
+
               {/* Action Suite: Search, Create Employee & Grid/List toggles */}
-              <div className="flex items-center gap-3.5 flex-wrap w-full md:w-auto">
+              <div className={`flex items-center gap-3.5 flex-wrap w-full md:w-auto ${isSubscriptionExpired ? "opacity-50 pointer-events-none select-none cursor-not-allowed" : ""}`}>
                 {/* Search Box */}
                 <div className="relative flex-1 sm:flex-initial sm:w-64">
                   <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -5582,6 +5746,8 @@ export default function AdminDashboard({
                     setWorkerFormPhone("");
                     setWorkerFormRole(UserRole.TEAM_MEMBER);
                     setWorkerFormGender("Not Specified");
+                    setWorkerFormBirthDay("");
+                    setWorkerFormBirthMonth("");
                     setWorkerFormDeptId("unassigned");
                     setWorkerFormActivityDays(settings?.activityDays || {
                       Monday: true,
@@ -5631,7 +5797,18 @@ export default function AdminDashboard({
                 </div>
 
                 <div className="flex items-center space-x-2 shrink-0">
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/10 text-cyan-500 border border-cyan-500/20">
+                  {isSubscriptionExpired ? (
+                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-neutral-500/15 text-neutral-400 border border-neutral-500/30 flex items-center gap-1.5">
+                      <Lock className="h-3 w-3" />
+                      Feature Disabled
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5">
+                      <ShieldCheck className="h-3 w-3" />
+                      Active Personnel
+                    </span>
+                  )}
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-neutral-500/10 text-neutral-400 border border-neutral-500/20">
                     {filteredWorkersForProfiles.length} Members
                   </span>
                   <span className={`text-[10px] font-mono font-bold uppercase tracking-wider hidden sm:inline-block ${adminThemeClass.textMuted}`}>
@@ -5649,8 +5826,16 @@ export default function AdminDashboard({
                     transition={{ duration: 0.25, ease: "easeInOut" }}
                     className="overflow-hidden p-4 sm:p-6"
                   >
+                    {/* Restriction Notice */}
+                    {isSubscriptionExpired && (
+                      <div className="mb-4 p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center gap-2.5 text-amber-500 dark:text-amber-400 text-xs">
+                        <Lock className="h-4 w-4 shrink-0" />
+                        <span>Personnel Directory Collection is currently disabled because your subscription has expired. Please renew your subscription to restore full access.</span>
+                      </div>
+                    )}
+
                     {/* Render Grid / List layouts */}
-            <div className="relative group/scroll w-full">
+            <div className={`relative group/scroll w-full ${isSubscriptionExpired ? "opacity-50 pointer-events-none select-none cursor-not-allowed" : ""}`}>
               {/* Top-center invisible down arrow button */}
               <button
                 type="button"
@@ -5864,12 +6049,255 @@ export default function AdminDashboard({
                 )}
               </AnimatePresence>
             </div>
-          </div>
+          </motion.div>
         )}
 
         {/* -------------------- TAB AREA: BILLING & SUBSCRIPTION -------------------- */}
         {activeTab === "billing" && (
-          <div className="space-y-6 select-none font-sans">
+          <motion.div
+            key="billing"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+            className="space-y-6 select-none font-sans"
+          >
+            {/* Active Subscription Overview Card */}
+            {(() => {
+              const activePlanName = subscription?.planCode 
+                ? (subscription.planCode.charAt(0).toUpperCase() + subscription.planCode.slice(1) + " Plan")
+                : "Business Plan (Professional)";
+              
+              const startDate = subscription?.startDate ? new Date(subscription.startDate) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+              const endDate = subscription?.endDate ? new Date(subscription.endDate) : new Date(Date.now() + 23 * 24 * 60 * 60 * 1000);
+              
+              const now = Date.now();
+              const diffTime = endDate.getTime() - now;
+              const remainingDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+              const isExpired = subscription?.status === "expired" || remainingDays <= 0;
+              
+              const totalDurationDays = Math.max(1, Math.round((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)));
+              
+              const activeDurationOpt = getDurationOption(
+                subscription?.durationKey ||
+                subscription?.durationMonths ||
+                (totalDurationDays <= 10 ? "1w" : totalDurationDays <= 20 ? "2w" : totalDurationDays <= 45 ? "1m" : totalDurationDays <= 75 ? "2m" : totalDurationDays <= 120 ? "3m" : totalDurationDays <= 240 ? "6m" : "12m")
+              );
+              const activeDurationDisplay = subscription?.durationLabel || activeDurationOpt.label;
+              const activeDiscountDisplay = subscription?.discountPercent !== undefined
+                ? (subscription.discountPercent === 0 ? "No Discount (0%)" : `${subscription.discountPercent}% Discount`)
+                : (activeDurationOpt.discountPercent === 0 ? "No Discount (0%)" : `${activeDurationOpt.discountPercent}% Discount`);
+
+              const durationLabel = `${totalDurationDays} Days (${activeDurationDisplay})`;
+
+              const formatDate = (date: Date) => {
+                return date.toLocaleDateString("en-US", {
+                  year: "numeric",
+                  month: "short",
+                  day: "numeric",
+                });
+              };
+
+              return (
+                <div
+                  id="billing_subscription_overview_card"
+                  className={`p-6 sm:p-7 rounded-3xl border shadow-xl relative overflow-hidden backdrop-blur-md transition-all ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-5 border-b border-neutral-200/10">
+                    <div className="flex items-center space-x-3">
+                      <div className="h-10 w-10 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 flex items-center justify-center shrink-0">
+                        <ShieldCheck className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h3 className={`font-semibold text-lg ${adminThemeClass.textTitle}`}>
+                          Active Subscription Details
+                        </h3>
+                        <p className={`text-xs font-light ${adminThemeClass.textMuted}`}>
+                          Workspace licensing tier, duration cycle, and renewal milestones.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div>
+                      {isExpired ? (
+                        <span className="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider bg-red-500/15 text-red-400 border border-red-500/30">
+                          <span className="w-2 h-2 rounded-full bg-red-400 mr-2 animate-ping" />
+                          Plan Expired
+                        </span>
+                      ) : remainingDays <= 5 ? (
+                        <span className="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                          <span className="w-2 h-2 rounded-full bg-amber-400 mr-2 animate-pulse" />
+                          {remainingDays} Days Remaining • Expiring Soon
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                          <span className="w-2 h-2 rounded-full bg-emerald-400 mr-2" />
+                          {remainingDays} Days Remaining • Active
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Grid displaying the 5 requested subscription information items */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 pt-5">
+                    {/* 1. Current Subscription Plan */}
+                    <div className={`p-4 rounded-2xl border flex flex-col justify-between ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                      <div className="flex items-center justify-between text-xs font-medium text-cyan-400 mb-1.5">
+                        <span className={adminThemeClass.textMuted}>Current Plan</span>
+                        <Shield className="h-4 w-4" />
+                      </div>
+                      <div className={`text-base font-bold truncate ${adminThemeClass.textTitle}`}>
+                        {activePlanName}
+                      </div>
+                      <span className="text-[11px] text-neutral-400 mt-1 capitalize">
+                        {subscription?.status === "trial" ? "Trial License" : "Commercial License"}
+                      </span>
+                    </div>
+
+                    {/* 2. Subscription Duration */}
+                    <div className={`p-4 rounded-2xl border flex flex-col justify-between ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                      <div className="flex items-center justify-between text-xs font-medium text-cyan-400 mb-1.5">
+                        <span className={adminThemeClass.textMuted}>Subscription Duration</span>
+                        <Clock className="h-4 w-4" />
+                      </div>
+                      <div className={`text-base font-bold truncate ${adminThemeClass.textTitle}`}>
+                        {activeDurationDisplay}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold font-mono bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                          {activeDiscountDisplay}
+                        </span>
+                        {subscription?.recurring && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                            <Repeat className="w-2.5 h-2.5 mr-1" />
+                            Auto-Renew
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* 3. Subscription Start Date */}
+                    <div className={`p-4 rounded-2xl border flex flex-col justify-between ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                      <div className="flex items-center justify-between text-xs font-medium text-cyan-400 mb-1.5">
+                        <span className={adminThemeClass.textMuted}>Start Date</span>
+                        <Calendar className="h-4 w-4" />
+                      </div>
+                      <div className={`text-base font-bold truncate ${adminThemeClass.textTitle}`}>
+                        {formatDate(startDate)}
+                      </div>
+                      <span className="text-[11px] text-neutral-400 mt-1">
+                        Activated cycle date
+                      </span>
+                    </div>
+
+                    {/* 4. Subscription Expiration Date */}
+                    <div className={`p-4 rounded-2xl border flex flex-col justify-between ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                      <div className="flex items-center justify-between text-xs font-medium text-cyan-400 mb-1.5">
+                        <span className={adminThemeClass.textMuted}>Expiration Date</span>
+                        <Calendar className="h-4 w-4" />
+                      </div>
+                      <div className={`text-base font-bold truncate ${adminThemeClass.textTitle}`}>
+                        {formatDate(endDate)}
+                      </div>
+                      <span className="text-[11px] text-neutral-400 mt-1">
+                        {isExpired ? "Needs renewal" : "Next scheduled renewal"}
+                      </span>
+                    </div>
+
+                    {/* 5. Remaining Subscription Duration or Plan Expiration Status */}
+                    <div className={`p-4 rounded-2xl border flex flex-col justify-between sm:col-span-2 lg:col-span-1 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                      <div className="flex items-center justify-between text-xs font-medium text-cyan-400 mb-1.5">
+                        <span className={adminThemeClass.textMuted}>Status & Remaining</span>
+                        <CheckCircle2 className="h-4 w-4" />
+                      </div>
+                      <div className={`text-base font-bold truncate ${
+                        isExpired
+                          ? "text-red-400"
+                          : remainingDays <= 5
+                          ? "text-amber-400"
+                          : "text-emerald-400"
+                      }`}>
+                        {isExpired ? "Expired" : `${remainingDays} Days Left`}
+                      </div>
+                      <div className="w-full bg-neutral-200 dark:bg-neutral-700/50 rounded-full h-1.5 mt-2 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-500 ${
+                            isExpired
+                              ? "bg-red-500 w-full"
+                              : remainingDays <= 5
+                              ? "bg-amber-500"
+                              : "bg-emerald-500"
+                          }`}
+                          style={{
+                            width: isExpired ? "100%" : `${Math.min(100, Math.max(5, (remainingDays / totalDurationDays) * 100))}%`
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Subscription Duration Options & Progressive Discount Structure */}
+                  <div className="mt-5 pt-5 border-t border-neutral-200/10 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5">
+                      <div className="flex items-center space-x-2">
+                        <Tag className="h-4 w-4 text-cyan-400" />
+                        <h4 className={`text-xs font-bold uppercase tracking-wider ${adminThemeClass.textTitle}`}>
+                          Subscription Duration Options & Corresponding Discounts
+                        </h4>
+                      </div>
+                      <span className="text-[11px] text-cyan-500 dark:text-cyan-400 font-mono">
+                        Progressive duration savings from 0% up to 25% max discount
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5">
+                      {SUBSCRIPTION_DURATION_OPTIONS.map((plan) => {
+                        const isCurrentActive = activeDurationOpt.key === plan.key;
+                        return (
+                          <div
+                            key={plan.key}
+                            id={`active_sub_duration_plan_${plan.key}`}
+                            className={`p-3 rounded-2xl border flex flex-col justify-between transition-all duration-200 ${
+                              isCurrentActive
+                                ? "border-cyan-500 bg-cyan-500/10 shadow-sm shadow-cyan-950/20 ring-1 ring-cyan-500/50"
+                                : `${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} hover:border-cyan-500/30`
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-1 mb-1">
+                              <span className={`text-xs font-bold truncate ${adminThemeClass.textTitle}`}>
+                                {plan.label}
+                              </span>
+                              {isCurrentActive && (
+                                <span className="h-2 w-2 rounded-full bg-cyan-400 animate-pulse shrink-0" title="Active Duration" />
+                              )}
+                            </div>
+                            <div>
+                              <span
+                                className={`inline-block text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${
+                                  plan.discountPercent === 0
+                                    ? "bg-neutral-500/10 text-neutral-400 border-neutral-500/20"
+                                    : plan.discountPercent === 25
+                                    ? "bg-gradient-to-r from-emerald-500/20 to-cyan-500/20 text-emerald-400 border-emerald-500/40"
+                                    : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                                }`}
+                              >
+                                {plan.discountPercent === 0 ? "No Discount (0%)" : `${plan.discountPercent}%`}
+                              </span>
+                              {isCurrentActive && (
+                                <span className="block text-[9px] font-semibold text-cyan-400 mt-1 uppercase tracking-wider">
+                                  Current Plan
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Header: Billing Gateway Workspace (Header Card appearing stylishly) */}
             <div
               className={`p-6 sm:p-8 rounded-3xl border shadow-xl transition-all duration-300 relative overflow-hidden backdrop-blur-md ${
@@ -5935,169 +6363,341 @@ export default function AdminDashboard({
                   transition={{ duration: 0.25 }}
                   className="space-y-4"
                 >
-                  <div className="flex items-center justify-between">
-                    <h4
-                      className={`font-bold text-base ${adminThemeClass.textTitle}`}
-                    >
-                      Available Subscription Packages
-                    </h4>
-                    <span className="text-[10px] font-mono text-cyan-405 dark:text-cyan-400">
-                      Select a package setup below to configure gateway
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                    <div>
+                      <h4
+                        className={`font-bold text-base ${adminThemeClass.textTitle}`}
+                      >
+                        Available Subscription Packages
+                      </h4>
+                      <p className={`text-xs ${adminThemeClass.textMuted}`}>
+                        Select a package and commitment duration below to configure gateway
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-mono text-cyan-500 dark:text-cyan-400">
+                      Discounts applied automatically per duration
                     </span>
+                  </div>
+
+                  {/* Duration and Recurring Selector Controls */}
+                  <div className={`p-5 rounded-3xl border shadow-sm ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder} space-y-4`}>
+                    <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <Clock className="h-4 w-4 text-cyan-400" />
+                          <h5 className={`font-bold text-sm ${adminThemeClass.textTitle}`}>
+                            Select Subscription Duration
+                          </h5>
+                        </div>
+                        <p className={`text-xs mt-0.5 ${adminThemeClass.textMuted}`}>
+                          Multi-month commitments receive upfront discounted billing rates.
+                        </p>
+                      </div>
+
+                      {/* Duration Pills: 1 Week, 2 Weeks, 1 Month, 2 Months, 3 Months, 6 Months, 12 Months */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5">
+                        {SUBSCRIPTION_DURATION_OPTIONS.map((opt) => {
+                          const currentOpt = getDurationOption(selectedDurationKey || selectedDurationMonths);
+                          const isSelected = currentOpt.key === opt.key;
+                          return (
+                            <button
+                              key={opt.key}
+                              type="button"
+                              id={`duration_option_${opt.key}`}
+                              onClick={() => {
+                                setSelectedDurationKey(opt.key);
+                                setSelectedDurationMonths(opt.key);
+                              }}
+                              className={`px-3 py-2.5 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center ${
+                                isSelected
+                                  ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white border-transparent shadow-md shadow-cyan-950/30 scale-[1.02]"
+                                  : `${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle} hover:border-cyan-500/40`
+                              }`}
+                            >
+                              <span className="font-bold text-xs">{opt.label}</span>
+                              <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-full mt-1 font-bold ${
+                                isSelected
+                                  ? "bg-white/20 text-white"
+                                  : opt.discountPercent === 0
+                                  ? "bg-neutral-500/10 text-neutral-400 border border-neutral-500/20"
+                                  : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                              }`}>
+                                {opt.discountPercent === 0 ? "No Discount (0%)" : `${opt.discountPercent}% OFF`}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Recurring Billing Toggle */}
+                    <div className="pt-3.5 border-t border-neutral-200/10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                      <div className="flex items-center space-x-3">
+                        <div className="p-2 rounded-xl bg-cyan-500/10 text-cyan-400 shrink-0">
+                          <Repeat className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <span className={`text-xs font-bold block ${adminThemeClass.textTitle}`}>
+                            Automatic Recurring Payments
+                          </span>
+                          <span className={`text-[11px] block ${adminThemeClass.textMuted}`}>
+                            Automatically renew workspace license on due date with applied duration discounts.
+                          </span>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        id="recurring_payment_toggle_btn"
+                        onClick={() => setIsRecurringSelected(!isRecurringSelected)}
+                        className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center space-x-2.5 transition-all cursor-pointer self-start sm:self-auto ${
+                          isRecurringSelected
+                            ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20"
+                            : `${adminThemeClass.innerBg} border ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`
+                        }`}
+                      >
+                        <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-colors ${
+                          isRecurringSelected ? "bg-emerald-400 border-emerald-400" : "border-neutral-400"
+                        }`}>
+                          {isRecurringSelected && <Check className="w-2.5 h-2.5 text-black stroke-[3]" />}
+                        </div>
+                        <span>{isRecurringSelected ? "Recurring Active" : "One-Time Billing"}</span>
+                      </button>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                     {/* Starter */}
-                    <div
-                      className={`p-6 rounded-3xl border flex flex-col justify-between transition-all duration-200 ${selectedPlanCode === "starter" ? `border-cyan-500 bg-cyan-500/5 ring-1 ring-cyan-500 ${adminThemeClass.cardBg}` : `${adminThemeClass.cardBg}`}`}
-                    >
-                      <div>
-                        <span
-                          className={`text-[10px] uppercase font-bold ${adminThemeClass.textMuted}`}
+                    {(() => {
+                      const pricing = calculateSubscriptionPricing("starter", selectedDurationKey || selectedDurationMonths);
+                      const isSelected = selectedPlanCode === "starter";
+
+                      return (
+                        <div
+                          className={`p-6 rounded-3xl border flex flex-col justify-between transition-all duration-200 ${isSelected ? `border-cyan-500 bg-cyan-500/5 ring-1 ring-cyan-500 ${adminThemeClass.cardBg}` : `${adminThemeClass.cardBg}`}`}
                         >
-                          {translations.starterPlan || "Starter Plan"}
-                        </span>
-                        <h4
-                          className={`text-2xl font-bold mt-1 ${adminThemeClass.textTitle}`}
-                        >
-                          NGN 10,000
-                        </h4>
-                        <span
-                          className={`text-xs block pb-4 mb-4 border-b ${adminThemeClass.textMuted} ${adminThemeClass.accentBorder}`}
-                        >
-                          {translations.monthlyRenewalBilling ||
-                            "Monthly renewal billing"}
-                        </span>
-                        <p
-                          className={`text-xs font-light mb-6 font-sans ${adminThemeClass.textMuted}`}
-                        >
-                          {translations.starterPlanDesc ||
-                            "Pragmatic workspace supporting up to 10 employees safely."}
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => setSelectedPlanCode("starter")}
-                        className={`w-full py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all ${selectedPlanCode === "starter" ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/45" : `${adminThemeClass.innerBg} border ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`}`}
-                      >
-                        {selectedPlanCode === "starter"
-                          ? "Check Selected"
-                          : translations.selectPlanBtn || "Select Plan"}
-                      </button>
-                    </div>
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <span
+                                className={`text-[10px] uppercase font-bold ${adminThemeClass.textMuted}`}
+                              >
+                                {translations.starterPlan || "Starter Plan"}
+                              </span>
+                              <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border font-bold ${
+                                pricing.discountPercent === 0
+                                  ? "bg-neutral-500/10 text-neutral-400 border-neutral-500/20"
+                                  : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                              }`}>
+                                {pricing.discountPercent === 0 ? "No Discount (0%)" : `${pricing.discountPercent}% OFF`}
+                              </span>
+                            </div>
+                            <div className="mt-1">
+                              <span className="text-xs line-through text-neutral-400 font-mono block">
+                                NGN {pricing.originalPrice.toLocaleString()}
+                              </span>
+                              <h4
+                                className={`text-2xl font-extrabold ${adminThemeClass.textTitle}`}
+                              >
+                                NGN {pricing.finalPrice.toLocaleString()}
+                              </h4>
+                            </div>
+                            <span
+                              className={`text-xs block pb-4 mb-4 border-b ${adminThemeClass.textMuted} ${adminThemeClass.accentBorder}`}
+                            >
+                              For {pricing.durationOption.label} (NGN {pricing.monthlyEquivalentPrice.toLocaleString()}/mo)
+                            </span>
+                            <p
+                              className={`text-xs font-light mb-6 font-sans ${adminThemeClass.textMuted}`}
+                            >
+                              {translations.starterPlanDesc ||
+                                "Pragmatic workspace supporting up to 10 employees safely."}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => setSelectedPlanCode("starter")}
+                            className={`w-full py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all ${isSelected ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/45" : `${adminThemeClass.innerBg} border ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`}`}
+                          >
+                            {isSelected
+                              ? `Selected (${pricing.durationOption.label} Plan)`
+                              : `Select ${pricing.durationOption.label} Plan`}
+                          </button>
+                        </div>
+                      );
+                    })()}
 
                     {/* Business */}
-                    <div
-                      className={`p-6 rounded-3xl border flex flex-col justify-between transition-all duration-200 ${selectedPlanCode === "business" ? `border-cyan-500 bg-cyan-500/5 ring-1 ring-cyan-500 ${adminThemeClass.cardBg}` : `${adminThemeClass.cardBg}`}`}
-                    >
-                      <div>
-                        <span
-                          className={`text-[10px] uppercase font-bold ${adminThemeClass.textMuted}`}
+                    {(() => {
+                      const pricing = calculateSubscriptionPricing("business", selectedDurationKey || selectedDurationMonths);
+                      const isSelected = selectedPlanCode === "business";
+
+                      return (
+                        <div
+                          className={`p-6 rounded-3xl border flex flex-col justify-between transition-all duration-200 ${isSelected ? `border-cyan-500 bg-cyan-500/5 ring-1 ring-cyan-500 ${adminThemeClass.cardBg}` : `${adminThemeClass.cardBg}`}`}
                         >
-                          {translations.businessPlan || "Business Plan"}
-                        </span>
-                        <h4
-                          className={`text-2xl font-bold mt-1 ${adminThemeClass.textTitle}`}
-                        >
-                          NGN 30,000
-                        </h4>
-                        <span
-                          className={`text-xs block pb-4 mb-4 border-b ${adminThemeClass.textMuted} ${adminThemeClass.accentBorder}`}
-                        >
-                          {translations.monthlyRenewalBilling ||
-                            "Monthly renewal billing"}
-                        </span>
-                        <p
-                          className={`text-xs font-light mb-6 font-sans ${adminThemeClass.textMuted}`}
-                        >
-                          {translations.businessPlanDesc ||
-                            "Designed for expanding business operations supporting 11-50 employees."}
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => setSelectedPlanCode("business")}
-                        className={`w-full py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all ${selectedPlanCode === "business" ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/45" : `${adminThemeClass.innerBg} border ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`}`}
-                      >
-                        {selectedPlanCode === "business"
-                          ? "Check Selected"
-                          : translations.selectPlanBtn || "Select Plan"}
-                      </button>
-                    </div>
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <span
+                                className={`text-[10px] uppercase font-bold ${adminThemeClass.textMuted}`}
+                              >
+                                {translations.businessPlan || "Business Plan"}
+                              </span>
+                              <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border font-bold ${
+                                pricing.discountPercent === 0
+                                  ? "bg-neutral-500/10 text-neutral-400 border-neutral-500/20"
+                                  : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                              }`}>
+                                {pricing.discountPercent === 0 ? "No Discount (0%)" : `${pricing.discountPercent}% OFF`}
+                              </span>
+                            </div>
+                            <div className="mt-1">
+                              <span className="text-xs line-through text-neutral-400 font-mono block">
+                                NGN {pricing.originalPrice.toLocaleString()}
+                              </span>
+                              <h4
+                                className={`text-2xl font-extrabold ${adminThemeClass.textTitle}`}
+                              >
+                                NGN {pricing.finalPrice.toLocaleString()}
+                              </h4>
+                            </div>
+                            <span
+                              className={`text-xs block pb-4 mb-4 border-b ${adminThemeClass.textMuted} ${adminThemeClass.accentBorder}`}
+                            >
+                              For {pricing.durationOption.label} (NGN {pricing.monthlyEquivalentPrice.toLocaleString()}/mo)
+                            </span>
+                            <p
+                              className={`text-xs font-light mb-6 font-sans ${adminThemeClass.textMuted}`}
+                            >
+                              {translations.businessPlanDesc ||
+                                "Designed for expanding business operations supporting 11-50 employees."}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => setSelectedPlanCode("business")}
+                            className={`w-full py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all ${isSelected ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/45" : `${adminThemeClass.innerBg} border ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`}`}
+                          >
+                            {isSelected
+                              ? `Selected (${pricing.durationOption.label} Plan)`
+                              : `Select ${pricing.durationOption.label} Plan`}
+                          </button>
+                        </div>
+                      );
+                    })()}
 
                     {/* Growth */}
-                    <div
-                      className={`p-6 rounded-3xl border flex flex-col justify-between transition-all duration-200 ${selectedPlanCode === "growth" ? `border-cyan-500 bg-cyan-500/5 ring-1 ring-cyan-500 ${adminThemeClass.cardBg}` : `${adminThemeClass.cardBg}`}`}
-                    >
-                      <div>
-                        <span
-                          className={`text-[10px] uppercase font-bold ${adminThemeClass.textMuted}`}
+                    {(() => {
+                      const pricing = calculateSubscriptionPricing("growth", selectedDurationKey || selectedDurationMonths);
+                      const isSelected = selectedPlanCode === "growth";
+
+                      return (
+                        <div
+                          className={`p-6 rounded-3xl border flex flex-col justify-between transition-all duration-200 ${isSelected ? `border-cyan-500 bg-cyan-500/5 ring-1 ring-cyan-500 ${adminThemeClass.cardBg}` : `${adminThemeClass.cardBg}`}`}
                         >
-                          {translations.growthPlan || "Growth Plan"}
-                        </span>
-                        <h4
-                          className={`text-2xl font-bold mt-1 ${adminThemeClass.textTitle}`}
-                        >
-                          NGN 50,050
-                        </h4>
-                        <span
-                          className={`text-xs block pb-4 mb-4 border-b ${adminThemeClass.textMuted} ${adminThemeClass.accentBorder}`}
-                        >
-                          {translations.monthlyRenewalBilling ||
-                            "Monthly renewal billing"}
-                        </span>
-                        <p
-                          className={`text-xs font-light mb-6 font-sans ${adminThemeClass.textMuted}`}
-                        >
-                          {translations.growthPlanDesc ||
-                            "Pragmatic workspace supporting up to 51-100 employees safely."}
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => setSelectedPlanCode("growth")}
-                        className={`w-full py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all ${selectedPlanCode === "growth" ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/45" : `${adminThemeClass.innerBg} border ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`}`}
-                      >
-                        {selectedPlanCode === "growth"
-                          ? "Check Selected"
-                          : translations.selectPlanBtn || "Select Plan"}
-                      </button>
-                    </div>
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <span
+                                className={`text-[10px] uppercase font-bold ${adminThemeClass.textMuted}`}
+                              >
+                                {translations.growthPlan || "Growth Plan"}
+                              </span>
+                              <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border font-bold ${
+                                pricing.discountPercent === 0
+                                  ? "bg-neutral-500/10 text-neutral-400 border-neutral-500/20"
+                                  : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                              }`}>
+                                {pricing.discountPercent === 0 ? "No Discount (0%)" : `${pricing.discountPercent}% OFF`}
+                              </span>
+                            </div>
+                            <div className="mt-1">
+                              <span className="text-xs line-through text-neutral-400 font-mono block">
+                                NGN {pricing.originalPrice.toLocaleString()}
+                              </span>
+                              <h4
+                                className={`text-2xl font-extrabold ${adminThemeClass.textTitle}`}
+                              >
+                                NGN {pricing.finalPrice.toLocaleString()}
+                              </h4>
+                            </div>
+                            <span
+                              className={`text-xs block pb-4 mb-4 border-b ${adminThemeClass.textMuted} ${adminThemeClass.accentBorder}`}
+                            >
+                              For {pricing.durationOption.label} (NGN {pricing.monthlyEquivalentPrice.toLocaleString()}/mo)
+                            </span>
+                            <p
+                              className={`text-xs font-light mb-6 font-sans ${adminThemeClass.textMuted}`}
+                            >
+                              {translations.growthPlanDesc ||
+                                "Pragmatic workspace supporting up to 51-100 employees safely."}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => setSelectedPlanCode("growth")}
+                            className={`w-full py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all ${isSelected ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/45" : `${adminThemeClass.innerBg} border ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`}`}
+                          >
+                            {isSelected
+                              ? `Selected (${pricing.durationOption.label} Plan)`
+                              : `Select ${pricing.durationOption.label} Plan`}
+                          </button>
+                        </div>
+                      );
+                    })()}
 
                     {/* Enterprise */}
-                    <div
-                      className={`p-6 rounded-3xl border flex flex-col justify-between transition-all duration-200 ${selectedPlanCode === "enterprise" ? `border-cyan-500 bg-cyan-500/5 ring-1 ring-cyan-500 ${adminThemeClass.cardBg}` : `${adminThemeClass.cardBg}`}`}
-                    >
-                      <div>
-                        <span
-                          className={`text-[10px] uppercase font-bold ${adminThemeClass.textMuted}`}
+                    {(() => {
+                      const pricing = calculateSubscriptionPricing("enterprise", selectedDurationKey || selectedDurationMonths);
+                      const isSelected = selectedPlanCode === "enterprise";
+
+                      return (
+                        <div
+                          className={`p-6 rounded-3xl border flex flex-col justify-between transition-all duration-200 ${isSelected ? `border-cyan-500 bg-cyan-500/5 ring-1 ring-cyan-500 ${adminThemeClass.cardBg}` : `${adminThemeClass.cardBg}`}`}
                         >
-                          {translations.enterprisePlan || "Enterprise Plan"}
-                        </span>
-                        <h4
-                          className={`text-2xl font-bold mt-1 ${adminThemeClass.textTitle}`}
-                        >
-                          NGN 150,000
-                        </h4>
-                        <span
-                          className={`text-xs block pb-4 mb-4 border-b ${adminThemeClass.textMuted} ${adminThemeClass.accentBorder}`}
-                        >
-                          {translations.monthlyRenewalBilling ||
-                            "Monthly renewal billing"}
-                        </span>
-                        <p
-                          className={`text-xs font-light mb-6 font-sans ${adminThemeClass.textMuted}`}
-                        >
-                          {translations.enterprisePlanDesc ||
-                            "Pragmatic workspace supporting unlimited employees and priority compilations."}
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => setSelectedPlanCode("enterprise")}
-                        className={`w-full py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all ${selectedPlanCode === "enterprise" ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/45" : `${adminThemeClass.innerBg} border ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`}`}
-                      >
-                        {selectedPlanCode === "enterprise"
-                          ? "Check Selected"
-                          : translations.selectPlanBtn || "Select Plan"}
-                      </button>
-                    </div>
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <span
+                                className={`text-[10px] uppercase font-bold ${adminThemeClass.textMuted}`}
+                              >
+                                {translations.enterprisePlan || "Enterprise Plan"}
+                              </span>
+                              <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border font-bold ${
+                                pricing.discountPercent === 0
+                                  ? "bg-neutral-500/10 text-neutral-400 border-neutral-500/20"
+                                  : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                              }`}>
+                                {pricing.discountPercent === 0 ? "No Discount (0%)" : `${pricing.discountPercent}% OFF`}
+                              </span>
+                            </div>
+                            <div className="mt-1">
+                              <span className="text-xs line-through text-neutral-400 font-mono block">
+                                NGN {pricing.originalPrice.toLocaleString()}
+                              </span>
+                              <h4
+                                className={`text-2xl font-extrabold ${adminThemeClass.textTitle}`}
+                              >
+                                NGN {pricing.finalPrice.toLocaleString()}
+                              </h4>
+                            </div>
+                            <span
+                              className={`text-xs block pb-4 mb-4 border-b ${adminThemeClass.textMuted} ${adminThemeClass.accentBorder}`}
+                            >
+                              For {pricing.durationOption.label} (NGN {pricing.monthlyEquivalentPrice.toLocaleString()}/mo)
+                            </span>
+                            <p
+                              className={`text-xs font-light mb-6 font-sans ${adminThemeClass.textMuted}`}
+                            >
+                              {translations.enterprisePlanDesc ||
+                                "Pragmatic workspace supporting unlimited employees and priority compilations."}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => setSelectedPlanCode("enterprise")}
+                            className={`w-full py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all ${isSelected ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/45" : `${adminThemeClass.innerBg} border ${adminThemeClass.accentBorder} ${adminThemeClass.textMuted} hover:${adminThemeClass.textTitle}`}`}
+                          >
+                            {isSelected
+                              ? `Selected (${pricing.durationOption.label} Plan)`
+                              : `Select ${pricing.durationOption.label} Plan`}
+                          </button>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </motion.div>
               )}
@@ -6205,6 +6805,58 @@ export default function AdminDashboard({
                     </button>
                   </div>
 
+                  {/* Step 3 Order Summary Breakdown */}
+                  {(() => {
+                    const pricing = calculateSubscriptionPricing(selectedPlanCode || "business", selectedDurationKey || selectedDurationMonths);
+
+                    return (
+                      <div className={`mt-6 p-5 rounded-2xl border ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} space-y-3`}>
+                        <div className="flex items-center justify-between border-b border-neutral-200/10 pb-2.5">
+                          <span className={`text-xs font-bold ${adminThemeClass.textTitle}`}>
+                            Subscription Order Summary
+                          </span>
+                          <span className="text-[10px] font-mono text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded-full font-bold">
+                            {pricing.durationOption.label} Commitment
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                          <div>
+                            <span className={`text-[10px] block ${adminThemeClass.textMuted}`}>Selected Tier</span>
+                            <span className={`font-bold capitalize ${adminThemeClass.textTitle}`}>
+                              {selectedPlanCode} Plan
+                            </span>
+                          </div>
+                          <div>
+                            <span className={`text-[10px] block ${adminThemeClass.textMuted}`}>Duration & Discount</span>
+                            <span className={`font-bold font-mono ${pricing.discountPercent === 0 ? adminThemeClass.textTitle : "text-emerald-400"}`}>
+                              {pricing.durationOption.label} ({pricing.discountPercent === 0 ? "No Discount (0%)" : `${pricing.discountPercent}% OFF`})
+                            </span>
+                          </div>
+                          <div>
+                            <span className={`text-[10px] block ${adminThemeClass.textMuted}`}>Renewal Billing</span>
+                            <span className={`font-bold ${isRecurringSelected ? "text-emerald-400" : adminThemeClass.textTitle}`}>
+                              {isRecurringSelected ? "Auto-Recurring" : "One-Time"}
+                            </span>
+                          </div>
+                          <div>
+                            <span className={`text-[10px] block ${adminThemeClass.textMuted}`}>Total Payable</span>
+                            <span className="font-extrabold text-sm text-cyan-400 font-mono">
+                              NGN {pricing.finalPrice.toLocaleString()}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between text-[11px] pt-2 border-t border-neutral-200/10 text-neutral-400">
+                          <span>Original Price: <span className="line-through font-mono">NGN {pricing.originalPrice.toLocaleString()}</span></span>
+                          <span className={`${pricing.discountAmount > 0 ? "text-emerald-400" : "text-neutral-400"} font-medium`}>
+                            {pricing.discountAmount > 0 ? `Upfront Duration Savings: -NGN ${pricing.discountAmount.toLocaleString()}` : "Standard Tier Rate (0% Discount)"}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   {/* Verify / Submission Controls */}
                   {gatewaySelected && (
                     <div className="mt-8 pt-6 border-t border-dashed border-neutral-200 dark:border-neutral-800">
@@ -6217,7 +6869,7 @@ export default function AdminDashboard({
                           <span
                             className={`block font-bold capitalize ${adminThemeClass.textTitle}`}
                           >
-                            Plan Selected: {selectedPlanCode} plan
+                            Plan Selected: {selectedPlanCode} ({getDurationOption(selectedDurationKey || selectedDurationMonths).label})
                           </span>
                           <span
                             className={`block text-[11px] ${adminThemeClass.textMuted}`}
@@ -6253,8 +6905,9 @@ export default function AdminDashboard({
                 </motion.div>
               )}
             </AnimatePresence>
-          </div>
+          </motion.div>
         )}
+        </AnimatePresence>
       </main>
       </div>
 
@@ -6262,18 +6915,18 @@ export default function AdminDashboard({
       <AnimatePresence>
         {showSettingsMenu && (
           <div
-            className="fixed inset-0 bg-black/40 backdrop-blur-xs z-40 flex justify-end"
+            className="fixed inset-x-0 bottom-0 top-[65px] sm:top-[73px] bg-black/40 backdrop-blur-xs z-40 flex justify-end"
             onClick={() => setShowSettingsMenu(false)}
           >
             <motion.div
-              initial={{ x: "100%" }}
-              animate={{ x: 0 }}
-              exit={{ x: "100%" }}
-              transition={{ type: "spring", damping: 25, stiffness: 220 }}
+              initial={{ x: "100%", opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: "100%", opacity: 0 }}
+              transition={{ type: "spring", damping: 26, stiffness: 240 }}
               onClick={(e) => e.stopPropagation()}
-              className={`w-full max-w-[100vw] sm:max-w-lg h-full sm:h-[calc(100vh-32px)] sm:my-4 sm:mr-4 sm:rounded-[2rem] flex flex-col justify-between shadow-2xl p-6 select-none border-l sm:border backdrop-blur-3xl bg-opacity-95 dark:bg-opacity-95 ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
+              className={`w-full max-w-[100vw] sm:max-w-lg h-full sm:h-[calc(100dvh-89px)] sm:my-2 sm:mr-4 rounded-b-3xl sm:rounded-[2rem] flex flex-col justify-between shadow-2xl p-6 select-none border-l sm:border backdrop-blur-3xl bg-opacity-95 dark:bg-opacity-95 ${adminThemeClass.cardBg} ${adminThemeClass.accentBorder}`}
             >
-              <div className="overflow-y-auto flex-1 min-h-0 space-y-6 pr-2 mb-4">
+              <div className="overflow-y-auto no-scrollbar flex-1 min-h-0 space-y-6 pr-2 mb-4">
                 {(() => {
                   const currentSettings = localSettings || settings;
                   if (currentSettings) {
@@ -6321,6 +6974,32 @@ export default function AdminDashboard({
                         >
                           &times;
                         </button>
+                      </div>
+
+                      {/* ONBOARDING & DASHBOARD TOUR BANNER */}
+                      <div className={`p-4 rounded-2xl border transition-all ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center space-x-3 min-w-0">
+                            <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 shrink-0">
+                              <Compass className="h-5 w-5" />
+                            </div>
+                            <div className="min-w-0">
+                              <h5 className={`text-xs font-bold truncate ${adminThemeClass.textTitle}`}>Interactive Dashboard Tour</h5>
+                              <p className={`text-[10px] truncate ${adminThemeClass.textMuted}`}>Walk through core tabs, shift filters, & analytics.</p>
+                            </div>
+                          </div>
+                          <button
+                            id="admin_settings_start_tour_btn"
+                            type="button"
+                            onClick={() => {
+                              setShowSettingsMenu(false);
+                              setTimeout(() => setShowOnboardingTour(true), 250);
+                            }}
+                            className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-xs shadow-md transition-all active:scale-95 cursor-pointer shrink-0"
+                          >
+                            Start Tour
+                          </button>
+                        </div>
                       </div>
 
                       {/* LAYOUT SETTING */}
@@ -6474,29 +7153,43 @@ export default function AdminDashboard({
 
                       {/* Company Profile & Brand Identity */}
                       <div
-                        className={`p-4 sm:p-5 rounded-2xl border space-y-4 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                        className={`p-4 sm:p-5 rounded-2xl border space-y-4 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} ${isSubscriptionExpired ? "opacity-75" : ""}`}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-2">
-                            <Building className="h-4 w-4 text-cyan-400" />
+                            <Building className={`h-4 w-4 ${isSubscriptionExpired ? "text-neutral-400" : "text-cyan-400"}`} />
                             <span
                               className={`text-xs uppercase font-bold tracking-wider font-mono block ${adminThemeClass.textTitle}`}
                             >
                               Company Profile & Identity
                             </span>
                           </div>
-                          {companyProfileSuccess && (
-                            <span className="text-[11px] font-semibold text-emerald-400 animate-fade-in flex items-center gap-1">
-                              <CheckCircle2 className="h-3.5 w-3.5" />
-                              {companyProfileSuccess}
+                          {isSubscriptionExpired ? (
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-neutral-500/15 text-neutral-400 border border-neutral-500/30 flex items-center gap-1.5">
+                              <Lock className="h-3 w-3" />
+                              Feature Disabled
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5">
+                              <ShieldCheck className="h-3 w-3" />
+                              Active Feature
                             </span>
                           )}
                         </div>
 
+                        {/* Restriction Notice */}
+                        {isSubscriptionExpired && (
+                          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center gap-2.5 text-amber-500 dark:text-amber-400 text-xs">
+                            <Lock className="h-4 w-4 shrink-0" />
+                            <span>Company Profile and Identity modifications are restricted because your subscription has expired. Please renew your subscription to restore access.</span>
+                          </div>
+                        )}
+
                         <p className={`text-xs ${adminThemeClass.textMuted}`}>
-                          Manage your official company legal name, contact email, phone number, and brand identity displayed across employee check-in portals and corporate attendance logs.
+                          Official company legal name, contact email, phone number, and brand identity displayed across employee check-in portals and corporate attendance logs.
                         </p>
 
+                        <div className={`space-y-4 ${isSubscriptionExpired ? "pointer-events-none opacity-60 select-none cursor-not-allowed" : ""}`}>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
                           {/* Brand Name */}
                           <div>
@@ -6701,8 +7394,8 @@ export default function AdminDashboard({
                                   className="h-full w-full object-cover select-none pointer-events-none"
                                 />
                               ) : (
-                                <Shield
-                                  className={`h-7 w-7 ${adminThemeClass.textMuted}`}
+                                <QrCode
+                                  className={`h-7 w-7 text-cyan-400 stroke-[2.2]`}
                                 />
                               )}
                             </div>
@@ -6751,21 +7444,40 @@ export default function AdminDashboard({
                           </div>
                         </div>
 
-                        {/* Save Company Profile Button - Spreads Wide Across Container */}
+                        {/* Save Company Profile Button */}
                         <div className="pt-3 w-full">
-                          <button
-                            id="save_company_profile_btn"
-                            type="button"
-                            disabled={isSavingCompanyProfile}
-                            onClick={handleSaveCompanyProfile}
-                            className="w-full py-3.5 px-6 bg-gradient-to-r from-cyan-500 via-cyan-600 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-cyan-950/45 cursor-pointer disabled:opacity-50 flex items-center justify-center active:scale-[0.99]"
-                          >
-                            {isSavingCompanyProfile ? (
-                              <span>Saving Company Profile...</span>
-                            ) : (
-                              <span>Save Company Profile</span>
-                            )}
-                          </button>
+                          {isSubscriptionExpired ? (
+                            <button
+                              id="save_company_profile_btn"
+                              type="button"
+                              disabled={true}
+                              className="w-full py-3.5 px-6 bg-neutral-500/20 text-neutral-400 text-xs font-bold rounded-xl border border-neutral-500/30 flex items-center justify-center gap-2 cursor-not-allowed select-none"
+                            >
+                              <Lock className="h-4 w-4" />
+                              <span>Company Profile & Identity (Disabled - Subscription Expired)</span>
+                            </button>
+                          ) : (
+                            <button
+                              id="save_company_profile_btn"
+                              type="button"
+                              onClick={handleSaveCompanyProfile}
+                              disabled={isSavingCompanyProfile}
+                              className="w-full py-3.5 px-6 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-cyan-950/40 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 active:scale-[0.99]"
+                            >
+                              {isSavingCompanyProfile ? (
+                                <>
+                                  <RefreshCw className="h-4 w-4 animate-spin" />
+                                  <span>Saving Profile...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Check className="h-4 w-4" />
+                                  <span>Save Company Profile & Brand Settings</span>
+                                </>
+                              )}
+                            </button>
+                          )}
+                        </div>
                         </div>{/* Update Attendance Setting Card */}
                       <div
                         id="setting_update_attendance_card"
@@ -7347,6 +8059,14 @@ export default function AdminDashboard({
                           </button>
                         </div>
                       </div>
+
+                      {/* Holiday Management Settings: Time Zone, International Holidays & Custom Holidays */}
+                      <AdminHolidaySettings
+                        settings={currentSettings}
+                        onChange={(newSettings) => setLocalSettings(newSettings)}
+                        adminThemeClass={adminThemeClass}
+                        translations={translations}
+                      />
 
                       {/* Company Active Work Days & Daily Shift Times (Merged) */}
                       <div className="space-y-2">
@@ -8448,7 +9168,7 @@ export default function AdminDashboard({
               <div
                 className={`h-14 w-14 rounded-2xl mx-auto flex items-center justify-center border ${adminThemeClass.accentBorder} bg-cyan-100/50 dark:bg-cyan-950/20 ${adminThemeClass.accentText}`}
               >
-                <Shield className="h-6 w-6" />
+                <QrCode className="h-6 w-6 stroke-[2.2]" />
               </div>
               <div>
                 <h4
@@ -9728,6 +10448,8 @@ export default function AdminDashboard({
                             setWorkerFormPhone(activeLeaderModal.phone || "");
                             setWorkerFormRole(activeLeaderModal.role || UserRole.TEAM_MEMBER);
                             setWorkerFormGender(activeLeaderModal.gender || "Not Specified");
+                            setWorkerFormBirthDay(activeLeaderModal.birthDay || "");
+                            setWorkerFormBirthMonth(activeLeaderModal.birthMonth || "");
                             setWorkerFormDeptId(activeLeaderModal.department_id || "unassigned");
                             setWorkerFormActivityDays(activeLeaderModal.activityDays || settings?.activityDays || {
                               Monday: true, Tuesday: true, Wednesday: true, Thursday: true, Friday: true, Saturday: false, Sunday: false
@@ -10603,18 +11325,20 @@ export default function AdminDashboard({
             transition={{ duration: 0.3 }}
             className="fixed inset-0 bg-neutral-50 dark:bg-[#0A0A0A] z-50 overflow-y-auto p-6 space-y-8 select-none"
           >
-            {/* Shimmering Navigation Bar */}
+            {/* Shimmering Navigation Bar with Official Logo */}
             <div className="flex items-center justify-between border-b pb-4 border-neutral-200/50 dark:border-neutral-800/40">
+              <OfficialAppLogo
+                size="md"
+                showText
+                appName="CLOCK-IT PRO+"
+                subtitle="INITIALIZING ADMIN COMMAND CENTER..."
+                animate={true}
+                textClassName="text-neutral-900 dark:text-white"
+                subtitleClassName="text-cyan-600 dark:text-cyan-400 font-bold animate-pulse text-[10px]"
+              />
               <div className="flex items-center space-x-3">
-                <div className="h-10 w-10 bg-neutral-200 dark:bg-neutral-800 rounded-xl animate-pulse" />
-                <div className="space-y-2">
-                  <div className="h-4 w-32 bg-neutral-200 dark:bg-neutral-800 rounded-md animate-pulse" />
-                  <div className="h-2.5 w-20 bg-neutral-200/65 dark:bg-neutral-800/60 rounded-md animate-pulse" />
-                </div>
-              </div>
-              <div className="flex items-center space-x-3">
-                <div className="h-10 w-10 bg-neutral-200 dark:bg-neutral-800 rounded-xl animate-pulse" />
-                <div className="h-10 w-10 bg-neutral-200 dark:bg-neutral-800 rounded-xl animate-pulse" />
+                <div className="h-9 w-9 bg-neutral-200/70 dark:bg-neutral-800/70 rounded-xl animate-pulse" />
+                <div className="h-9 w-9 bg-neutral-200/70 dark:bg-neutral-800/70 rounded-xl animate-pulse" />
               </div>
             </div>
 
@@ -10856,7 +11580,9 @@ export default function AdminDashboard({
                             phone: workerFormPhone,
                             role: workerFormRole,
                             department_id: workerFormDeptId === "unassigned" ? "" : workerFormDeptId,
-                            gender: workerFormGender
+                            gender: workerFormGender,
+                            birthDay: workerFormBirthDay ? Number(workerFormBirthDay) : undefined,
+                            birthMonth: workerFormBirthMonth ? Number(workerFormBirthMonth) : undefined
                           })
                         });
 
@@ -10965,6 +11691,54 @@ export default function AdminDashboard({
                     theme={theme === "light" ? "light" : theme === "army" ? "army" : theme === "navy" ? "navy" : "dark"}
                     className={`rounded-2xl p-3 font-bold text-xs transition-all outline-none focus:border-cyan-500 hover:opacity-95 ${adminThemeClass.inputBg} ${adminThemeClass.accentBorder}`}
                   />
+                </div>
+
+                {/* Date of Birth Collection (Day & Month only for celebratory announcements & privacy) */}
+                <div className="flex flex-col space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className={`text-[10px] font-bold uppercase ${adminThemeClass.textMuted}`}>
+                      Date of Birth
+                    </span>
+                    <span className="text-[10px] text-neutral-500">Day & Month</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* Month */}
+                    <CustomSelect
+                      id="admin_worker_form_birth_month"
+                      value={workerFormBirthMonth ? String(workerFormBirthMonth) : ""}
+                      onChange={(val) => setWorkerFormBirthMonth(val ? Number(val) : "")}
+                      placeholder="Month"
+                      options={[
+                        { value: "", label: "Month" },
+                        ...[
+                          "January", "February", "March", "April", "May", "June",
+                          "July", "August", "September", "October", "November", "December"
+                        ].map((m, idx) => ({
+                          value: String(idx + 1),
+                          label: `${m} (${idx + 1})`
+                        }))
+                      ]}
+                      theme={theme === "light" ? "light" : theme === "army" ? "army" : theme === "navy" ? "navy" : "dark"}
+                      className={`rounded-2xl p-3 font-bold text-xs transition-all outline-none focus:border-cyan-500 hover:opacity-95 ${adminThemeClass.inputBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle}`}
+                    />
+
+                    {/* Day */}
+                    <CustomSelect
+                      id="admin_worker_form_birth_day"
+                      value={workerFormBirthDay ? String(workerFormBirthDay) : ""}
+                      onChange={(val) => setWorkerFormBirthDay(val ? Number(val) : "")}
+                      placeholder="Day"
+                      options={[
+                        { value: "", label: "Day" },
+                        ...Array.from({ length: 31 }, (_, i) => ({
+                          value: String(i + 1),
+                          label: String(i + 1)
+                        }))
+                      ]}
+                      theme={theme === "light" ? "light" : theme === "army" ? "army" : theme === "navy" ? "navy" : "dark"}
+                      className={`rounded-2xl p-3 font-bold text-xs transition-all outline-none focus:border-cyan-500 hover:opacity-95 ${adminThemeClass.inputBg} ${adminThemeClass.accentBorder} ${adminThemeClass.textTitle}`}
+                    />
+                  </div>
                 </div>
 
                 <div className="flex justify-end space-x-2 pt-2 pb-1">
@@ -11438,6 +12212,13 @@ export default function AdminDashboard({
       {/* CARD PAYMENT GATEWAY MODAL */}
       <AnimatePresence>
         {showCardModal && (() => {
+          // Calculate dynamically selected package & duration discount pricing
+          const pricing = calculateSubscriptionPricing(selectedPlanCode || "business", selectedDurationKey || selectedDurationMonths);
+          const durationLabel = pricing.durationOption.label;
+          const original = pricing.originalPrice;
+          const discPct = pricing.discountPercent;
+          const finalPayable = pricing.finalPrice;
+
           // Detect Card Type (Mastercard, Visa, Verve)
           const cleanDigits = cardNumber.replace(/\D/g, "");
           const getCardBrand = (digits: string): { name: "Mastercard" | "Visa" | "Verve" | "Unknown"; label: string; color: string } => {
@@ -11489,6 +12270,24 @@ export default function AdminDashboard({
 
                 {/* Body - Scrollable */}
                 <div className="p-6 space-y-5 overflow-y-auto flex-1 scrollbar-thin">
+                  {/* Order Summary Pill inside Modal */}
+                  <div className={`p-3.5 rounded-2xl border flex items-center justify-between text-xs ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                    <div>
+                      <span className="font-bold capitalize text-cyan-400 block">
+                        {selectedPlanCode} Plan ({durationLabel})
+                      </span>
+                      <span className={`text-[11px] ${adminThemeClass.textMuted}`}>
+                        {discPct === 0 ? "No Discount (0%)" : `${discPct}% Duration Discount Applied`} • {isRecurringSelected ? "Auto-Recurring" : "One-Time"}
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[10px] text-neutral-400 block line-through">NGN {original.toLocaleString()}</span>
+                      <span className="font-mono font-extrabold text-sm text-emerald-400">
+                        NGN {finalPayable.toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+
                   {/* Virtual Card Preview */}
                   <div className="p-5 rounded-2xl bg-gradient-to-tr from-slate-900 via-cyan-950 to-blue-900 border border-cyan-500/30 shadow-xl text-white space-y-4 relative overflow-hidden">
                     <div className="flex justify-between items-center">
@@ -11702,7 +12501,18 @@ export default function AdminDashboard({
                       setTimeout(() => {
                         setIsProcessingCard(false);
                         setShowCardModal(false);
-                        handleBillingRenewalSubmit();
+                        handleBillingRenewalSubmit({
+                          paymentMethod: "card",
+                          planCode: selectedPlanCode,
+                          durationKey: pricing.durationOption.key,
+                          durationMonths: pricing.durationOption.monthsEquivalent,
+                          durationLabel: pricing.durationOption.label,
+                          originalPrice: pricing.originalPrice,
+                          discountPercent: pricing.discountPercent,
+                          discountAmount: pricing.discountAmount,
+                          finalPrice: pricing.finalPrice,
+                          recurring: isRecurringSelected,
+                        });
                       }, 800);
                     }}
                     className="px-6 py-3 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-cyan-950/45 cursor-pointer disabled:opacity-50 flex items-center space-x-2"
@@ -11713,7 +12523,7 @@ export default function AdminDashboard({
                         <span>Authorizing Card...</span>
                       </>
                     ) : (
-                      <span>Authorize & Activate Subscription</span>
+                      <span>Pay NGN {finalPayable.toLocaleString()} & Activate</span>
                     )}
                   </button>
                 </div>
@@ -11762,6 +12572,16 @@ export default function AdminDashboard({
         adminThemeClass={adminThemeClass}
         isDarkMode={isDark}
         theme={theme}
+      />
+
+      {/* Interactive Onboarding Tour Overlay */}
+      <OnboardingTour
+        isOpen={showOnboardingTour}
+        onClose={() => setShowOnboardingTour(false)}
+        role="admin"
+        theme={theme}
+        onNavigateTab={(tab) => setActiveTab(tab)}
+        userId={user?.id}
       />
     </div>
   );

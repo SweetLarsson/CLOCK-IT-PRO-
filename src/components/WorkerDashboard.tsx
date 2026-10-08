@@ -29,6 +29,8 @@ import {
   Shield,
   Menu,
   ChevronLeft,
+  ChevronsLeft,
+  ChevronsRight,
   ChevronDown,
   ChevronUp,
   Users,
@@ -43,6 +45,8 @@ import {
   Check,
   Megaphone,
   WifiOff,
+  Compass,
+  X,
 } from "lucide-react";
 import { AttendanceStatus, PermissionStatus, CentralAnnouncement } from "../types.js";
 import { formatDateToCustomString, groupNotificationsByDate } from "../utils/dateFormatter.js";
@@ -55,7 +59,11 @@ import CustomDatePicker from "./CustomDatePicker";
 import { useWorkerViewModel } from "../viewmodels/useWorkerViewModel.js";
 import { IMAGES } from "../assets/assets.js";
 import { WorkerCentralAnnouncementModal } from "./WorkerCentralAnnouncementModal";
+import { WorkerHolidayCalendar } from "./WorkerHolidayCalendar.js";
 import { PwaInstallComponent } from "./PwaInstallButton.js";
+import { updatePwaManifest } from "../utils/pwaManager.js";
+import { OnboardingTour } from "./OnboardingTour.js";
+import { OfficialAppLogo } from "./OfficialAppLogo.js";
 
 interface WorkerDashboardProps {
   user: any;
@@ -192,10 +200,29 @@ export default function WorkerDashboard({
 
   const [workerActiveSummaryTab, setWorkerActiveSummaryTab] = React.useState<"info" | "analytics" | "hours" | "history" | "actions">("info");
   const [isShiftAssessmentExpanded, setIsShiftAssessmentExpanded] = React.useState<boolean>(false);
-  const [isAssessmentHistoryExpanded, setIsAssessmentHistoryExpanded] = React.useState<boolean>(false);
+  const [isAssessmentHistoryExpanded, setIsAssessmentHistoryExpanded] = React.useState<boolean>(true);
   const [isCompanyEmailRevealed, setIsCompanyEmailRevealed] = React.useState<boolean>(false);
+  const menuButtonRef = React.useRef<HTMLButtonElement>(null);
+  const [menuPlacement, setMenuPlacement] = React.useState<"bottom" | "top">("bottom");
   const workerSummaryTabRowRef = React.useRef<HTMLDivElement>(null);
   const workerPunchHistoryRef = React.useRef<HTMLDivElement>(null);
+
+  // Interactive Onboarding Tour State
+  const [showOnboardingTour, setShowOnboardingTour] = React.useState<boolean>(false);
+
+  // Auto-launch interactive onboarding tour for new workers
+  React.useEffect(() => {
+    try {
+      const tourKey = `has_completed_onboarding_worker_${user?.id || "default"}`;
+      const hasCompleted = localStorage.getItem(tourKey);
+      if (!hasCompleted) {
+        const timer = setTimeout(() => {
+          setShowOnboardingTour(true);
+        }, 900);
+        return () => clearTimeout(timer);
+      }
+    } catch (e) {}
+  }, [user?.id]);
 
   const formatEllipsisEmail = (emailStr?: string) => {
     if (!emailStr || emailStr === "N/A") return "N/A";
@@ -249,11 +276,17 @@ export default function WorkerDashboard({
   };
 
   const [theme, setTheme] = React.useState<"light" | "dark" | "army" | "navy" | any>(() => {
-    const saved = localStorage.getItem(`worker_theme_${user.id}`);
+    const saved = user?.id ? localStorage.getItem(`worker_theme_${user.id}`) : null;
     if (saved === "light" || saved === "dark" || saved === "army" || saved === "navy") {
       return saved as "light" | "dark" | "army" | "navy";
     }
-    return settings?.theme === "dark" ? "dark" : "light";
+    if (user?.preferences?.theme) {
+      return user.preferences.theme;
+    }
+    if (settings?.theme === "light" || settings?.theme === "dark" || settings?.theme === "army" || settings?.theme === "navy") {
+      return settings.theme;
+    }
+    return "dark";
   });
 
   const [departments, setDepartments] = React.useState<any[]>([]);
@@ -380,7 +413,7 @@ export default function WorkerDashboard({
       default:
         return {
           bg: "bg-white text-neutral-800",
-          navBg: "bg-white border-neutral-205",
+          navBg: "bg-white border-neutral-200",
           cardBg: "bg-white border-neutral-200 shadow-sm",
           innerBg: "bg-neutral-50 border-neutral-200",
           dashedBorder: "border-dashed border-cyan-500/40",
@@ -398,16 +431,114 @@ export default function WorkerDashboard({
     }
   }, [theme]);
 
+  // Keep theme in sync when settings or user preference updates
+  React.useEffect(() => {
+    const saved = user?.id ? localStorage.getItem(`worker_theme_${user.id}`) : null;
+    const userPrefTheme = user?.preferences?.theme;
+    const effectiveWorkerTheme = saved || userPrefTheme;
+    if (effectiveWorkerTheme && (effectiveWorkerTheme === "light" || effectiveWorkerTheme === "dark" || effectiveWorkerTheme === "army" || effectiveWorkerTheme === "navy")) {
+      setTheme(effectiveWorkerTheme);
+      setTempTheme(effectiveWorkerTheme);
+    } else if (settings?.theme && (settings.theme === "light" || settings.theme === "dark" || settings.theme === "army" || settings.theme === "navy")) {
+      setTheme(settings.theme);
+      setTempTheme(settings.theme);
+    }
+  }, [settings?.theme, user?.id, user?.preferences?.theme]);
+
+  // Root & document body background styling synchronization
+  React.useEffect(() => {
+    const body = document.body;
+    const root = document.documentElement;
+    if (theme === "dark" || theme === "army" || theme === "navy") {
+      body.classList.add("dark");
+      root.classList.add("dark");
+      if (theme === "army") {
+        body.style.backgroundColor = "#141C10";
+      } else if (theme === "navy") {
+        body.style.backgroundColor = "#0B132B";
+      } else {
+        body.style.backgroundColor = "#0A0A0A";
+      }
+    } else {
+      body.classList.remove("dark");
+      root.classList.remove("dark");
+      body.style.backgroundColor = "#f9fafb";
+    }
+  }, [theme]);
+
+  // Dynamically update document status bar (theme-color & apple-mobile-web-app-status-bar-style)
+  React.useEffect(() => {
+    const statusBarColor =
+      theme === "light"
+        ? "#ffffff"
+        : theme === "army"
+        ? "#182313"
+        : theme === "navy"
+        ? "#111A35"
+        : "#0D0D0D";
+
+    let metaThemeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+    if (!metaThemeColor) {
+      metaThemeColor = document.createElement("meta");
+      metaThemeColor.name = "theme-color";
+      document.head.appendChild(metaThemeColor);
+    }
+    metaThemeColor.content = statusBarColor;
+
+    let metaAppleStatus = document.querySelector<HTMLMetaElement>('meta[name="apple-mobile-web-app-status-bar-style"]');
+    if (!metaAppleStatus) {
+      metaAppleStatus = document.createElement("meta");
+      metaAppleStatus.name = "apple-mobile-web-app-status-bar-style";
+      document.head.appendChild(metaAppleStatus);
+    }
+    metaAppleStatus.content = theme === "light" ? "default" : "black-translucent";
+  }, [theme]);
+
+  // Status bar dynamic button theme class ensuring bold high-contrast visibility
+  const statusBarButtonClass = React.useMemo(() => {
+    switch (theme) {
+      case "army":
+        return "bg-[#25361E] hover:bg-[#2C3E25] text-white border-[#436134]";
+      case "navy":
+        return "bg-[#1C2541] hover:bg-[#243361] text-white border-[#34498C]";
+      case "dark":
+        return "bg-[#1A1A1A] hover:bg-[#262626] text-white border-[#333333]";
+      case "light":
+      default:
+        return "bg-neutral-100 hover:bg-neutral-200 text-neutral-900 border-neutral-300";
+    }
+  }, [theme]);
+
   const [showSettingsModal, setShowSettingsModal] = React.useState(false);
   const [showConfirmLogout, setShowConfirmLogout] = React.useState(false);
   const groupedNotifications = React.useMemo(() => {
     return groupNotificationsByDate(notifications);
   }, [notifications]);
   const [showClearNotifsConfirm, setShowClearNotifsConfirm] = React.useState(false);
-  const [tempTheme, setTempTheme] = React.useState<any>(theme);
-  const [tempLang, setTempLang] = React.useState<"en" | "fr" | "es">((settings?.language as any) || "en");
-  const [tempSettingsTheme, setTempSettingsTheme] = React.useState<"light" | "dark" | "army" | "navy">(theme as any);
-  const [tempSettingsLang, setTempSettingsLang] = React.useState<"en" | "fr" | "es">((settings?.language as any) || "en");
+  const [tempTheme, setTempTheme] = React.useState<any>(() => {
+    const saved = user?.id ? localStorage.getItem(`worker_theme_${user.id}`) : null;
+    if (saved === "light" || saved === "dark" || saved === "army" || saved === "navy") return saved;
+    if (user?.preferences?.theme) return user.preferences.theme;
+    return theme || "dark";
+  });
+  const [tempLang, setTempLang] = React.useState<"en" | "fr" | "es">(() => {
+    const saved = user?.id ? localStorage.getItem(`worker_lang_${user.id}`) : null;
+    if (saved === "en" || saved === "fr" || saved === "es") return saved as "en" | "fr" | "es";
+    if (user?.preferences?.language) return user.preferences.language;
+    return (settings?.language as any) || "en";
+  });
+  const [tempSettingsTheme, setTempSettingsTheme] = React.useState<"light" | "dark" | "army" | "navy">(() => {
+    const saved = user?.id ? localStorage.getItem(`worker_theme_${user.id}`) : null;
+    if (saved === "light" || saved === "dark" || saved === "army" || saved === "navy") return saved as any;
+    if (user?.preferences?.theme) return user.preferences.theme as any;
+    return (theme as any) || "dark";
+  });
+  const [tempSettingsLang, setTempSettingsLang] = React.useState<"en" | "fr" | "es">(() => {
+    const saved = user?.id ? localStorage.getItem(`worker_lang_${user.id}`) : null;
+    if (saved === "en" || saved === "fr" || saved === "es") return saved as "en" | "fr" | "es";
+    if (user?.preferences?.language) return user.preferences.language;
+    return (settings?.language as any) || "en";
+  });
   const [isSettingsSaved, setIsSettingsSaved] = React.useState(false);
   const [showVerifyAttendanceModal, setShowVerifyAttendanceModal] = React.useState(false);
   const [scannedActionType, setScannedActionType] = React.useState<"check-in" | "check-out">("check-in");
@@ -520,20 +651,43 @@ export default function WorkerDashboard({
     }, 350);
   };
 
+  const handleToggleSettingsMenu = () => {
+    if (!showSettingsModal && menuButtonRef.current) {
+      const rect = menuButtonRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      if (spaceBelow < 460 && spaceAbove > spaceBelow) {
+        setMenuPlacement("top");
+      } else {
+        setMenuPlacement("bottom");
+      }
+    }
+    setShowSettingsModal((prev) => !prev);
+  };
+
   React.useEffect(() => {
     if (showSettingsModal) {
-      setTempTheme(theme);
-      setTempLang((settings?.language as any) || "en");
+      const savedTheme = user?.id ? (localStorage.getItem(`worker_theme_${user.id}`) || user?.preferences?.theme) : null;
+      setTempTheme(savedTheme || theme || "dark");
+      const savedLang = user?.id ? (localStorage.getItem(`worker_lang_${user.id}`) || user?.preferences?.language) : null;
+      setTempLang((savedLang as any) || (settings?.language as any) || "en");
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = originalOverflow;
+      };
     }
-  }, [showSettingsModal, theme, settings?.language]);
+  }, [showSettingsModal, theme, user?.id, user?.preferences?.theme, user?.preferences?.language, settings?.language]);
 
   React.useEffect(() => {
     if (workerActiveSummaryTab === "actions") {
-      setTempSettingsTheme(theme as any);
-      setTempSettingsLang((settings?.language as any) || "en");
+      const savedTheme = user?.id ? (localStorage.getItem(`worker_theme_${user.id}`) || user?.preferences?.theme) : null;
+      setTempSettingsTheme((savedTheme as any) || (theme as any) || "dark");
+      const savedLang = user?.id ? (localStorage.getItem(`worker_lang_${user.id}`) || user?.preferences?.language) : null;
+      setTempSettingsLang((savedLang as any) || (settings?.language as any) || "en");
       setIsSettingsSaved(false);
     }
-  }, [workerActiveSummaryTab, theme, settings?.language]);
+  }, [workerActiveSummaryTab, theme, user?.id, user?.preferences?.theme, user?.preferences?.language, settings?.language]);
 
   const getLocalDateString = (dateInput?: Date): string => {
     const d = dateInput || new Date();
@@ -753,6 +907,12 @@ export default function WorkerDashboard({
   }, [activeTab, cameraState]);
 
   const [workerTimeframe, setWorkerTimeframe] = React.useState<"daily" | "weekly" | "monthly" | "yearly">("monthly");
+  // Attendance Logs Table Pagination (100 items per page)
+  const [workerLogsPage, setWorkerLogsPage] = React.useState<number>(1);
+
+  React.useEffect(() => {
+    setWorkerLogsPage(1);
+  }, [workerTimeframe]);
 
   const [chartDimensions, setChartDimensions] = React.useState({ width: 500, height: 130 });
   const chartContainerRef = React.useRef<HTMLDivElement>(null);
@@ -961,8 +1121,8 @@ export default function WorkerDashboard({
   return (
     <div className={`min-h-screen flex flex-col font-sans select-none pb-20 justify-start transition-colors duration-300 ${themeClass.bg}`}>
       
-      {/* Header Info Panel */}
-      <nav className={`px-6 py-4 flex items-center justify-between sticky top-0 z-20 shadow-md transition-colors duration-300 ${themeClass.navBg}`}>
+      {/* Header Info Panel / Status Bar */}
+      <nav className={`px-6 py-4 flex items-center justify-between sticky top-0 z-20 shadow-md border-b transition-colors duration-300 ${themeClass.navBg}`}>
         <div className="flex items-center space-x-3">
           <img 
             src={user.profilePhoto?.medium || IMAGES.defaultWorkerAvatar} 
@@ -979,15 +1139,34 @@ export default function WorkerDashboard({
             }}
           />
           <div className="flex flex-col">
-            <div className={`flex items-center space-x-1.5 font-display font-medium text-xs leading-none ${themeClass.textTitle}`}>
+            <div className={`flex items-center space-x-1.5 font-display font-bold text-sm sm:text-base leading-none ${themeClass.textTitle}`}>
               <span>{user.firstName} {user.lastName}</span>
             </div>
-            <div className="flex items-center space-x-1.5 mt-1 leading-none">
-              <span className={`text-[10px] font-normal ${themeClass.textMuted}`}>
-                {tenant.name}
+            <div className="flex items-center space-x-1.5 mt-1.5 leading-none">
+              <span className={`text-xs font-semibold inline-flex items-center gap-1.5 ${
+                user?.status === "suspended"
+                  ? "text-red-500 dark:text-red-400"
+                  : theme === "light" 
+                  ? "text-emerald-600" 
+                  : theme === "navy" 
+                  ? "text-emerald-300" 
+                  : theme === "army" 
+                  ? "text-emerald-300" 
+                  : "text-emerald-400"
+              }`}>
+                <span className={`inline-block h-1.5 w-1.5 rounded-full ${
+                  user?.status === "suspended" 
+                    ? "bg-red-500" 
+                    : "bg-emerald-400 animate-pulse"
+                }`} />
+                <span>
+                  {user?.status === "suspended"
+                    ? (translations.suspended || "Suspended")
+                    : (translations.active || "Active")}
+                </span>
               </span>
               <span className="inline-block h-1 w-1 rounded-full bg-neutral-400/40" />
-              <span className={`text-[8px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded-md border ${
+              <span className={`text-[9px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-md border ${
                 user.role === "team_lead"
                   ? "bg-amber-500/10 text-amber-500 dark:text-amber-400 border-amber-500/15"
                   : user.role === "company_admin" || user.role === "super_admin"
@@ -1010,19 +1189,17 @@ export default function WorkerDashboard({
         <div className="flex items-center space-x-3">
           <div className="relative">
             <button 
+              id="worker_notifications_btn"
               onClick={(e) => {
                 e.stopPropagation();
                 setShowNotifDrawer(!showNotifDrawer);
               }}
-              className={`h-10 w-10 rounded-xl border flex items-center justify-center transition-colors relative cursor-pointer z-40 ${
-                isDark 
-                  ? 'bg-[#1A1A1A] hover:bg-[#202020] text-neutral-350 border-[#262626]' 
-                  : 'bg-neutral-50 hover:bg-neutral-100 text-neutral-600 border-neutral-180'
-              }`}
+              className={`h-10 w-10 rounded-xl border flex items-center justify-center transition-all duration-200 relative cursor-pointer z-40 active:scale-95 ${statusBarButtonClass}`}
+              title="Notifications"
             >
-              <Bell className="h-4.5 w-4.5" />
+              <Bell className={`h-4.5 w-4.5 stroke-[2.4] ${theme === "light" ? "text-neutral-900" : "text-white"}`} />
               {notifications.filter(n => !n.read).length > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-cyan-500 text-black text-[9px] font-bold flex items-center justify-center shrink-0">
+                <span className="absolute -top-1 -right-1 h-4.5 w-4.5 rounded-full bg-cyan-500 text-black text-[10px] font-extrabold flex items-center justify-center shrink-0 shadow-sm">
                   {notifications.filter(n => !n.read).length}
                 </span>
               )}
@@ -1191,15 +1368,12 @@ export default function WorkerDashboard({
           <div className="relative">
             <button 
               id="worker_menu_settings"
-              onClick={() => setShowSettingsModal(!showSettingsModal)}
-              className={`h-10 w-10 rounded-xl border flex items-center justify-center transition-colors tooltip cursor-pointer ${
-                isDark 
-                  ? 'bg-[#1A1A1A] hover:bg-[#202020] text-neutral-350 border-[#262626]' 
-                  : 'bg-neutral-50 hover:bg-neutral-100 text-neutral-600 border-neutral-185'
-              }`}
+              ref={menuButtonRef}
+              onClick={handleToggleSettingsMenu}
+              className={`h-10 w-10 rounded-xl border flex items-center justify-center transition-all duration-200 tooltip cursor-pointer active:scale-95 ${statusBarButtonClass}`}
               title={translations.settingsTitle}
             >
-              <Menu className="h-4.5 w-4.5 text-cyan-400" />
+              <Menu className={`h-4.5 w-4.5 stroke-[2.4] ${theme === "light" ? "text-neutral-900" : "text-white"}`} />
             </button>
 
             <AnimatePresence>
@@ -1207,32 +1381,49 @@ export default function WorkerDashboard({
                 <>
                   <div className="fixed inset-0 z-30" onClick={() => setShowSettingsModal(false)} />
                   <motion.div 
-                    initial={{ opacity: 0, y: 12, scale: 0.95 }}
+                    initial={{ opacity: 0, y: menuPlacement === "top" ? -10 : 10, scale: 0.96 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 12, scale: 0.95 }}
-                    transition={{ duration: 0.15 }}
-                    className={`absolute right-0 mt-3 w-80 rounded-2xl border p-5 shadow-2xl z-45 transition-all duration-300 ${themeClass.navBg} ${themeClass.accentBorder} ${themeClass.textHighlight}`}
+                    exit={{ opacity: 0, y: menuPlacement === "top" ? -10 : 10, scale: 0.96 }}
+                    transition={{ duration: 0.18 }}
+                    className={`absolute right-0 ${
+                      menuPlacement === "top" ? "bottom-full mb-3" : "top-full mt-3"
+                    } w-80 sm:w-84 max-w-[calc(100vw-1.5rem)] max-h-[min(82vh,560px)] rounded-2xl sm:rounded-3xl border p-5 shadow-2xl z-45 flex flex-col transition-all duration-300 ${themeClass.navBg} ${themeClass.accentBorder} ${themeClass.textHighlight}`}
                   >
-                    <div className="mb-4">
+                    <div className="mb-3 shrink-0">
                       <h4 className={`font-display font-bold text-sm ${themeClass.textTitle}`}>Menu Settings</h4>
                       <p className={`text-[11px] font-light mt-0.5 ${themeClass.textMuted}`}>
                         Theme display & profile avatar settings.
                       </p>
                     </div>
 
-                    <div className="space-y-4">
-                      {/* PWA Mobile & Desktop App */}
+                    <div className="space-y-4 overflow-y-auto no-scrollbar flex-1 min-h-0 pr-1">
+                      {/* Onboarding Dashboard Tour */}
                       <div className="space-y-1.5 flex flex-col">
                         <span className={`text-[10px] font-semibold uppercase tracking-wider block ${themeClass.textMuted}`}>
-                          PWA Mobile & Desktop App
+                          Dashboard Tour
                         </span>
-                        <PwaInstallComponent
-                          role="worker"
-                          tenantName={tenant?.name || tenant?.companyName}
-                          workerName={`${user?.firstName || ""} ${user?.lastName || ""}`.trim()}
-                          theme={tempTheme || "dark"}
-                          variant="menu-item"
-                        />
+                        <button
+                          id="worker_settings_start_tour_btn"
+                          type="button"
+                          onClick={() => {
+                            setShowSettingsModal(false);
+                            setTimeout(() => setShowOnboardingTour(true), 250);
+                          }}
+                          className={`w-full p-2.5 rounded-xl border flex items-center justify-between transition-all duration-200 cursor-pointer ${themeClass.innerBg} ${themeClass.accentBorder} hover:border-cyan-500/40 active:scale-98`}
+                        >
+                          <div className="flex items-center space-x-2.5">
+                            <div className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400 shrink-0">
+                              <Compass className="h-4 w-4" />
+                            </div>
+                            <div className="text-left">
+                              <span className={`text-xs font-bold block ${themeClass.textTitle}`}>Interactive Tour</span>
+                              <span className={`text-[10px] block ${themeClass.textMuted}`}>Replay feature walkthrough</span>
+                            </div>
+                          </div>
+                          <span className="text-xs font-bold text-cyan-400 px-2.5 py-1 rounded-lg bg-cyan-500/10 shrink-0">
+                            Start
+                          </span>
+                        </button>
                       </div>
 
                       {/* Avatar Upload */}
@@ -1272,7 +1463,7 @@ export default function WorkerDashboard({
 
                       {/* Theme selection */}
                       <div className="space-y-1.5 flex flex-col">
-                        <span className={`text-[10px] font-semibold uppercase tracking-wider ${themeClass.textMuted}`}>Display Mode</span>
+                        <span className={`text-[10px] font-semibold uppercase tracking-wider ${themeClass.textMuted}`}>{translations.aesthetics || "Aesthetics"}</span>
                         <div className={`grid grid-cols-2 gap-1.5 p-1 border rounded-xl bg-black/15 ${themeClass.accentBorder}`}>
                           <button
                             type="button"
@@ -1331,7 +1522,7 @@ export default function WorkerDashboard({
 
                       {/* Language selection */}
                       <div className="space-y-1.5 flex flex-col">
-                        <span className={`text-[10px] font-semibold uppercase tracking-wider ${themeClass.textMuted}`}>Language / Langue / Idioma</span>
+                        <span className={`text-[10px] font-semibold uppercase tracking-wider ${themeClass.textMuted}`}>{translations.platformLocalization || "Platform Localization"}</span>
                         <div className={`grid grid-cols-3 gap-1.5 p-1 border rounded-xl bg-black/15 ${themeClass.accentBorder}`}>
                           {(["en", "fr", "es"] as const).map((lang) => {
                             const label = lang === "en" ? "English" : lang === "fr" ? "Français" : "Español";
@@ -1353,33 +1544,95 @@ export default function WorkerDashboard({
                         </div>
                       </div>
 
-                      {/* Sign Out Action inside Settings Dropdown */}
-                      <div className="pt-4 border-t border-neutral-100 dark:border-neutral-850">
+                      {/* Session, PWA Install & Logout Actions */}
+                      <div className="pt-4 border-t border-neutral-100 dark:border-neutral-850 space-y-2.5">
+                        {/* 1. Close Session */}
+                        <button
+                          id="worker_close_session_btn"
+                          type="button"
+                          onClick={() => {
+                            setShowSettingsModal(false);
+                          }}
+                          className={`w-full py-2.5 px-3 rounded-xl border flex items-center justify-center space-x-2 transition-all cursor-pointer text-xs font-semibold ${themeClass.innerBg} ${themeClass.accentBorder} ${themeClass.textTitle} hover:opacity-90 active:scale-98`}
+                        >
+                          <X className="h-4 w-4 text-cyan-400" />
+                          <span>Close Session</span>
+                        </button>
+
+                        {/* 2. Install Mobile & Desktop Application (relocated between Close Session and Logout) */}
+                        <div className="w-full">
+                          <PwaInstallComponent
+                            role="worker"
+                            tenantName={tenant?.name || tenant?.companyName}
+                            workerName={`${user?.firstName || ""} ${user?.lastName || ""}`.trim()}
+                            theme={tempTheme || "dark"}
+                            variant="menu-item"
+                          />
+                        </div>
+
+                        {/* 3. Logout */}
                         <button
                           id="worker_signout_menu"
+                          type="button"
                           onClick={() => {
                             setShowSettingsModal(false);
                             setShowConfirmLogout(true);
                           }}
-                          className={`w-full py-2.5 px-3 rounded-xl border flex items-center justify-center space-x-2 transition-all cursor-pointer text-xs font-semibold ${
+                          className={`w-full py-2.5 px-3 rounded-xl border flex items-center justify-center space-x-2 transition-all cursor-pointer text-xs font-semibold active:scale-98 ${
                             isDark 
                               ? 'bg-red-500/10 hover:bg-red-500/20 text-red-400 border-red-500/20' 
                               : 'bg-red-50 hover:bg-red-100 text-red-600 border-red-200'
                           }`}
                         >
                           <LogOut className="h-4 w-4" />
-                          <span>Close Session & Logout</span>
+                          <span>Logout</span>
                         </button>
                       </div>
 
                     </div>
 
-                    <div className="mt-4 pt-3 border-t border-neutral-100 dark:border-neutral-850">
+                    <div className="mt-3 pt-3 border-t border-neutral-100 dark:border-neutral-850 shrink-0">
                       <button
                         type="button"
                         onClick={() => {
                           setTheme(tempTheme);
                           localStorage.setItem(`worker_theme_${user.id}`, tempTheme);
+                          localStorage.setItem(`worker_lang_${user.id}`, tempLang);
+
+                          const updatedUser = {
+                            ...user,
+                            preferences: {
+                              ...(user.preferences || {}),
+                              theme: tempTheme,
+                              language: tempLang
+                            }
+                          };
+                          setUser(updatedUser);
+                          if (onUserUpdate) {
+                            onUserUpdate(updatedUser);
+                          }
+
+                          try {
+                            const sessionRaw = localStorage.getItem("clock_it_session");
+                            if (sessionRaw) {
+                              const sessionParsed = JSON.parse(sessionRaw);
+                              sessionParsed.user = {
+                                ...sessionParsed.user,
+                                preferences: {
+                                  ...(sessionParsed.user?.preferences || {}),
+                                  theme: tempTheme,
+                                  language: tempLang
+                                }
+                              };
+                              sessionParsed.settings = {
+                                ...sessionParsed.settings,
+                                theme: tempTheme,
+                                language: tempLang
+                              };
+                              localStorage.setItem("clock_it_session", JSON.stringify(sessionParsed));
+                            }
+                          } catch (e) {}
+
                           if (onSettingsChange) {
                             onSettingsChange({
                               ...settings,
@@ -1387,12 +1640,33 @@ export default function WorkerDashboard({
                               language: tempLang
                             });
                           }
-                          onNotifyAdmin("Settings Saved", "Preferences updated successfully.");
+
+                          try {
+                            fetch("/api/user/preferences", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                user_id: user.id,
+                                tenant_id: tenant?.id,
+                                theme: tempTheme,
+                                language: tempLang
+                              })
+                            }).catch(() => {});
+                          } catch (e) {}
+
+                          updatePwaManifest({
+                            role: "worker",
+                            tenantName: tenant?.name || tenant?.companyName,
+                            workerName: `${user?.firstName || ""} ${user?.lastName || ""}`.trim(),
+                            theme: tempTheme
+                          });
+
+                          onNotifyAdmin(translations.settingsSaved || "Settings Saved", translations.preferencesSaved || "Preferences updated successfully.");
                           setShowSettingsModal(false);
                         }}
                         className="w-full py-2.5 px-3 bg-gradient-to-r from-cyan-500 to-blue-600 text-white rounded-xl text-xs font-bold hover:brightness-110 shadow-md shadow-cyan-950/30 cursor-pointer active:scale-95 duration-200 flex items-center justify-center"
                       >
-                        Apply Settings
+                        {translations.applySettings || "Apply Settings"}
                       </button>
                     </div>
 
@@ -1448,20 +1722,23 @@ export default function WorkerDashboard({
         {/* Tab Selection */}
         <div className={`flex rounded-2xl p-1 shadow-xl sticky top-[73px] z-10 border ${themeClass.dashedBorder} ${themeClass.navBg}`}>
           <button 
+            id="worker_tab_scan"
             onClick={() => setActiveTab("scan")}
-            className={`flex-1 py-3 text-xs sm:text-sm font-semibold rounded-xl text-center cursor-pointer transition-all flex items-center justify-center ${activeTab === "scan" ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/40" : `hover:${themeClass.accentText} ${themeClass.textMuted}`}`}
+            className={`flex-1 py-3 text-xs sm:text-sm font-semibold rounded-xl text-center cursor-pointer transition-all flex items-center justify-center ${activeTab === "scan" ? (theme === "army" ? "bg-emerald-600 text-white shadow-md shadow-emerald-950/40" : "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/40") : `hover:${themeClass.accentText} ${themeClass.textMuted}`}`}
           >
             <span>{translations.workerTabScan || "Scan"}</span>
           </button>
           <button 
+            id="worker_tab_history"
             onClick={() => setActiveTab("history")}
-            className={`flex-1 py-3 text-xs sm:text-sm font-semibold rounded-xl text-center cursor-pointer transition-all flex items-center justify-center ${activeTab === "history" ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/40" : `hover:${themeClass.accentText} ${themeClass.textMuted}`}`}
+            className={`flex-1 py-3 text-xs sm:text-sm font-semibold rounded-xl text-center cursor-pointer transition-all flex items-center justify-center ${activeTab === "history" ? (theme === "army" ? "bg-emerald-600 text-white shadow-md shadow-emerald-950/40" : "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/40") : `hover:${themeClass.accentText} ${themeClass.textMuted}`}`}
           >
             <span>{translations.workerTabTrend || "Trend"}</span>
           </button>
           <button 
+            id="worker_tab_permission"
             onClick={() => setActiveTab("permission")}
-            className={`flex-1 py-3 text-xs sm:text-sm font-semibold rounded-xl text-center cursor-pointer transition-all flex items-center justify-center ${activeTab === "permission" ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/40" : `hover:${themeClass.accentText} ${themeClass.textMuted}`}`}
+            className={`flex-1 py-3 text-xs sm:text-sm font-semibold rounded-xl text-center cursor-pointer transition-all flex items-center justify-center ${activeTab === "permission" ? (theme === "army" ? "bg-emerald-600 text-white shadow-md shadow-emerald-950/40" : "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-950/40") : `hover:${themeClass.accentText} ${themeClass.textMuted}`}`}
           >
             <span>{translations.workerTabPermission || "Permission"}</span>
           </button>
@@ -1469,7 +1746,12 @@ export default function WorkerDashboard({
 
         {/* TAB ACTIVE DESK: SCANNER */}
         {activeTab === "scan" && (
-          <div className="space-y-6">
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, ease: "easeOut" }}
+            className="space-y-6"
+          >
             
             {isCheckedOutToday ? (
               <motion.div
@@ -1813,12 +2095,17 @@ export default function WorkerDashboard({
               </div>
             </motion.div>
 
-          </div>
+          </motion.div>
         )}
 
         {/* TAB ACTIVE DESK: LOGS HISTORY */}
         {activeTab === "history" && (
-          <div className="space-y-6">
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, ease: "easeOut" }}
+            className="space-y-6"
+          >
 
             {/* Company Details Banner Container */}
             <div className={`p-4 rounded-3xl border shadow-md flex items-center justify-between gap-4 ${themeClass.cardBg} ${themeClass.accentBorder}`}>
@@ -1833,7 +2120,7 @@ export default function WorkerDashboard({
                         className="h-full w-full object-cover select-none pointer-events-none"
                       />
                     ) : (
-                      <Shield className="h-5 w-5" />
+                      <QrCode className="h-5 w-5 stroke-[2.2]" />
                     )}
                   </div>
                   {/* Company Name & Tag */}
@@ -2083,7 +2370,12 @@ export default function WorkerDashboard({
 
             {/* TAB PANELS */}
             {workerActiveSummaryTab === "info" && (
-              <div className="space-y-6 flex flex-col items-center w-full">
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25, ease: "easeOut" }}
+                className="space-y-6 flex flex-col items-center w-full"
+              >
                 {/* Worker Metrics Timeframe Basis - between Summary Tab and Present / Performance Index containers */}
                 <div className={`flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border rounded-2xl gap-4 ${themeClass.cardBg} w-full max-w-2xl mx-auto`}>
                   <div>
@@ -2420,7 +2712,7 @@ export default function WorkerDashboard({
                     {translations.methodOfCalcDesc || "Eligible shift intervals include solely workspace activity schedules configured by active company supervisors. Approved leave/permission exemptions deduct from calculated denominators automatically, avoiding penalty indicators on worker attendance rates."}
                   </p>
                 </div>
-              </div>
+              </motion.div>
             )}
 
             {workerActiveSummaryTab === "analytics" && (() => {
@@ -2457,7 +2749,22 @@ export default function WorkerDashboard({
               };
 
               return (
-                <div className="space-y-5 font-sans">
+                <motion.div
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.25, ease: "easeOut" }}
+                  className="space-y-5 font-sans"
+                >
+                  {/* Organization Holiday & Schedule Calendar */}
+                  <WorkerHolidayCalendar
+                    user={user}
+                    settings={settings}
+                    permissions={permissions}
+                    themeClass={themeClass}
+                    translations={translations}
+                    isDark={isDark}
+                  />
+
                   <motion.div
                     initial={{ opacity: 0, y: 14 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -2517,7 +2824,7 @@ export default function WorkerDashboard({
                       </div>
                     )}
                   </motion.div>
-                </div>
+                </motion.div>
               );
             })()}
 
@@ -2554,7 +2861,12 @@ export default function WorkerDashboard({
               const perfBadge = getPerformanceBadge(selectedM.performancePercentage);
 
               return (
-                <div className="space-y-4 font-sans">
+                <motion.div
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.25, ease: "easeOut" }}
+                  className="space-y-4 font-sans"
+                >
                   {/* Worker Metrics Timeframe Basis Selector */}
                   <div className={`flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border rounded-2xl gap-4 ${themeClass.cardBg} w-full`}>
                     <div>
@@ -2873,7 +3185,7 @@ export default function WorkerDashboard({
                       </div>
                     </div>
                   </div>
-                </div>
+                </motion.div>
               );
             })()}
 
@@ -2913,8 +3225,23 @@ export default function WorkerDashboard({
               const workerLogs = attendanceRecords
                 .filter((r: any) => r.date >= startStr && r.date <= endStr)
                 .sort((a, b) => b.date.localeCompare(a.date));
+
+              const workerLogsPageSize = 100;
+              const workerLogsTotalRecords = workerLogs.length;
+              const workerLogsTotalPages = Math.max(1, Math.ceil(workerLogsTotalRecords / workerLogsPageSize));
+              const currentWorkerLogsPage = Math.min(Math.max(1, workerLogsPage), workerLogsTotalPages);
+              const workerLogsRemainingPages = Math.max(0, workerLogsTotalPages - currentWorkerLogsPage);
+              const paginatedWorkerLogs = workerLogs.slice(
+                (currentWorkerLogsPage - 1) * workerLogsPageSize,
+                currentWorkerLogsPage * workerLogsPageSize
+              );
               return (
-                <div className="space-y-4 font-sans w-full">
+                <motion.div
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.25, ease: "easeOut" }}
+                  className="space-y-4 font-sans w-full"
+                >
                   {/* Worker Metrics Timeframe Basis - captured below Punch History tab, just above Attendance Log table */}
                   <div className={`flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border rounded-2xl gap-4 ${themeClass.cardBg} w-full`}>
                     <div>
@@ -2990,8 +3317,8 @@ export default function WorkerDashboard({
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-neutral-200/10 text-[11px]">
-                            {workerLogs.length > 0 ? (
-                              workerLogs.map((log, idx) => {
+                            {paginatedWorkerLogs.length > 0 ? (
+                              paginatedWorkerLogs.map((log, idx) => {
                                 const hoursWorked = log.coveredTime ? (log.coveredTime / 3600).toFixed(2) : "0.00";
                                 
                                 // Check if there was an approved leave/permission for this date
@@ -3101,20 +3428,176 @@ export default function WorkerDashboard({
                         <ChevronRight className="h-4 w-4" />
                       </button>
                     </div>
+
+                    {/* Attendance Logs Table Pagination Controls Bar */}
+                    <div
+                      className={`px-4 sm:px-6 py-4 border-t flex flex-col md:flex-row items-center justify-between gap-4 mt-4 ${themeClass.innerBg} ${themeClass.accentBorder} rounded-2xl`}
+                    >
+                      {/* Information: Record Range, Current Page, Total Pages, Remaining Pages */}
+                      <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs">
+                        <span className={`font-semibold ${themeClass.textTitle}`}>
+                          Showing {workerLogsTotalRecords === 0 ? 0 : (currentWorkerLogsPage - 1) * workerLogsPageSize + 1}–{Math.min(currentWorkerLogsPage * workerLogsPageSize, workerLogsTotalRecords)} of {workerLogsTotalRecords} {workerLogsTotalRecords === 1 ? "record" : "records"}
+                        </span>
+                        <span className={themeClass.textMuted}>•</span>
+                        <div className="flex items-center space-x-1.5">
+                          <span className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border ${themeClass.inputBg} ${themeClass.accentBorder} ${themeClass.accentText}`}>
+                            Page {currentWorkerLogsPage} of {workerLogsTotalPages}
+                          </span>
+                          <span className={`px-2 py-1 rounded-lg text-[11px] font-medium ${themeClass.innerBg} ${themeClass.textMuted}`}>
+                            {workerLogsRemainingPages} {workerLogsRemainingPages === 1 ? "page" : "pages"} remaining
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Pagination Navigation Controls */}
+                      <div className="flex items-center space-x-1.5 sm:space-x-2">
+                        {/* First Page Button */}
+                        <button
+                          type="button"
+                          disabled={currentWorkerLogsPage <= 1}
+                          onClick={() => {
+                            setWorkerLogsPage(1);
+                            workerPunchHistoryRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+                          }}
+                          className={`h-9 px-2.5 sm:px-3 rounded-xl text-xs font-semibold flex items-center space-x-1 border transition-all cursor-pointer ${
+                            currentWorkerLogsPage <= 1
+                              ? "opacity-40 cursor-not-allowed border-transparent text-neutral-400"
+                              : `${themeClass.inputBg} ${themeClass.accentBorder} ${themeClass.textTitle} hover:border-cyan-500/40 active:scale-95`
+                          }`}
+                          title="First Page"
+                        >
+                          <ChevronsLeft className="h-4 w-4" />
+                          <span className="hidden sm:inline">First</span>
+                        </button>
+
+                        {/* Previous Page Button */}
+                        <button
+                          type="button"
+                          disabled={currentWorkerLogsPage <= 1}
+                          onClick={() => {
+                            setWorkerLogsPage((prev) => Math.max(1, prev - 1));
+                            workerPunchHistoryRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+                          }}
+                          className={`h-9 px-2.5 sm:px-3 rounded-xl text-xs font-semibold flex items-center space-x-1 border transition-all cursor-pointer ${
+                            currentWorkerLogsPage <= 1
+                              ? "opacity-40 cursor-not-allowed border-transparent text-neutral-400"
+                              : `${themeClass.inputBg} ${themeClass.accentBorder} ${themeClass.textTitle} hover:border-cyan-500/40 active:scale-95`
+                          }`}
+                          title="Previous Page"
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                          <span className="hidden sm:inline">Prev</span>
+                        </button>
+
+                        {/* Dynamic Visible Page Number Buttons */}
+                        <div className="flex items-center space-x-1">
+                          {(() => {
+                            const pages: (number | string)[] = [];
+                            const total = workerLogsTotalPages;
+                            const current = currentWorkerLogsPage;
+
+                            if (total <= 5) {
+                              for (let i = 1; i <= total; i++) pages.push(i);
+                            } else {
+                              pages.push(1);
+                              if (current > 3) pages.push("...");
+                              const start = Math.max(2, current - 1);
+                              const end = Math.min(total - 1, current + 1);
+                              for (let i = start; i <= end; i++) pages.push(i);
+                              if (current < total - 2) pages.push("...");
+                              pages.push(total);
+                            }
+
+                            return pages.map((p, idx) => {
+                              if (p === "...") {
+                                return (
+                                  <span key={`dots-${idx}`} className={`px-1 text-xs ${themeClass.textMuted}`}>
+                                    •••
+                                  </span>
+                                );
+                              }
+                              const isCurrent = p === current;
+                              return (
+                                <button
+                                  key={`page-${p}`}
+                                  type="button"
+                                  onClick={() => {
+                                    setWorkerLogsPage(Number(p));
+                                    workerPunchHistoryRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+                                  }}
+                                  className={`h-9 min-w-[36px] px-2 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                                    isCurrent
+                                      ? theme === "army"
+                                        ? "bg-emerald-600 text-white border-emerald-400 shadow-md scale-105"
+                                        : "bg-gradient-to-r from-cyan-500 to-blue-600 text-white border-cyan-400 shadow-md scale-105"
+                                      : `${themeClass.inputBg} ${themeClass.accentBorder} ${themeClass.textTitle} hover:border-cyan-500/40 active:scale-95`
+                                  }`}
+                                >
+                                  {p}
+                                </button>
+                              );
+                            });
+                          })()}
+                        </div>
+
+                        {/* Next Page Button */}
+                        <button
+                          type="button"
+                          disabled={currentWorkerLogsPage >= workerLogsTotalPages}
+                          onClick={() => {
+                            setWorkerLogsPage((prev) => Math.min(workerLogsTotalPages, prev + 1));
+                            workerPunchHistoryRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+                          }}
+                          className={`h-9 px-2.5 sm:px-3 rounded-xl text-xs font-semibold flex items-center space-x-1 border transition-all cursor-pointer ${
+                            currentWorkerLogsPage >= workerLogsTotalPages
+                              ? "opacity-40 cursor-not-allowed border-transparent text-neutral-400"
+                              : `${themeClass.inputBg} ${themeClass.accentBorder} ${themeClass.textTitle} hover:border-cyan-500/40 active:scale-95`
+                          }`}
+                          title="Next Page"
+                        >
+                          <span className="hidden sm:inline">Next</span>
+                          <ChevronRight className="h-4 w-4" />
+                        </button>
+
+                        {/* Last Page Button */}
+                        <button
+                          type="button"
+                          disabled={currentWorkerLogsPage >= workerLogsTotalPages}
+                          onClick={() => {
+                            setWorkerLogsPage(workerLogsTotalPages);
+                            workerPunchHistoryRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+                          }}
+                          className={`h-9 px-2.5 sm:px-3 rounded-xl text-xs font-semibold flex items-center space-x-1 border transition-all cursor-pointer ${
+                            currentWorkerLogsPage >= workerLogsTotalPages
+                              ? "opacity-40 cursor-not-allowed border-transparent text-neutral-400"
+                              : `${themeClass.inputBg} ${themeClass.accentBorder} ${themeClass.textTitle} hover:border-cyan-500/40 active:scale-95`
+                          }`}
+                          title="Last Page"
+                        >
+                          <span className="hidden sm:inline">Last</span>
+                          <ChevronsRight className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                </div>
+                </motion.div>
               );
             })()}
 
             {workerActiveSummaryTab === "actions" && (
-              <div className="space-y-6">
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25, ease: "easeOut" }}
+                className="space-y-6"
+              >
                 <div className={`p-6 rounded-3xl border shadow-md space-y-4 ${themeClass.cardBg} pb-8`}>
                   <h4 className={`font-semibold text-xs uppercase tracking-wider ${themeClass.textMuted}`}>{translations.personalSettings || "Personal Settings & Preferences"}</h4>
                   
                   <div className="flex flex-col space-y-6">
                     <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 border-b border-neutral-200/10 pb-4">
                       <div>
-                        <span className={`text-xs font-semibold block ${themeClass.textTitle}`}>{translations.applicationColorTheme || "Application Color Theme"}</span>
+                        <span className={`text-xs font-semibold block ${themeClass.textTitle}`}>{translations.aesthetics || "Aesthetics"}</span>
                         <span className={`text-[10px] ${themeClass.textMuted}`}>{translations.switchLookAndFeel || "Switch look & feel for current user session."}</span>
                       </div>
                       <div className="flex flex-wrap gap-1.5">
@@ -3137,7 +3620,7 @@ export default function WorkerDashboard({
 
                     <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 border-b border-neutral-200/10 pb-4">
                       <div>
-                        <span className={`text-xs font-semibold block ${themeClass.textTitle}`}>{translations.workspaceLocalization || "Workspace Localization"}</span>
+                        <span className={`text-xs font-semibold block ${themeClass.textTitle}`}>{translations.platformLocalization || "Platform Localization"}</span>
                         <span className={`text-[10px] ${themeClass.textMuted}`}>{translations.chooseActiveInterface || "Choose active interface translation schema."}</span>
                       </div>
                       <div className="flex flex-wrap gap-1.5">
@@ -3186,6 +3669,41 @@ export default function WorkerDashboard({
                           // Save
                           setTheme(tempSettingsTheme);
                           localStorage.setItem(`worker_theme_${user.id}`, tempSettingsTheme);
+                          localStorage.setItem(`worker_lang_${user.id}`, tempSettingsLang);
+
+                          const updatedUser = {
+                            ...user,
+                            preferences: {
+                              ...(user.preferences || {}),
+                              theme: tempSettingsTheme,
+                              language: tempSettingsLang
+                            }
+                          };
+                          setUser(updatedUser);
+                          if (onUserUpdate) {
+                            onUserUpdate(updatedUser);
+                          }
+
+                          try {
+                            const sessionRaw = localStorage.getItem("clock_it_session");
+                            if (sessionRaw) {
+                              const sessionParsed = JSON.parse(sessionRaw);
+                              sessionParsed.user = {
+                                ...sessionParsed.user,
+                                preferences: {
+                                  ...(sessionParsed.user?.preferences || {}),
+                                  theme: tempSettingsTheme,
+                                  language: tempSettingsLang
+                                }
+                              };
+                              sessionParsed.settings = {
+                                ...sessionParsed.settings,
+                                theme: tempSettingsTheme,
+                                language: tempSettingsLang
+                              };
+                              localStorage.setItem("clock_it_session", JSON.stringify(sessionParsed));
+                            }
+                          } catch (e) {}
 
                           if (onSettingsChange) {
                             onSettingsChange({
@@ -3195,9 +3713,29 @@ export default function WorkerDashboard({
                             });
                           }
 
+                          try {
+                            fetch("/api/user/preferences", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                user_id: user.id,
+                                tenant_id: tenant?.id,
+                                theme: tempSettingsTheme,
+                                language: tempSettingsLang
+                              })
+                            }).catch(() => {});
+                          } catch (e) {}
+
+                          updatePwaManifest({
+                            role: "worker",
+                            tenantName: tenant?.name || tenant?.companyName,
+                            workerName: `${user?.firstName || ""} ${user?.lastName || ""}`.trim(),
+                            theme: tempSettingsTheme
+                          });
+
                           // Confirm
                           setIsSettingsSaved(true);
-                          onNotifyAdmin("Settings Saved", `Worker display customized: theme=${tempSettingsTheme}, lang=${tempSettingsLang}`);
+                          onNotifyAdmin(translations.settingsSaved || "Settings Saved", `Worker display customized: theme=${tempSettingsTheme}, lang=${tempSettingsLang}`);
                           
                           setTimeout(() => {
                             setIsSettingsSaved(false);
@@ -3211,7 +3749,7 @@ export default function WorkerDashboard({
 
                   </div>
                 </div>
-              </div>
+              </motion.div>
             )}
 
                     </div>
@@ -3219,12 +3757,17 @@ export default function WorkerDashboard({
                 )}
               </AnimatePresence>
             </div>
-          </div>
+          </motion.div>
         )}
 
         {/* TAB ACTIVE DESK: EXEMPTIONS LEAVE REQUEST */}
         {activeTab === "permission" && (
-          <div className="space-y-6">
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, ease: "easeOut" }}
+            className="space-y-6"
+          >
             
             <div className={`rounded-3xl p-6 sm:p-8 border shadow-lg space-y-6 ${themeClass.cardBg}`}>
               
@@ -3308,7 +3851,7 @@ export default function WorkerDashboard({
 
             </div>
 
-          </div>
+          </motion.div>
         )}
 
       </main>
@@ -3464,19 +4007,20 @@ export default function WorkerDashboard({
             transition={{ duration: 0.3 }}
             className="fixed inset-0 bg-neutral-50 dark:bg-[#070708] z-50 overflow-y-auto p-6 space-y-6 select-none font-sans"
           >
-            {/* Shimmering Navigation Bar */}
+            {/* Shimmering Navigation Bar with Official Logo */}
             <div className="flex items-center justify-between border-b pb-4 border-neutral-200/50 dark:border-neutral-800/40">
-              <div className="flex items-center space-x-3">
-                <div className="h-11 w-11 bg-neutral-200 dark:bg-neutral-800 rounded-xl animate-pulse" />
-                <div className="space-y-2">
-                  <div className="h-4 w-32 bg-neutral-200 dark:bg-neutral-800 rounded-md animate-pulse" />
-                  <div className="h-2.5 w-20 bg-neutral-200/65 dark:bg-neutral-800/60 rounded-md animate-pulse" />
-                </div>
-              </div>
-              <div className="flex items-center space-x-3">
-                <div className="h-9 w-9 bg-neutral-200 dark:bg-neutral-800 rounded-lg animate-pulse" />
-                <div className="h-9 w-9 bg-neutral-200 dark:bg-neutral-800 rounded-lg animate-pulse" />
-                <div className="h-9 w-24 bg-neutral-200 dark:bg-neutral-800 rounded-lg animate-pulse" />
+              <OfficialAppLogo
+                size="md"
+                showText
+                appName="CLOCK-IT PRO+"
+                subtitle="LOADING WORKER WORKSPACE..."
+                animate={true}
+                textClassName="text-neutral-900 dark:text-white"
+                subtitleClassName="text-cyan-600 dark:text-cyan-400 font-bold animate-pulse text-[10px]"
+              />
+              <div className="flex items-center space-x-2">
+                <div className="h-9 w-9 bg-neutral-200/70 dark:bg-neutral-800/70 rounded-xl animate-pulse" />
+                <div className="h-9 w-9 bg-neutral-200/70 dark:bg-neutral-800/70 rounded-xl animate-pulse" />
               </div>
             </div>
 
@@ -3485,8 +4029,8 @@ export default function WorkerDashboard({
               {/* Left Column: QR checkin / handshake skeleton */}
               <div className="lg:col-span-1 p-6 rounded-3xl border border-neutral-200/50 dark:border-neutral-800/40 bg-white dark:bg-neutral-900/40 shadow-sm space-y-6 flex flex-col items-center">
                 <div className="h-4 w-2/3 bg-neutral-200 dark:bg-neutral-800 rounded-md animate-pulse" />
-                <div className="w-full max-w-sm aspect-square bg-neutral-200/50 dark:bg-[#070707] rounded-3xl animate-pulse flex items-center justify-center">
-                  <QrCode className="h-12 w-12 text-neutral-300 dark:text-neutral-700 animate-pulse" />
+                <div className="w-full max-w-sm aspect-square bg-neutral-200/40 dark:bg-neutral-900/40 rounded-3xl flex items-center justify-center border border-neutral-200/50 dark:border-neutral-800/40 shadow-inner">
+                  <OfficialAppLogo size="xl" animate={true} />
                 </div>
                 <div className="h-9 w-full max-w-sm bg-neutral-200 dark:bg-neutral-800 rounded-xl animate-pulse" />
               </div>
@@ -3614,6 +4158,15 @@ export default function WorkerDashboard({
         }}
       />
 
+      {/* Interactive Onboarding Tour for Workers */}
+      <OnboardingTour
+        isOpen={showOnboardingTour}
+        onClose={() => setShowOnboardingTour(false)}
+        role="worker"
+        theme={tempTheme || "dark"}
+        onNavigateTab={(tab) => setActiveTab(tab)}
+        userId={user?.id}
+      />
     </div>
   );
 }

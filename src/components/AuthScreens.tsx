@@ -25,8 +25,25 @@ import {
   KeyRound,
   Send,
   RefreshCw,
-  ShieldCheck
+  ShieldCheck,
+  Calendar
 } from "lucide-react";
+import CustomSelect, { SelectOption } from "./CustomSelect.js";
+
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December"
+];
+
+const BIRTH_MONTH_OPTIONS: SelectOption[] = MONTH_NAMES.map((name, idx) => ({
+  value: String(idx + 1),
+  label: name
+}));
+
+const BIRTH_DAY_OPTIONS: SelectOption[] = Array.from({ length: 31 }, (_, i) => ({
+  value: String(i + 1),
+  label: String(i + 1)
+}));
 
 interface AuthScreensProps {
   onLoginSuccess: (data: { user: any; tenant: any; subscription: any }) => void;
@@ -148,9 +165,12 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
   const [workerEmail, setWorkerEmail] = useState("");
   const [workerPass, setWorkerPass] = useState("");
   const [showWorkerPass, setShowWorkerPass] = useState(false);
-  const [companyCode, setCompanyCode] = useState(""); // tenant_id to join
+  const [companyCode, setCompanyCode] = useState("default-tenant"); // tenant_id to join
   const [isFromQr, setIsFromQr] = useState(false);
   const [workerGender, setWorkerGender] = useState("Male");
+  const [workerBirthDay, setWorkerBirthDay] = useState<number | "">("");
+  const [workerBirthMonth, setWorkerBirthMonth] = useState<number | "">("");
+  const [registeredCompanyName, setRegisteredCompanyName] = useState<string>("Apex Tech Global Ltd");
 
   // Forgot Password Modal State (Resend API Integration)
   const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
@@ -351,6 +371,29 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
     fetchDepts();
   }, [companyCode]);
 
+  // Fetch dynamic company name associated with the Unique ID
+  useEffect(() => {
+    const targetId = (companyCode || "default-tenant").trim();
+    let isMounted = true;
+    fetch(`/api/tenant?tenant_id=${encodeURIComponent(targetId)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (isMounted && data?.tenant?.name) {
+          setRegisteredCompanyName(data.tenant.name);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      isMounted = false;
+    };
+  }, [companyCode]);
+
+  // Automatically populate digital signature with worker's full name
+  useEffect(() => {
+    const fullName = `${workerFirst} ${workerLast}`.trim();
+    setDigitalSignature(fullName);
+  }, [workerFirst, workerLast]);
+
   const handleOpenForgotPassword = () => {
     setForgotEmail(email || "");
     setForgotStep("request");
@@ -516,6 +559,12 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
         throw new Error(data.error || "Company registration failed.");
       }
 
+      // Mark newly registered account to allow interactive tour sequence
+      try {
+        localStorage.setItem(`is_new_user_${(data.user?.id || adminEmail).toLowerCase()}`, "true");
+        localStorage.setItem(`clock_it_new_registration_${(data.user?.id || adminEmail).toLowerCase()}`, "true");
+      } catch (e) {}
+
       setSuccessMsg("Workspace configured! Please sign in with your credentials.");
       setTimeout(() => {
         setEmail(adminEmail);
@@ -575,6 +624,8 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
           registeredViaQr: isFromQr,
           department_id: selectedDeptId,
           gender: workerGender,
+          birthDay: workerBirthDay ? Number(workerBirthDay) : undefined,
+          birthMonth: workerBirthMonth ? Number(workerBirthMonth) : undefined,
           localDate: new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0') + '-' + String(new Date().getDate()).padStart(2, '0'),
           localTime: new Date().toTimeString().split(" ")[0]
         })
@@ -1285,11 +1336,18 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
             {activeTab === "registerWorker" && (
               <form id="auth_reg_worker_form" onSubmit={handleWorkerRegisterSubmit} className="space-y-4">
                 
+                {/* Sign-Up Form Company-Specific Description */}
+                <div className="bg-gradient-to-r from-cyan-950/40 via-blue-950/30 to-neutral-900/40 border border-cyan-800/50 p-4 rounded-2xl text-xs font-medium space-y-1 block animate-fade-in font-sans shadow-md">
+                  <p className="text-neutral-200 leading-relaxed font-semibold">
+                    Welcome to Clock-It-Pro Plus. You are about to sign up as an employee into <span className="font-bold text-cyan-400">{registeredCompanyName}</span> account.
+                  </p>
+                </div>
+
                 {isFromQr && (
-                  <div className="bg-cyan-950/40 border border-cyan-800/60 p-4 rounded-xl text-xs font-medium text-cyan-400 space-y-1 block animate-fade-in font-sans">
-                    <strong className="block text-cyan-300 font-bold">💎 QR Gate Handshake Active</strong>
-                    <p className="font-light text-neutral-300 leading-relaxed">
-                      You've scanned the official secure company QR terminal pass! Complete this quick one-time registration to create your worker credentials. It is registered and audited against the active subscription threshold.
+                  <div className="bg-cyan-950/30 border border-cyan-800/40 p-3 rounded-xl text-xs font-medium text-cyan-400 space-y-1 block animate-fade-in font-sans">
+                    <strong className="block text-cyan-300 font-bold text-[11px]">💎 QR Gate Handshake Active</strong>
+                    <p className="font-light text-neutral-300 leading-relaxed text-[11px]">
+                      Scanned official company QR terminal pass. Credentials are authenticated and audited against active subscription limits.
                     </p>
                   </div>
                 )}
@@ -1367,26 +1425,22 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
                     </div>
                   </div>
                   <div className="flex flex-col space-y-1">
-                    <label className="text-[11px] font-semibold text-neutral-400">Tenant Code ID</label>
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-semibold text-neutral-400">Unique ID</label>
+                      <span className="text-[9px] font-mono text-cyan-400/90 bg-cyan-950/50 px-1.5 py-0.5 rounded border border-cyan-800/30">
+                        Read-Only
+                      </span>
+                    </div>
                     <div className="relative">
                       <Building className="absolute left-3.5 top-3.5 h-3.5 w-3.5 text-neutral-400" />
                       <input 
                         type="text" 
-                        placeholder="e.g. default-tenant"
-                        value={companyCode}
-                        onChange={(e) => setCompanyCode(e.target.value)}
-                        className="w-full text-xs bg-[#111] focus:bg-[#151515] text-white border border-[#262626] rounded-xl py-3 pl-9 pr-9 font-medium outline-none focus:border-cyan-500 min-h-[44px]"
+                        value={companyCode || "default-tenant"}
+                        readOnly
+                        tabIndex={-1}
+                        className="w-full text-xs bg-[#141414] text-neutral-300 border border-[#262626] rounded-xl py-3 pl-9 pr-4 font-mono font-semibold outline-none cursor-not-allowed select-none min-h-[44px]"
                         required
                       />
-                      {companyCode && (
-                        <button
-                          type="button"
-                          onClick={() => setCompanyCode("")}
-                          className="absolute right-3 top-3 text-neutral-400 hover:text-white cursor-pointer"
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </button>
-                      )}
                     </div>
                   </div>
                 </div>
@@ -1470,9 +1524,9 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
                 </div>
 
                 <div className="flex flex-col space-y-1.5">
-                  <label className="text-[11px] font-semibold text-neutral-400">Gender Identity</label>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-[#111] border border-[#262626] p-1.5 rounded-xl">
-                    {(["Male", "Female", "Non-Binary", "Prefer not to say"] as const).map((g) => (
+                  <label className="text-[11px] font-semibold text-neutral-400">Gender</label>
+                  <div className="grid grid-cols-2 gap-2 bg-[#111] border border-[#262626] p-1.5 rounded-xl">
+                    {(["Male", "Female"] as const).map((g) => (
                       <button
                         key={g}
                         type="button"
@@ -1482,6 +1536,37 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
                         {g}
                       </button>
                     ))}
+                  </div>
+                </div>
+
+                {/* Date of Birth Collection (Day & Month only for celebrations & privacy) */}
+                <div className="flex flex-col space-y-1.5">
+                  <label className="text-[11px] font-semibold text-neutral-400 flex items-center gap-1.5">
+                    <Calendar className="h-3.5 w-3.5 text-cyan-400" />
+                    {translations.dateOfBirth || "Date of Birth (Day & Month)"}
+                  </label>
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* Month Selector */}
+                    <CustomSelect
+                      id="auth_worker_birth_month"
+                      value={workerBirthMonth ? String(workerBirthMonth) : ""}
+                      onChange={(val) => setWorkerBirthMonth(val ? Number(val) : "")}
+                      placeholder={translations.birthMonth || "Month of Birth"}
+                      options={BIRTH_MONTH_OPTIONS}
+                      theme="dark"
+                      className="w-full text-xs bg-[#111] hover:bg-[#151515] text-white border border-[#262626] rounded-xl py-3 pl-3.5 pr-10 font-medium outline-none focus:border-cyan-500 min-h-[44px]"
+                    />
+
+                    {/* Day Selector */}
+                    <CustomSelect
+                      id="auth_worker_birth_day"
+                      value={workerBirthDay ? String(workerBirthDay) : ""}
+                      onChange={(val) => setWorkerBirthDay(val ? Number(val) : "")}
+                      placeholder={translations.birthDay || "Day of Birth"}
+                      options={BIRTH_DAY_OPTIONS}
+                      theme="dark"
+                      className="w-full text-xs bg-[#111] hover:bg-[#151515] text-white border border-[#262626] rounded-xl py-3 pl-3.5 pr-10 font-medium outline-none focus:border-cyan-500 min-h-[44px]"
+                    />
                   </div>
                 </div>
 
@@ -1567,20 +1652,30 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
                   </div>
 
                   <div className="flex flex-col space-y-1">
-                    <label className="text-[11px] font-semibold text-neutral-400">
-                      {translations.legalTermsSignature || "Digital Signature (Type your full name)"}
-                    </label>
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-semibold text-neutral-400">
+                        {translations.legalTermsSignature || "Digital Signature"}
+                      </label>
+                      <span className="text-[9px] font-mono text-emerald-400/90 bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-800/30">
+                        Auto-Populated
+                      </span>
+                    </div>
                     <input
                       type="text"
-                      placeholder={`${workerFirst} ${workerLast}`.trim() || "Type your full name"}
+                      placeholder="Enter First & Last Name to populate signature"
                       value={digitalSignature}
-                      onChange={(e) => setDigitalSignature(e.target.value)}
-                      className="w-full text-xs bg-[#111] focus:bg-[#151515] text-white border border-[#262626] rounded-xl py-3 px-4 font-medium outline-none focus:border-cyan-500 min-h-[44px]"
+                      readOnly
+                      tabIndex={-1}
+                      className="w-full text-xs bg-[#141414] text-cyan-300 font-mono border border-[#262626] rounded-xl py-3 px-4 font-semibold cursor-not-allowed select-none outline-none min-h-[44px]"
                       required
                     />
-                    {workerFirst && workerLast && (
+                    {workerFirst && workerLast ? (
                       <span className="text-[10px] text-neutral-500 select-none">
-                        Signature must match exactly: <span className="font-mono text-cyan-500">{workerFirst} {workerLast}</span>
+                        Cryptographic signature generated for: <span className="font-mono text-cyan-400 font-semibold">{workerFirst} {workerLast}</span>
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-neutral-500 select-none">
+                        Signature automatically syncs with your registered name.
                       </span>
                     )}
                   </div>

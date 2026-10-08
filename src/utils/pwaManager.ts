@@ -98,63 +98,44 @@ export function getPwaIconSvg(role: "admin" | "worker" | "guest", size = 512): s
   const isAdmin = role === "admin";
   const isWorker = role === "worker";
 
-  const primaryColor = isAdmin ? "#06b6d4" : isWorker ? "#10b981" : "#06b6d4";
-  const secondaryColor = isAdmin ? "#3b82f6" : isWorker ? "#06b6d4" : "#3b82f6";
   const labelText = isAdmin ? "ADMIN" : isWorker ? "WORKER" : "CLOCK-IT";
 
   const svg = `
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">
   <defs>
-    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0f172a" />
-      <stop offset="100%" stop-color="#020617" />
+    <linearGradient id="pwaLogoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#06b6d4" />
+      <stop offset="100%" stop-color="#2563eb" />
     </linearGradient>
-    <linearGradient id="primaryGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="${primaryColor}" />
-      <stop offset="100%" stop-color="${secondaryColor}" />
-    </linearGradient>
-    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+    <filter id="pwaGlow" x="-20%" y="-20%" width="140%" height="140%">
       <feGaussianBlur stdDeviation="16" result="blur" />
       <feComposite in="SourceGraphic" in2="blur" operator="over" />
     </filter>
   </defs>
 
-  <!-- Background Card -->
-  <rect width="${size}" height="${size}" rx="100" fill="url(#bgGrad)" />
-  <rect width="${size - 16}" height="${size - 16}" x="8" y="8" rx="92" fill="none" stroke="${primaryColor}" stroke-opacity="0.3" stroke-width="6" />
+  <!-- Official Logo Outer Card -->
+  <rect width="${size}" height="${size}" rx="${size * 0.22}" fill="url(#pwaLogoGrad)" />
+  <rect width="${size - 16}" height="${size - 16}" x="8" y="8" rx="${size * 0.2}" fill="none" stroke="#ffffff" stroke-opacity="0.25" stroke-width="6" />
 
-  <!-- Outer Glow Ring -->
-  <circle cx="${size / 2}" cy="${size * 0.44}" r="${size * 0.28}" fill="none" stroke="url(#primaryGrad)" stroke-width="12" filter="url(#glow)" opacity="0.4" />
-  <circle cx="${size / 2}" cy="${size * 0.44}" r="${size * 0.28}" fill="none" stroke="url(#primaryGrad)" stroke-width="10" />
+  <!-- Official QR Code Emblem (White) -->
+  <g fill="none" stroke="#ffffff" stroke-width="${Math.max(14, size * 0.045)}" stroke-linecap="round" stroke-linejoin="round" transform="translate(${size * 0.18}, ${size * 0.14}) scale(${size * 0.027})">
+    <rect width="5" height="5" x="3" y="3" rx="1" stroke-width="2.2" />
+    <rect width="5" height="5" x="16" y="3" rx="1" stroke-width="2.2" />
+    <rect width="5" height="5" x="3" y="16" rx="1" stroke-width="2.2" />
+    <path d="M21 16h-3a2 2 0 0 0-2 2v3" stroke-width="2.2" />
+    <path d="M21 21v.01" stroke-width="2.2" />
+    <path d="M12 7v3a2 2 0 0 1-2 2H7" stroke-width="2.2" />
+    <path d="M3 12h.01" stroke-width="2.2" />
+    <path d="M12 3h.01" stroke-width="2.2" />
+    <path d="M12 16v.01" stroke-width="2.2" />
+    <path d="M16 12h1" stroke-width="2.2" />
+    <path d="M21 12v.01" stroke-width="2.2" />
+    <path d="M12 21v-1" stroke-width="2.2" />
+  </g>
 
-  ${
-    isAdmin
-      ? `
-  <!-- Admin Shield & Command Center Motif -->
-  <path d="M ${size * 0.5} ${size * 0.22} L ${size * 0.68} ${size * 0.3} L ${size * 0.68} ${size * 0.46} C ${size * 0.68} ${size * 0.6} ${size * 0.5} ${size * 0.66} ${size * 0.5} ${size * 0.66} C ${size * 0.5} ${size * 0.66} ${size * 0.32} ${size * 0.6} ${size * 0.32} ${size * 0.46} L ${size * 0.32} ${size * 0.3} Z" fill="url(#primaryGrad)" opacity="0.2" />
-  <path d="M ${size * 0.5} ${size * 0.24} L ${size * 0.66} ${size * 0.31} L ${size * 0.66} ${size * 0.45} C ${size * 0.66} ${size * 0.58} ${size * 0.5} ${size * 0.64} ${size * 0.5} ${size * 0.64} C ${size * 0.5} ${size * 0.64} ${size * 0.34} ${size * 0.58} ${size * 0.34} ${size * 0.45} L ${size * 0.34} ${size * 0.31} Z" fill="none" stroke="url(#primaryGrad)" stroke-width="12" stroke-linejoin="round" />
-  <!-- Center Star / Check -->
-  <circle cx="${size * 0.5}" cy="${size * 0.44}" r="${size * 0.08}" fill="url(#primaryGrad)" />
-  `
-      : isWorker
-      ? `
-  <!-- Worker Clock & ID Badge Motif -->
-  <circle cx="${size * 0.5}" cy="${size * 0.38}" r="${size * 0.09}" fill="url(#primaryGrad)" />
-  <path d="M ${size * 0.34} ${size * 0.58} C ${size * 0.34} ${size * 0.48} ${size * 0.66} ${size * 0.48} ${size * 0.66} ${size * 0.58}" fill="none" stroke="url(#primaryGrad)" stroke-width="14" stroke-linecap="round" />
-  <!-- Clock hands overlay -->
-  <circle cx="${size * 0.5}" cy="${size * 0.44}" r="${size * 0.22}" fill="none" stroke="url(#primaryGrad)" stroke-width="6" stroke-dasharray="10 14" opacity="0.6" />
-  <path d="M ${size * 0.5} ${size * 0.32} L ${size * 0.5} ${size * 0.44} L ${size * 0.58} ${size * 0.44}" fill="none" stroke="#ffffff" stroke-width="10" stroke-linecap="round" />
-  `
-      : `
-  <!-- Master Clock Motif -->
-  <circle cx="${size * 0.5}" cy="${size * 0.44}" r="${size * 0.22}" fill="none" stroke="url(#primaryGrad)" stroke-width="12" />
-  <path d="M ${size * 0.5} ${size * 0.3} L ${size * 0.5} ${size * 0.44} L ${size * 0.6} ${size * 0.44}" fill="none" stroke="url(#primaryGrad)" stroke-width="12" stroke-linecap="round" />
-  `
-  }
-
-  <!-- Bottom Badge Pill -->
-  <rect x="${size * 0.18}" y="${size * 0.78}" width="${size * 0.64}" height="${size * 0.13}" rx="${size * 0.065}" fill="url(#primaryGrad)" />
-  <text x="${size * 0.5}" y="${size * 0.865}" font-family="system-ui, -apple-system, sans-serif" font-size="${size * 0.055}" font-weight="900" fill="#000000" text-anchor="middle" letter-spacing="4">${labelText}</text>
+  <!-- Bottom Role Pill -->
+  <rect x="${size * 0.2}" y="${size * 0.81}" width="${size * 0.6}" height="${size * 0.12}" rx="${size * 0.06}" fill="#0f172a" fill-opacity="0.85" stroke="#ffffff" stroke-opacity="0.3" stroke-width="3" />
+  <text x="${size * 0.5}" y="${size * 0.89}" font-family="system-ui, -apple-system, sans-serif" font-size="${size * 0.052}" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="3">${labelText}</text>
 </svg>
   `.trim();
 
@@ -173,7 +154,14 @@ export function updatePwaManifest(config: PwaManifestConfig) {
   let shortName = "CLOCK-IT";
   let startUrl = "/";
   let description = "Enterprise Workforce Attendance & Shift Operations Management";
-  let themeColor = "#06b6d4";
+  const themeColor =
+    theme === "light"
+      ? "#ffffff"
+      : theme === "army"
+      ? "#182313"
+      : theme === "navy"
+      ? "#111A35"
+      : "#0D0D0D";
   const bgColor = theme === "light" ? "#f8fafc" : theme === "army" ? "#141C10" : theme === "navy" ? "#0B132B" : "#0a0a0a";
 
   if (role === "admin") {
@@ -181,7 +169,6 @@ export function updatePwaManifest(config: PwaManifestConfig) {
     shortName = tenantName ? `${tenantName.slice(0, 10)} Admin` : "Admin Portal";
     startUrl = "/?pwa=admin";
     description = `Enterprise Admin Dashboard & Attendance Terminal for ${tenantName || "Organization"}`;
-    themeColor = "#06b6d4";
   } else if (role === "worker") {
     manifestName = tenantName
       ? `${tenantName} - Staff Workspace${workerName ? ` (${workerName})` : ""}`
@@ -189,7 +176,6 @@ export function updatePwaManifest(config: PwaManifestConfig) {
     shortName = tenantName ? `${tenantName.slice(0, 10)} Staff` : "Staff Portal";
     startUrl = "/?pwa=worker";
     description = `Worker Attendance Terminal, Shift Check-In & Permission Portal for ${workerName || "Staff"}`;
-    themeColor = "#10b981";
   }
 
   // Construct manifest object

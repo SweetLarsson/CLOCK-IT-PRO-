@@ -14,7 +14,7 @@ import {
   visitorLogs, 
   pendingSubscriptions 
 } from './schema.ts';
-import { eq } from 'drizzle-orm';
+import { eq, and, notInArray } from 'drizzle-orm';
 import { 
   Tenant, 
   User, 
@@ -223,96 +223,105 @@ function mapPendingSubscription(ps: any) {
  */
 export async function seedPostgresDatabase(initialState: any) {
   if (!isPgConfigured()) return;
-  try {
-    const existingTenants = await db.select().from(tenants);
-    if (existingTenants.length > 0) {
-      console.log('PostgreSQL database already initialized with tenants.');
+
+  const maxRetries = 4;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const existingTenants = await db.select().from(tenants);
+      if (existingTenants.length > 0) {
+        console.log('PostgreSQL database already initialized with tenants.');
+        return;
+      }
+
+      console.log('Seeding PostgreSQL database with initial data...');
+
+      if (initialState.tenants && initialState.tenants.length > 0) {
+        for (const t of initialState.tenants) {
+          await db.insert(tenants).values(mapTenant(t)).onConflictDoNothing();
+        }
+      }
+
+      if (initialState.users && initialState.users.length > 0) {
+        for (const u of initialState.users) {
+          await db.insert(users).values(mapUser(u)).onConflictDoNothing();
+        }
+      }
+
+      if (initialState.departments && initialState.departments.length > 0) {
+        for (const d of initialState.departments) {
+          await db.insert(departments).values(mapDepartment(d)).onConflictDoNothing();
+        }
+      }
+
+      if (initialState.departmentLeadHistory && initialState.departmentLeadHistory.length > 0) {
+        for (const h of initialState.departmentLeadHistory) {
+          await db.insert(departmentLeadHistory).values(mapDepartmentLeadHistory(h)).onConflictDoNothing();
+        }
+      }
+
+      if (initialState.attendance && initialState.attendance.length > 0) {
+        for (const a of initialState.attendance) {
+          await db.insert(attendance).values(mapAttendance(a)).onConflictDoNothing();
+        }
+      }
+
+      if (initialState.permissions && initialState.permissions.length > 0) {
+        for (const p of initialState.permissions) {
+          await db.insert(permissions).values(mapPermission(p)).onConflictDoNothing();
+        }
+      }
+
+      if (initialState.notifications && initialState.notifications.length > 0) {
+        for (const n of initialState.notifications) {
+          await db.insert(notifications).values(mapNotification(n)).onConflictDoNothing();
+        }
+      }
+
+      if (initialState.subscriptions && initialState.subscriptions.length > 0) {
+        for (const s of initialState.subscriptions) {
+          await db.insert(subscriptions).values(mapSubscription(s)).onConflictDoNothing();
+        }
+      }
+
+      if (initialState.settings && initialState.settings.length > 0) {
+        for (const st of initialState.settings) {
+          await db.insert(settings).values(mapSettings(st)).onConflictDoNothing();
+        }
+      }
+
+      if (initialState.reportJobs && initialState.reportJobs.length > 0) {
+        for (const r of initialState.reportJobs) {
+          await db.insert(reportJobs).values(mapReportJob(r)).onConflictDoNothing();
+        }
+      }
+
+      if (initialState.auditLogs && initialState.auditLogs.length > 0) {
+        for (const al of initialState.auditLogs) {
+          await db.insert(auditLogs).values(mapAuditLog(al)).onConflictDoNothing();
+        }
+      }
+
+      if (initialState.visitorLogs && initialState.visitorLogs.length > 0) {
+        for (const vl of initialState.visitorLogs) {
+          await db.insert(visitorLogs).values(mapVisitorLog(vl)).onConflictDoNothing();
+        }
+      }
+
+      if (initialState.pendingSubscriptions && initialState.pendingSubscriptions.length > 0) {
+        for (const ps of initialState.pendingSubscriptions) {
+          await db.insert(pendingSubscriptions).values(mapPendingSubscription(ps)).onConflictDoNothing();
+        }
+      }
+
+      console.log('PostgreSQL database seeded successfully.');
       return;
-    }
-
-    console.log('Seeding PostgreSQL database with initial data...');
-
-    if (initialState.tenants && initialState.tenants.length > 0) {
-      for (const t of initialState.tenants) {
-        await db.insert(tenants).values(mapTenant(t)).onConflictDoNothing();
+    } catch (error: any) {
+      if (attempt < maxRetries) {
+        await new Promise((res) => setTimeout(res, attempt * 1200));
+      } else {
+        console.warn('PostgreSQL database unavailable or timed out during seeding (continuing with local data store):', error?.message || error);
       }
     }
-
-    if (initialState.users && initialState.users.length > 0) {
-      for (const u of initialState.users) {
-        await db.insert(users).values(mapUser(u)).onConflictDoNothing();
-      }
-    }
-
-    if (initialState.departments && initialState.departments.length > 0) {
-      for (const d of initialState.departments) {
-        await db.insert(departments).values(mapDepartment(d)).onConflictDoNothing();
-      }
-    }
-
-    if (initialState.departmentLeadHistory && initialState.departmentLeadHistory.length > 0) {
-      for (const h of initialState.departmentLeadHistory) {
-        await db.insert(departmentLeadHistory).values(mapDepartmentLeadHistory(h)).onConflictDoNothing();
-      }
-    }
-
-    if (initialState.attendance && initialState.attendance.length > 0) {
-      for (const a of initialState.attendance) {
-        await db.insert(attendance).values(mapAttendance(a)).onConflictDoNothing();
-      }
-    }
-
-    if (initialState.permissions && initialState.permissions.length > 0) {
-      for (const p of initialState.permissions) {
-        await db.insert(permissions).values(mapPermission(p)).onConflictDoNothing();
-      }
-    }
-
-    if (initialState.notifications && initialState.notifications.length > 0) {
-      for (const n of initialState.notifications) {
-        await db.insert(notifications).values(mapNotification(n)).onConflictDoNothing();
-      }
-    }
-
-    if (initialState.subscriptions && initialState.subscriptions.length > 0) {
-      for (const s of initialState.subscriptions) {
-        await db.insert(subscriptions).values(mapSubscription(s)).onConflictDoNothing();
-      }
-    }
-
-    if (initialState.settings && initialState.settings.length > 0) {
-      for (const st of initialState.settings) {
-        await db.insert(settings).values(mapSettings(st)).onConflictDoNothing();
-      }
-    }
-
-    if (initialState.reportJobs && initialState.reportJobs.length > 0) {
-      for (const r of initialState.reportJobs) {
-        await db.insert(reportJobs).values(mapReportJob(r)).onConflictDoNothing();
-      }
-    }
-
-    if (initialState.auditLogs && initialState.auditLogs.length > 0) {
-      for (const al of initialState.auditLogs) {
-        await db.insert(auditLogs).values(mapAuditLog(al)).onConflictDoNothing();
-      }
-    }
-
-    if (initialState.visitorLogs && initialState.visitorLogs.length > 0) {
-      for (const vl of initialState.visitorLogs) {
-        await db.insert(visitorLogs).values(mapVisitorLog(vl)).onConflictDoNothing();
-      }
-    }
-
-    if (initialState.pendingSubscriptions && initialState.pendingSubscriptions.length > 0) {
-      for (const ps of initialState.pendingSubscriptions) {
-        await db.insert(pendingSubscriptions).values(mapPendingSubscription(ps)).onConflictDoNothing();
-      }
-    }
-
-    console.log('PostgreSQL database seeded successfully.');
-  } catch (error: any) {
-    console.warn('PostgreSQL database unavailable or timed out during seeding (continuing with local data store):', error?.message || error);
   }
 }
 
@@ -334,7 +343,18 @@ export async function syncStateToPostgres(state: any) {
         await db.insert(users).values(val).onConflictDoUpdate({ target: users.id, set: val });
       }
     }
-    if (state.departments && state.departments.length > 0) {
+    if (state.departments) {
+      const activeDeptIds: string[] = state.departments.map((d: any) => String(d.id));
+      const tenantIds: string[] = Array.from(new Set<string>((state.tenants || []).map((t: any) => String(t.id))));
+      for (const tId of tenantIds) {
+        if (!tId) continue;
+        const tenantActiveDeptIds: string[] = state.departments.filter((d: any) => String(d.tenant_id) === tId).map((d: any) => String(d.id));
+        if (tenantActiveDeptIds.length > 0) {
+          await db.delete(departments).where(and(eq(departments.tenant_id, String(tId)), notInArray(departments.id, tenantActiveDeptIds)));
+        } else {
+          await db.delete(departments).where(eq(departments.tenant_id, String(tId)));
+        }
+      }
       for (const d of state.departments) {
         const val = mapDepartment(d);
         await db.insert(departments).values(val).onConflictDoUpdate({ target: departments.id, set: val });
@@ -564,6 +584,11 @@ export async function upsertDepartment(deptData: Department): Promise<Department
 
 export async function deleteDepartment(dept_id: string): Promise<void> {
   try {
+    // Unassign workers assigned to this department
+    await db.update(users).set({ department_id: null }).where(eq(users.department_id, dept_id));
+    // Clear any lead history records
+    await db.delete(departmentLeadHistory).where(eq(departmentLeadHistory.department_id, dept_id));
+    // Delete the department
     await db.delete(departments).where(eq(departments.id, dept_id));
   } catch (error) {
     console.error(`Failed to delete department ${dept_id}:`, error);
@@ -947,54 +972,63 @@ export async function upsertVisitorLog(logData: VisitorLog): Promise<VisitorLog>
  */
 export async function getFullDBStateFromPostgres(tenant_id?: string): Promise<any> {
   if (!isPgConfigured()) return null;
-  try {
-    const allTenants = await db.select().from(tenants);
 
-    const [
-      allUsers,
-      allDepts,
-      allLeadHist,
-      allAtt,
-      allPerms,
-      allNotifs,
-      allSubs,
-      allSettings,
-      allJobs,
-      allAudit,
-      allVisitors,
-      allPendingSubs
-    ] = await Promise.all([
-      db.select().from(users),
-      db.select().from(departments),
-      db.select().from(departmentLeadHistory),
-      db.select().from(attendance),
-      db.select().from(permissions),
-      db.select().from(notifications),
-      db.select().from(subscriptions),
-      db.select().from(settings),
-      db.select().from(reportJobs),
-      db.select().from(auditLogs),
-      db.select().from(visitorLogs),
-      db.select().from(pendingSubscriptions)
-    ]);
+  const maxRetries = 3;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const allTenants = await db.select().from(tenants);
 
-    return {
-      tenants: allTenants,
-      users: allUsers,
-      departments: allDepts,
-      departmentLeadHistory: allLeadHist,
-      attendance: allAtt,
-      permissions: allPerms,
-      notifications: allNotifs,
-      subscriptions: allSubs,
-      settings: allSettings,
-      reportJobs: allJobs,
-      auditLogs: allAudit,
-      visitorLogs: allVisitors,
-      pendingSubscriptions: allPendingSubs
-    };
-  } catch (error: any) {
-    console.warn("PostgreSQL not reachable or timed out (falling back to local data store):", error?.message || error);
-    return null;
+      const [
+        allUsers,
+        allDepts,
+        allLeadHist,
+        allAtt,
+        allPerms,
+        allNotifs,
+        allSubs,
+        allSettings,
+        allJobs,
+        allAudit,
+        allVisitors,
+        allPendingSubs
+      ] = await Promise.all([
+        db.select().from(users),
+        db.select().from(departments),
+        db.select().from(departmentLeadHistory),
+        db.select().from(attendance),
+        db.select().from(permissions),
+        db.select().from(notifications),
+        db.select().from(subscriptions),
+        db.select().from(settings),
+        db.select().from(reportJobs),
+        db.select().from(auditLogs),
+        db.select().from(visitorLogs),
+        db.select().from(pendingSubscriptions)
+      ]);
+
+      return {
+        tenants: allTenants,
+        users: allUsers,
+        departments: allDepts,
+        departmentLeadHistory: allLeadHist,
+        attendance: allAtt,
+        permissions: allPerms,
+        notifications: allNotifs,
+        subscriptions: allSubs,
+        settings: allSettings,
+        reportJobs: allJobs,
+        auditLogs: allAudit,
+        visitorLogs: allVisitors,
+        pendingSubscriptions: allPendingSubs
+      };
+    } catch (error: any) {
+      if (attempt < maxRetries) {
+        await new Promise((res) => setTimeout(res, attempt * 1000));
+      } else {
+        console.warn("PostgreSQL not reachable or timed out (falling back to local data store):", error?.message || error);
+        return null;
+      }
+    }
   }
+  return null;
 }

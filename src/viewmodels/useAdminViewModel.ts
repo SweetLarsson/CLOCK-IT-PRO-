@@ -5,7 +5,12 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import QRCode from "qrcode";
-import { AttendanceStatus, PermissionStatus, UserRole } from "../types.js";
+import { AttendanceStatus, PermissionStatus, UserRole, SubscriptionPlanCode } from "../types.js";
+import {
+  SubscriptionDurationKey,
+  calculateSubscriptionPricing,
+  getDurationOption
+} from "../utils/billingUtils.js";
 
 const compressImage = (file: File, maxWidth: number = 200, maxHeight: number = 200): Promise<string> => {
   return new Promise((resolve) => {
@@ -208,7 +213,16 @@ export function useAdminViewModel({
 
   // Billing simulation states
   const [selectedPlanCode, setSelectedPlanCode] = useState<string>("");
-  const [gatewaySelected, setGatewaySelected] = useState<"opay" | "paystack" | null>(null);
+  const [gatewaySelected, setGatewaySelected] = useState<"opay" | "paystack" | "card" | null>(null);
+  const [selectedDurationKey, setSelectedDurationKey] = useState<SubscriptionDurationKey>("2m");
+  const [selectedDurationMonths, setSelectedDurationMonthsState] = useState<number>(2);
+
+  const setSelectedDurationMonths = (val: any) => {
+    const opt = getDurationOption(val);
+    setSelectedDurationKey(opt.key);
+    setSelectedDurationMonthsState(opt.monthsEquivalent);
+  };
+  const [isRecurringSelected, setIsRecurringSelected] = useState<boolean>(false);
   const [billingProgress, setBillingProgress] = useState<string | null>(null);
 
   // Background Job report tracker
@@ -720,9 +734,43 @@ export function useAdminViewModel({
   };
 
   // Billing webhook triggers simulation
-  const handleBillingRenewalSubmit = async () => {
-    if (!gatewaySelected) return;
+  const handleBillingRenewalSubmit = async (customOptions?: {
+    planCode?: string;
+    paymentMethod?: "opay" | "paystack" | "card";
+    durationMonths?: number;
+    durationKey?: SubscriptionDurationKey | string;
+    durationLabel?: string;
+    recurring?: boolean;
+    originalPrice?: number;
+    discountPercent?: number;
+    discountAmount?: number;
+    finalPrice?: number;
+  }) => {
+    const method = customOptions?.paymentMethod || gatewaySelected;
+    if (!method) return;
     setBillingProgress(translations.verifyingPayment);
+
+    const plan = customOptions?.planCode || selectedPlanCode || SubscriptionPlanCode.BUSINESS;
+    const durationInput = customOptions?.durationKey || customOptions?.durationMonths || selectedDurationKey || selectedDurationMonths;
+    const pricing = calculateSubscriptionPricing(plan, durationInput);
+
+    const discountPercent = customOptions?.discountPercent !== undefined
+      ? customOptions.discountPercent
+      : pricing.discountPercent;
+
+    const originalPrice = customOptions?.originalPrice !== undefined
+      ? customOptions.originalPrice
+      : pricing.originalPrice;
+
+    const discountAmount = customOptions?.discountAmount !== undefined
+      ? customOptions.discountAmount
+      : Math.round(originalPrice * (discountPercent / 100));
+
+    const finalPrice = customOptions?.finalPrice !== undefined
+      ? customOptions.finalPrice
+      : (originalPrice - discountAmount);
+
+    const recurring = customOptions?.recurring !== undefined ? customOptions.recurring : isRecurringSelected;
 
     setTimeout(async () => {
       try {
@@ -731,8 +779,16 @@ export function useAdminViewModel({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             tenant_id: tenant.id,
-            planCode: selectedPlanCode,
-            paymentMethod: gatewaySelected
+            planCode: plan,
+            paymentMethod: method,
+            durationMonths: pricing.durationOption.monthsEquivalent,
+            durationKey: pricing.durationOption.key,
+            durationLabel: customOptions?.durationLabel || pricing.durationOption.label,
+            recurring,
+            originalPrice,
+            discountPercent,
+            discountAmount,
+            finalPrice
           })
         });
         if (response.ok) {
@@ -938,6 +994,12 @@ export function useAdminViewModel({
     setSelectedPlanCode,
     gatewaySelected,
     setGatewaySelected,
+    selectedDurationKey,
+    setSelectedDurationKey,
+    selectedDurationMonths,
+    setSelectedDurationMonths,
+    isRecurringSelected,
+    setIsRecurringSelected,
     billingProgress,
     setBillingProgress,
     reportFeedback,

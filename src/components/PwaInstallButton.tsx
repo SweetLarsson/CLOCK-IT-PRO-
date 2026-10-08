@@ -123,9 +123,11 @@ export function PwaInstallComponent({
               <span className="block text-xs font-bold font-mono uppercase tracking-wider">
                 {isInstalled ? "App Installed" : (buttonText || (isAdmin ? "Install App" : "Install Worker App"))}
               </span>
-              <span className="block text-[10px] opacity-75">
-                {isInstalled ? "Running in Standalone App Mode" : "Add to Home Screen & Desktop"}
-              </span>
+              {!isInstalled && (
+                <span className="block text-[10px] opacity-75">
+                  Add to Home Screen & Desktop
+                </span>
+              )}
             </div>
           </div>
           <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-black/30 border border-white/10">
@@ -150,7 +152,7 @@ export function PwaInstallComponent({
               ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20"
               : `${accentBg} ${accentBorder} ${accentColor} hover:scale-105 active:scale-95 shadow-sm`
           } ${className}`}
-          title={isInstalled ? "Running in Standalone PWA Mode" : `Install ${appTitle}`}
+          title={isInstalled ? "App Installed" : `Install ${appTitle}`}
         >
           <Download className="h-3.5 w-3.5 shrink-0" />
           <span className="truncate">{isInstalled ? "PWA Active" : `Install ${isAdmin ? "Admin" : "Worker"} App`}</span>
