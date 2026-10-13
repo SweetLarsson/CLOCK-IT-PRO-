@@ -4545,6 +4545,25 @@ async function startServer() {
     }
   }, 10000);
 
+  // Catch unhandled /api/* routes to prevent HTML SPA fallback for API calls
+  app.all("/api/*", (req, res) => {
+    return res.status(404).json({ error: `API route ${req.method} ${req.path} not found.` });
+  });
+
+  // Global Express error handler ensuring API failures always return valid JSON
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error("Unhandled error on", req.method, req.path, ":", err);
+    if (res.headersSent) {
+      return next(err);
+    }
+    if (req.path.startsWith("/api/")) {
+      return res.status(500).json({
+        error: err?.message || "An unexpected internal server error occurred. Please try again."
+      });
+    }
+    next(err);
+  });
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true, hmr: process.env.DISABLE_HMR === 'true' ? false : undefined },

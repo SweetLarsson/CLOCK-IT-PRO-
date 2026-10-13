@@ -25,6 +25,7 @@ import {
   compareBiometricVectors, 
   playBiometricTone 
 } from "../utils/facialBiometrics.js";
+import { safeAuthFetch } from "../utils/safeAuthFetch.js";
 
 interface BiometricFacialAuthModalProps {
   isOpen: boolean;
@@ -435,7 +436,7 @@ export default function BiometricFacialAuthModal({
       } else {
         // First-time enrollment: store the new vector
         setConfidenceScore(99);
-        const enrollRes = await fetch("/api/auth/biometric/enroll", {
+        const enrollRes = await safeAuthFetch("/api/auth/biometric/enroll", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -446,13 +447,12 @@ export default function BiometricFacialAuthModal({
           })
         });
         if (!enrollRes.ok) {
-          const errData = await enrollRes.json();
-          throw new Error(errData.error || "Biometric profile creation failed.");
+          throw new Error(enrollRes.error || "Biometric profile creation failed.");
         }
       }
 
       // Verify on server
-      const verifyRes = await fetch("/api/auth/biometric/verify", {
+      const verifyRes = await safeAuthFetch("/api/auth/biometric/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -467,10 +467,10 @@ export default function BiometricFacialAuthModal({
         })
       });
 
-      const verifyData = await verifyRes.json();
       if (!verifyRes.ok) {
-        throw new Error(verifyData.error || "Server rejected biometric validation.");
+        throw new Error(verifyRes.error || "Server rejected biometric validation.");
       }
+      const verifyData = verifyRes.data;
 
       // Verification Success!
       playBiometricTone("success");
@@ -480,7 +480,7 @@ export default function BiometricFacialAuthModal({
       stopCamera();
 
       setTimeout(() => {
-        onVerified(verifyData.user || user);
+        onVerified(verifyData?.user || user);
       }, 1200);
 
     } catch (err: any) {
@@ -502,7 +502,7 @@ export default function BiometricFacialAuthModal({
     setFallbackError(null);
 
     try {
-      const res = await fetch("/api/auth/biometric/bypass", {
+      const res = await safeAuthFetch("/api/auth/biometric/bypass", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -510,10 +510,10 @@ export default function BiometricFacialAuthModal({
           passcode: fallbackCode.trim()
         })
       });
-      const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || "Invalid emergency supervisor passcode.");
+        throw new Error(res.error || "Invalid emergency supervisor passcode.");
       }
+      const data = res.data;
 
       playBiometricTone("success");
       setVerificationSuccess(true);
@@ -521,7 +521,7 @@ export default function BiometricFacialAuthModal({
       stopCamera();
 
       setTimeout(() => {
-        onVerified(data.user || user);
+        onVerified(data?.user || user);
       }, 1000);
     } catch (err: any) {
       setFallbackError(err.message);

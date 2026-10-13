@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import CustomSelect, { SelectOption } from "./CustomSelect.js";
 import BiometricFacialAuthModal from "./BiometricFacialAuthModal.js";
+import { safeAuthFetch } from "../utils/safeAuthFetch.js";
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -118,7 +119,7 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
     }
 
     try {
-      const response = await fetch("/api/auth/social-login", {
+      const res = await safeAuthFetch("/api/auth/social-login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -128,10 +129,10 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
           tenant_id: companyCode || undefined
         })
       });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || `${provider === "google" ? "Google" : "Apple"} SSO authentication failed`);
+      if (!res.ok) {
+        throw new Error(res.error || `${provider === "google" ? "Google" : "Apple"} SSO authentication failed`);
       }
+      const data = res.data;
 
       const isTeamMember = data.user?.role === "team_member" || data.user?.role === "team_lead";
       if (isTeamMember) {
@@ -507,15 +508,15 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
     setLoading(true);
     setErrorMsg(null);
     try {
-      const response = await fetch("/api/auth/login", {
+      const res = await safeAuthFetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password })
       });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || "Login trace failed");
+      if (!res.ok) {
+        throw new Error(res.error || "Login verification failed. Please verify your credentials and try again.");
       }
+      const data = res.data;
       
       // For Team Members, require camera-based biometric facial recognition as secondary login layer
       const isTeamMember = data.user?.role === "team_member" || data.user?.role === "team_lead";
@@ -559,7 +560,7 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
     setLoading(true);
     setErrorMsg(null);
     try {
-      const response = await fetch("/api/auth/register-company", {
+      const res = await safeAuthFetch("/api/auth/register-company", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -570,10 +571,10 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
           subscriptionToken: tokenToSend
         })
       });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || "Company registration failed.");
+      if (!res.ok) {
+        throw new Error(res.error || "Company registration failed. Please review your details and try again.");
       }
+      const data = res.data;
 
       // Mark newly registered account to allow interactive tour sequence
       try {
@@ -621,7 +622,7 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
     setLoading(true);
     setErrorMsg(null);
     try {
-      const response = await fetch("/api/auth/register-worker", {
+      const res = await safeAuthFetch("/api/auth/register-worker", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -640,10 +641,10 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
           localTime: new Date().toTimeString().split(" ")[0]
         })
       });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || "Worker registry failed.");
+      if (!res.ok) {
+        throw new Error(res.error || "Worker registration failed. Please verify your company ID and information.");
       }
+      const data = res.data;
 
       // Mark newly registered account to allow interactive tour sequence
       try {
