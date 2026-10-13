@@ -47,6 +47,7 @@ import {
   WifiOff,
   Compass,
   X,
+  ScanFace,
 } from "lucide-react";
 import { AttendanceStatus, PermissionStatus, CentralAnnouncement } from "../types.js";
 import { formatDateToCustomString, groupNotificationsByDate } from "../utils/dateFormatter.js";
@@ -64,6 +65,7 @@ import { PwaInstallComponent } from "./PwaInstallButton.js";
 import { updatePwaManifest } from "../utils/pwaManager.js";
 import { OnboardingTour } from "./OnboardingTour.js";
 import { OfficialAppLogo } from "./OfficialAppLogo.js";
+import BiometricFacialAuthModal from "./BiometricFacialAuthModal.js";
 
 interface WorkerDashboardProps {
   user: any;
@@ -71,6 +73,7 @@ interface WorkerDashboardProps {
   subscription: any;
   settings: any;
   translations: any;
+  isWelcomeModalActive?: boolean;
   onLogout: () => void;
   onNotifyAdmin: (title: string, msg: string) => void;
   onSettingsChange?: (newSettings: any) => void;
@@ -126,6 +129,7 @@ export default function WorkerDashboard({
   subscription, 
   settings, 
   translations, 
+  isWelcomeModalActive = false,
   onLogout,
   onNotifyAdmin,
   onSettingsChange,
@@ -203,26 +207,60 @@ export default function WorkerDashboard({
   const [isAssessmentHistoryExpanded, setIsAssessmentHistoryExpanded] = React.useState<boolean>(true);
   const [isCompanyEmailRevealed, setIsCompanyEmailRevealed] = React.useState<boolean>(false);
   const menuButtonRef = React.useRef<HTMLButtonElement>(null);
+  const workerTopNavRef = React.useRef<HTMLElement>(null);
+  const [navBottomOffset, setNavBottomOffset] = React.useState<number>(76);
   const [menuPlacement, setMenuPlacement] = React.useState<"bottom" | "top">("bottom");
   const workerSummaryTabRowRef = React.useRef<HTMLDivElement>(null);
   const workerPunchHistoryRef = React.useRef<HTMLDivElement>(null);
 
+  // Monitor top nav bottom position to place settings modal exactly 2px below bottom edge
+  React.useEffect(() => {
+    const updateNavBottom = () => {
+      if (workerTopNavRef.current) {
+        const rect = workerTopNavRef.current.getBoundingClientRect();
+        setNavBottomOffset(rect.bottom > 0 ? rect.bottom : 76);
+      }
+    };
+    updateNavBottom();
+    window.addEventListener("resize", updateNavBottom);
+    window.addEventListener("scroll", updateNavBottom, true);
+    return () => {
+      window.removeEventListener("resize", updateNavBottom);
+      window.removeEventListener("scroll", updateNavBottom, true);
+    };
+  }, []);
+
   // Interactive Onboarding Tour State
   const [showOnboardingTour, setShowOnboardingTour] = React.useState<boolean>(false);
 
-  // Auto-launch interactive onboarding tour for new workers
+  // Controlled sequence: Welcome Back modal appears first -> closes automatically -> Interactive Tour starts afterward
   React.useEffect(() => {
+    // Hold tour while Welcome Back modal is active or initial splash is showing
+    if (isWelcomeModalActive || showSplash) {
+      return;
+    }
+
     try {
       const tourKey = `has_completed_onboarding_worker_${user?.id || "default"}`;
       const hasCompleted = localStorage.getItem(tourKey);
-      if (!hasCompleted) {
+
+      // Check if user is a genuinely new user eligible for auto-tour
+      const isNewUserKey = `is_new_user_${(user?.id || user?.email || "").toLowerCase()}`;
+      const newRegKey = `clock_it_new_registration_${(user?.id || user?.email || "").toLowerCase()}`;
+      const isNewUser = localStorage.getItem(isNewUserKey) === "true" || localStorage.getItem(newRegKey) === "true";
+
+      if (!hasCompleted && isNewUser) {
+        // Welcome Back modal has closed cleanly; start tour after brief transition buffer
         const timer = setTimeout(() => {
           setShowOnboardingTour(true);
-        }, 900);
+          // Clean up transient new user flag so tour is strictly once in lifetime
+          localStorage.removeItem(isNewUserKey);
+          localStorage.removeItem(newRegKey);
+        }, 450);
         return () => clearTimeout(timer);
       }
     } catch (e) {}
-  }, [user?.id]);
+  }, [user?.id, user?.email, isWelcomeModalActive, showSplash]);
 
   const formatEllipsisEmail = (emailStr?: string) => {
     if (!emailStr || emailStr === "N/A") return "N/A";
@@ -511,6 +549,7 @@ export default function WorkerDashboard({
 
   const [showSettingsModal, setShowSettingsModal] = React.useState(false);
   const [showConfirmLogout, setShowConfirmLogout] = React.useState(false);
+  const [showBiometricCalibrateModal, setShowBiometricCalibrateModal] = React.useState(false);
   const groupedNotifications = React.useMemo(() => {
     return groupNotificationsByDate(notifications);
   }, [notifications]);
@@ -1122,7 +1161,7 @@ export default function WorkerDashboard({
     <div className={`min-h-screen flex flex-col font-sans select-none pb-20 justify-start transition-colors duration-300 ${themeClass.bg}`}>
       
       {/* Header Info Panel / Status Bar */}
-      <nav className={`px-6 py-4 flex items-center justify-between sticky top-0 z-20 shadow-md border-b transition-colors duration-300 ${themeClass.navBg}`}>
+      <nav ref={workerTopNavRef} className={`px-6 py-4 flex items-center justify-between sticky top-0 z-20 shadow-md border-b transition-colors duration-300 ${themeClass.navBg}`}>
         <div className="flex items-center space-x-3">
           <img 
             src={user.profilePhoto?.medium || IMAGES.defaultWorkerAvatar} 
@@ -1379,24 +1418,47 @@ export default function WorkerDashboard({
             <AnimatePresence>
               {showSettingsModal && (
                 <>
-                  <div className="fixed inset-0 z-30" onClick={() => setShowSettingsModal(false)} />
+                  {/* Backdrop overlay that prevents background page scrolling and captures outside clicks */}
                   <motion.div 
-                    initial={{ opacity: 0, y: menuPlacement === "top" ? -10 : 10, scale: 0.96 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: menuPlacement === "top" ? -10 : 10, scale: 0.96 }}
-                    transition={{ duration: 0.18 }}
-                    className={`absolute right-0 ${
-                      menuPlacement === "top" ? "bottom-full mb-3" : "top-full mt-3"
-                    } w-80 sm:w-84 max-w-[calc(100vw-1.5rem)] max-h-[min(82vh,560px)] rounded-2xl sm:rounded-3xl border p-5 shadow-2xl z-45 flex flex-col transition-all duration-300 ${themeClass.navBg} ${themeClass.accentBorder} ${themeClass.textHighlight}`}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px]" 
+                    onClick={() => setShowSettingsModal(false)} 
+                  />
+
+                  {/* Fixed Drawer sliding in from the right-hand side, 2px below top nav */}
+                  <motion.div 
+                    initial={{ x: "100%", opacity: 0 }}
+                    animate={{ x: 0, opacity: 1 }}
+                    exit={{ x: "100%", opacity: 0 }}
+                    transition={{ type: "spring", damping: 28, stiffness: 280 }}
+                    style={{
+                      top: `${navBottomOffset + 2}px`,
+                      maxHeight: `calc(100vh - ${navBottomOffset + 2}px - 16px)`,
+                    }}
+                    className={`fixed right-2 sm:right-6 w-84 sm:w-92 max-w-[calc(100vw-1rem)] rounded-2xl sm:rounded-3xl border p-5 shadow-2xl z-50 flex flex-col transition-colors duration-300 ${themeClass.navBg} ${themeClass.accentBorder} ${themeClass.textHighlight}`}
+                    onClick={(e) => e.stopPropagation()}
                   >
-                    <div className="mb-3 shrink-0">
-                      <h4 className={`font-display font-bold text-sm ${themeClass.textTitle}`}>Menu Settings</h4>
-                      <p className={`text-[11px] font-light mt-0.5 ${themeClass.textMuted}`}>
-                        Theme display & profile avatar settings.
-                      </p>
+                    <div className="mb-3 shrink-0 flex items-center justify-between">
+                      <div>
+                        <h4 className={`font-display font-bold text-sm ${themeClass.textTitle}`}>Menu Settings</h4>
+                        <p className={`text-[11px] font-light mt-0.5 ${themeClass.textMuted}`}>
+                          Theme display & profile avatar settings.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowSettingsModal(false)}
+                        className={`p-1.5 rounded-xl border transition-colors cursor-pointer ${themeClass.innerBg} ${themeClass.accentBorder} ${themeClass.textMuted} hover:${themeClass.textHighlight}`}
+                        title="Close"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
                     </div>
 
-                    <div className="space-y-4 overflow-y-auto no-scrollbar flex-1 min-h-0 pr-1">
+                    <div className="space-y-4 overflow-y-auto custom-dropdown-scroll flex-1 min-h-0 pr-1">
                       {/* Onboarding Dashboard Tour */}
                       <div className="space-y-1.5 flex flex-col">
                         <span className={`text-[10px] font-semibold uppercase tracking-wider block ${themeClass.textMuted}`}>
@@ -1459,6 +1521,42 @@ export default function WorkerDashboard({
                           className="hidden" 
                           accept="image/*" 
                         />
+                      </div>
+
+                      {/* Biometric Facial ID Management */}
+                      <div className="space-y-1.5 flex flex-col">
+                        <span className={`text-[10px] font-semibold uppercase tracking-wider block ${themeClass.textMuted}`}>
+                          Biometric Secondary Security
+                        </span>
+                        <div className={`p-3 rounded-xl border flex items-center justify-between transition-colors ${themeClass.innerBg} ${themeClass.accentBorder}`}>
+                          <div className="flex items-center space-x-2.5">
+                            <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-400 shrink-0">
+                              <ScanFace className="h-4 w-4" />
+                            </div>
+                            <div className="text-left">
+                              <div className="flex items-center space-x-1.5">
+                                <span className={`text-xs font-bold block ${themeClass.textTitle}`}>Facial ID Login Layer</span>
+                                <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full ${user.biometricProfile?.enabled ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30" : "bg-cyan-500/15 text-cyan-400 border border-cyan-500/30"}`}>
+                                  {user.biometricProfile?.enabled ? "Active" : "Enrolled"}
+                                </span>
+                              </div>
+                              <span className={`text-[10px] block ${themeClass.textMuted}`}>
+                                Device camera secondary verification
+                              </span>
+                            </div>
+                          </div>
+                          <button
+                            id="worker_settings_calibrate_biometric_btn"
+                            type="button"
+                            onClick={() => {
+                              setShowSettingsModal(false);
+                              setShowBiometricCalibrateModal(true);
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-[10px] font-bold transition-all cursor-pointer active:scale-98 shadow-xs"
+                          >
+                            Calibrate
+                          </button>
+                        </div>
                       </div>
 
                       {/* Theme selection */}
@@ -4167,6 +4265,26 @@ export default function WorkerDashboard({
         onNavigateTab={(tab) => setActiveTab(tab)}
         userId={user?.id}
       />
+
+      {/* Biometric Facial Authentication Calibration Modal */}
+      {showBiometricCalibrateModal && (
+        <BiometricFacialAuthModal
+          isOpen={showBiometricCalibrateModal}
+          user={user}
+          theme={tempTheme || "dark"}
+          mode="calibrate"
+          onClose={() => setShowBiometricCalibrateModal(false)}
+          onVerified={(verifiedUser) => {
+            setShowBiometricCalibrateModal(false);
+            if (onUserUpdate) {
+              onUserUpdate({ ...user, ...verifiedUser });
+            }
+            if (onNotifyAdmin) {
+              onNotifyAdmin("Biometric Facial ID Updated", "Your facial recognition profile and biometric vectors have been recalibrated.");
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

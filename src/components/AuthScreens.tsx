@@ -29,6 +29,7 @@ import {
   Calendar
 } from "lucide-react";
 import CustomSelect, { SelectOption } from "./CustomSelect.js";
+import BiometricFacialAuthModal from "./BiometricFacialAuthModal.js";
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -62,6 +63,10 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
 
   // Direct Social Auth (Google & Apple)
   const [isSocialSubmitting, setIsSocialSubmitting] = useState(false);
+
+  // Biometric Facial Recognition Secondary Login Layer State
+  const [showBiometricModal, setShowBiometricModal] = useState(false);
+  const [pendingBiometricSession, setPendingBiometricSession] = useState<any>(null);
 
   const handleSocialLogin = async (provider: "google" | "apple") => {
     setIsSocialSubmitting(true);
@@ -126,6 +131,14 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
       const data = await response.json();
       if (!response.ok) {
         throw new Error(data.error || `${provider === "google" ? "Google" : "Apple"} SSO authentication failed`);
+      }
+
+      const isTeamMember = data.user?.role === "team_member" || data.user?.role === "team_lead";
+      if (isTeamMember) {
+        setPendingBiometricSession(data);
+        setShowBiometricModal(true);
+        setIsSocialSubmitting(false);
+        return;
       }
 
       if (rememberMe) {
@@ -228,7 +241,6 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
     }
   }, [sortedDepts, selectedDeptId]);
   const [agreedTerms, setAgreedTerms] = useState(false);
-  const [digitalSignature, setDigitalSignature] = useState("");
   const [termsModalOpen, setTermsModalOpen] = useState(false);
 
   // Loading & Error States
@@ -388,11 +400,6 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
     };
   }, [companyCode]);
 
-  // Automatically populate digital signature with worker's full name
-  useEffect(() => {
-    const fullName = `${workerFirst} ${workerLast}`.trim();
-    setDigitalSignature(fullName);
-  }, [workerFirst, workerLast]);
 
   const handleOpenForgotPassword = () => {
     setForgotEmail(email || "");
@@ -510,6 +517,15 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
         throw new Error(data.error || "Login trace failed");
       }
       
+      // For Team Members, require camera-based biometric facial recognition as secondary login layer
+      const isTeamMember = data.user?.role === "team_member" || data.user?.role === "team_lead";
+      if (isTeamMember) {
+        setPendingBiometricSession(data);
+        setShowBiometricModal(true);
+        setLoading(false);
+        return;
+      }
+
       if (rememberMe) {
         localStorage.setItem("clock_it_session", JSON.stringify(data));
       }
@@ -598,13 +614,7 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
     }
 
     if (!agreedTerms) {
-      setErrorMsg("You must read and sign the Legal Terms and Privacy Policy before submitting.");
-      return;
-    }
-
-    const expectedName = (workerFirst.trim() + " " + workerLast.trim()).toLowerCase();
-    if (digitalSignature.trim().toLowerCase() !== expectedName) {
-      setErrorMsg(`Your digital signature must exactly match your full name: "${workerFirst} ${workerLast}"`);
+      setErrorMsg("You must read and agree to the Legal Terms and Privacy Policy before submitting.");
       return;
     }
 
@@ -635,6 +645,12 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
         throw new Error(data.error || "Worker registry failed.");
       }
 
+      // Mark newly registered account to allow interactive tour sequence
+      try {
+        localStorage.setItem(`is_new_user_${(data.user?.id || workerEmail).toLowerCase()}`, "true");
+        localStorage.setItem(`clock_it_new_registration_${(data.user?.id || workerEmail).toLowerCase()}`, "true");
+      } catch (e) {}
+
       setSuccessMsg("Associated worker cataloged! Sign in via main Login desk.");
       setTimeout(() => {
         setEmail(workerEmail);
@@ -646,7 +662,6 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
         setWorkerEmail("");
         setWorkerPass("");
         setAgreedTerms(false);
-        setDigitalSignature("");
         setSuccessMsg(null);
       }, 2000);
     } catch (err: any) {
@@ -1343,14 +1358,6 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
                   </p>
                 </div>
 
-                {isFromQr && (
-                  <div className="bg-cyan-950/30 border border-cyan-800/40 p-3 rounded-xl text-xs font-medium text-cyan-400 space-y-1 block animate-fade-in font-sans">
-                    <strong className="block text-cyan-300 font-bold text-[11px]">💎 QR Gate Handshake Active</strong>
-                    <p className="font-light text-neutral-300 leading-relaxed text-[11px]">
-                      Scanned official company QR terminal pass. Credentials are authenticated and audited against active subscription limits.
-                    </p>
-                  </div>
-                )}
                 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="flex flex-col space-y-1">
@@ -1628,8 +1635,8 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
                   </div>
                 </div>
 
-                {/* Legal Terms & Agreement Signature Section */}
-                <div className="space-y-3 pt-2 border-t border-[#262626] mt-3 animate-fade-in">
+                {/* Legal Terms & Agreement Section */}
+                <div className="pt-2 border-t border-[#262626] mt-3 animate-fade-in">
                   <div className="flex items-start space-x-2.5">
                     <input
                       id="legal_terms_checkbox"
@@ -1649,35 +1656,6 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
                         [View Terms]
                       </button>
                     </label>
-                  </div>
-
-                  <div className="flex flex-col space-y-1">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[11px] font-semibold text-neutral-400">
-                        {translations.legalTermsSignature || "Digital Signature"}
-                      </label>
-                      <span className="text-[9px] font-mono text-emerald-400/90 bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-800/30">
-                        Auto-Populated
-                      </span>
-                    </div>
-                    <input
-                      type="text"
-                      placeholder="Enter First & Last Name to populate signature"
-                      value={digitalSignature}
-                      readOnly
-                      tabIndex={-1}
-                      className="w-full text-xs bg-[#141414] text-cyan-300 font-mono border border-[#262626] rounded-xl py-3 px-4 font-semibold cursor-not-allowed select-none outline-none min-h-[44px]"
-                      required
-                    />
-                    {workerFirst && workerLast ? (
-                      <span className="text-[10px] text-neutral-500 select-none">
-                        Cryptographic signature generated for: <span className="font-mono text-cyan-400 font-semibold">{workerFirst} {workerLast}</span>
-                      </span>
-                    ) : (
-                      <span className="text-[10px] text-neutral-500 select-none">
-                        Signature automatically syncs with your registered name.
-                      </span>
-                    )}
                   </div>
                 </div>
 
@@ -2017,6 +1995,40 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
                 <span>UTILITY: 3000 DEV</span>
               </div>
             </div>
+          )}
+
+          {/* Biometric Facial Recognition Secondary Authentication Modal for Team Members */}
+          {showBiometricModal && pendingBiometricSession && (
+            <BiometricFacialAuthModal
+              isOpen={showBiometricModal}
+              user={pendingBiometricSession.user}
+              theme="dark"
+              mode="login-2fa"
+              onClose={() => {
+                setShowBiometricModal(false);
+                setPendingBiometricSession(null);
+                setErrorMsg("Biometric facial authentication was canceled. Facial recognition is required for team member access.");
+              }}
+              onVerified={(verifiedUser) => {
+                const finalData = {
+                  ...pendingBiometricSession,
+                  user: {
+                    ...pendingBiometricSession.user,
+                    ...verifiedUser,
+                    biometricVerified: true
+                  }
+                };
+                if (rememberMe) {
+                  localStorage.setItem("clock_it_session", JSON.stringify(finalData));
+                }
+                setShowBiometricModal(false);
+                setPendingBiometricSession(null);
+                setSuccessMsg("Biometric facial identity confirmed! Welcome back.");
+                setTimeout(() => {
+                  onLoginSuccess(finalData);
+                }, 600);
+              }}
+            />
           )}
 
       </div>

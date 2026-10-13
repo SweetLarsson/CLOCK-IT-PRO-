@@ -344,6 +344,19 @@
       "preferences": {
         "theme": "army",
         "language": "es"
+      },
+      "biometricProfile": {
+        "enabled": true,
+        "enrolledAt": "2026-10-13T13:28:05.754Z",
+        "faceVector": [
+          0.1,
+          0.2,
+          0.3
+        ],
+        "faceSnapshot": "data:image/jpeg;base64,sample",
+        "biometricId": "bio-2df908c8ae0535f5",
+        "deviceName": "MacBook Pro FaceTime Camera",
+        "lastVerifiedAt": "2026-10-13T13:28:10.167Z"
       }
     },
     {
@@ -5149,7 +5162,7 @@
       "tenant_id": "tenant-yp2fumg4p",
       "planCode": "starter",
       "price": 10000,
-      "status": "active",
+      "status": "expired",
       "startDate": "2026-08-27T10:28:42.423Z",
       "endDate": "2026-09-26T10:28:42.423Z",
       "paymentMethod": "paystack",
@@ -5424,6 +5437,30 @@
     }
   ],
   "auditLogs": [
+    {
+      "id": "audit-t3k1alx",
+      "tenant_id": "default-tenant",
+      "user_id": "worker-david",
+      "action": "BIOMETRIC_AUTH_BYPASS_AUTHORIZED",
+      "details": "Emergency secondary authorization code accepted for team member David Ade.",
+      "timestamp": "2026-10-13T13:28:15.037Z"
+    },
+    {
+      "id": "audit-8nlyorh",
+      "tenant_id": "default-tenant",
+      "user_id": "worker-david",
+      "action": "BIOMETRIC_FACIAL_AUTH_VERIFIED",
+      "details": "Secondary facial recognition login verified successfully via device camera for team member David Ade (david@apextech.com).",
+      "timestamp": "2026-10-13T13:28:10.167Z"
+    },
+    {
+      "id": "audit-p44tqmk",
+      "tenant_id": "default-tenant",
+      "user_id": "worker-david",
+      "action": "BIOMETRIC_PROFILE_ENROLLED",
+      "details": "Biometric facial profile registered via device camera (Biometric ID: bio-2df908c8ae0535f5) for team member David Ade.",
+      "timestamp": "2026-10-13T13:28:05.754Z"
+    },
     {
       "id": "log-2t731j1dk",
       "tenant_id": "tenant-nk500tae2",

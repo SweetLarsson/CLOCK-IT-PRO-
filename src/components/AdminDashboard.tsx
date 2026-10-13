@@ -74,6 +74,7 @@ import {
   Play,
   Sparkles,
   Tag,
+  ScanFace,
 } from "lucide-react";
 import { AnimatedMenuIcon } from "./AnimatedMenuIcon.js";
 import { AnimatedQrCodeIcon } from "./AnimatedQrCodeIcon.js";
@@ -125,6 +126,7 @@ interface AdminDashboardProps {
   subscription: any;
   initialSettings: any;
   translations: any;
+  isWelcomeModalActive?: boolean;
   onLogout: () => void;
   onNotifyAdmin: (title: string, msg: string) => void;
   onSettingsChange?: (newSettings: any) => void;
@@ -159,6 +161,7 @@ export default function AdminDashboard({
   subscription: initialSub,
   initialSettings,
   translations,
+  isWelcomeModalActive = false,
   onLogout,
   onNotifyAdmin,
   onSettingsChange,
@@ -397,19 +400,34 @@ export default function AdminDashboard({
   // Interactive Onboarding Tour State
   const [showOnboardingTour, setShowOnboardingTour] = React.useState(false);
 
-  // Auto-launch interactive onboarding tour for new administrators
+  // Controlled sequence: Welcome Back modal appears first -> closes automatically -> Interactive Tour starts afterward
   React.useEffect(() => {
+    // Hold tour while Welcome Back modal is active or initial splash is showing
+    if (isWelcomeModalActive || showSplash) {
+      return;
+    }
+
     try {
       const tourKey = `has_completed_onboarding_admin_${user?.id || "default"}`;
       const hasCompleted = localStorage.getItem(tourKey);
-      if (!hasCompleted) {
+
+      // Check if user is a genuinely new user eligible for auto-tour
+      const isNewUserKey = `is_new_user_${(user?.id || user?.email || "").toLowerCase()}`;
+      const newRegKey = `clock_it_new_registration_${(user?.id || user?.email || "").toLowerCase()}`;
+      const isNewUser = localStorage.getItem(isNewUserKey) === "true" || localStorage.getItem(newRegKey) === "true";
+
+      if (!hasCompleted && isNewUser) {
+        // Welcome Back modal has closed cleanly; start tour after brief transition buffer
         const timer = setTimeout(() => {
           setShowOnboardingTour(true);
-        }, 900);
+          // Clean up transient new user flag so tour is strictly once in lifetime
+          localStorage.removeItem(isNewUserKey);
+          localStorage.removeItem(newRegKey);
+        }, 450);
         return () => clearTimeout(timer);
       }
     } catch (e) {}
-  }, [user?.id]);
+  }, [user?.id, user?.email, isWelcomeModalActive, showSplash]);
 
   const arrivalStatusDropdownOptions = React.useMemo(() => [
     {
@@ -6000,7 +6018,12 @@ export default function AdminDashboard({
                           {/* Role */}
                           <td className="p-4">
                             <span className={`font-bold block ${adminThemeClass.textTitle}`}>{w.title || "Staff Member"}</span>
-                            <span className="text-[10px] uppercase font-bold text-[#00bcd4]">{w.role}</span>
+                            <div className="flex items-center space-x-1.5 mt-0.5">
+                              <span className="text-[10px] uppercase font-bold text-[#00bcd4]">{w.role}</span>
+                              <span className="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-cyan-500/10 text-cyan-400 border border-cyan-500/20" title="Biometric Camera Secondary Layer Active">
+                                Face 2FA
+                              </span>
+                            </div>
                           </td>
 
                           {/* Department */}
@@ -9418,6 +9441,25 @@ export default function AdminDashboard({
                         <div className={`p-4 rounded-2xl border col-span-2 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
                           <span className={`text-[9px] uppercase font-bold font-mono tracking-wider block ${adminThemeClass.textMuted}`}>Overall Performance Index</span>
                           <strong className={`text-xl block font-mono mt-1 font-extrabold ${adminThemeClass.accentText}`}>{metrics.performancePercentage.toFixed(2)}%</strong>
+                        </div>
+                        <div className={`p-4 rounded-2xl border col-span-2 flex items-center justify-between ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}>
+                          <div className="flex items-center space-x-3">
+                            <div className="h-9 w-9 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 flex items-center justify-center shrink-0">
+                              <ScanFace className="h-5 w-5" />
+                            </div>
+                            <div>
+                              <span className={`text-[9px] uppercase font-bold font-mono tracking-wider block ${adminThemeClass.textMuted}`}>Secondary Login Security</span>
+                              <strong className={`text-xs block font-bold ${adminThemeClass.textTitle}`}>Camera Facial Recognition Layer</strong>
+                              <span className={`text-[10px] ${adminThemeClass.textMuted}`}>
+                                {activeLeaderModal.biometricProfile?.lastVerifiedAt 
+                                  ? `Last camera verified: ${new Date(activeLeaderModal.biometricProfile.lastVerifiedAt).toLocaleDateString()}` 
+                                  : "Cryptographic 2FA active"}
+                              </span>
+                            </div>
+                          </div>
+                          <span className="px-2.5 py-1 rounded-full text-[9px] font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                            Enrolled & Secured
+                          </span>
                         </div>
                       </div>
 

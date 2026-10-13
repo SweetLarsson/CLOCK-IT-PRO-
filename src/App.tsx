@@ -491,9 +491,10 @@ export default function App() {
       time: new Date().toLocaleTimeString()
     });
 
+    // Welcome Back modal remains visible for a few seconds (3.5s) then closes automatically
     setTimeout(() => {
       setSignInToast(null);
-    }, 5000);
+    }, 3500);
   };
 
   const handleLogout = () => {
@@ -664,6 +665,7 @@ export default function App() {
             subscription={session.subscription}
             initialSettings={session.settings}
             translations={translations}
+            isWelcomeModalActive={Boolean(signInToast)}
             onLogout={handleLogout}
             onNotifyAdmin={addToastNotification}
             onSettingsChange={(newSettings) => {
@@ -689,6 +691,7 @@ export default function App() {
             subscription={session.subscription}
             settings={session.settings}
             translations={translations}
+            isWelcomeModalActive={Boolean(signInToast)}
             onLogout={handleLogout}
             onNotifyAdmin={addToastNotification}
             onTenantChange={(newTenant) => {
@@ -715,7 +718,7 @@ export default function App() {
         )
       )}
 
-      {/* Center Toast for new Sign-In */}
+      {/* Center Toast / Modal for new Sign-In */}
       <AnimatePresence>
         {signInToast && (
           <div id="center-signin-toast" className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
@@ -723,11 +726,25 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.9 }}
-              className={`pointer-events-auto border rounded-3xl p-6 shadow-2xl max-w-sm w-full mx-4 backdrop-blur-xl flex flex-col items-center text-center ${getCenterToastStyle().bg}`}
+              transition={{ duration: 0.25 }}
+              onClick={() => setSignInToast(null)}
+              className={`pointer-events-auto border rounded-3xl p-6 shadow-2xl max-w-sm w-full mx-4 backdrop-blur-xl flex flex-col items-center text-center cursor-pointer select-none relative ${getCenterToastStyle().bg}`}
               style={{
                 boxShadow: "0 25px 50px -12px rgba(0,0,0,0.5)"
               }}
+              title="Click to dismiss"
             >
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSignInToast(null);
+                }}
+                className="absolute top-4 right-4 p-1 rounded-full text-neutral-400 hover:text-white transition-colors cursor-pointer"
+                title="Dismiss"
+              >
+                <X className="h-4 w-4" />
+              </button>
               <div className={`h-14 w-14 rounded-2xl flex items-center justify-center mb-4 border ${getCenterToastStyle().accent}`}>
                 <ShieldCheck className="h-8 w-8" />
               </div>
