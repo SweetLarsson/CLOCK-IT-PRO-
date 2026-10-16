@@ -1,8 +1,8 @@
 /**
  * Safe fetch wrapper for authentication and API requests.
  * Prevents "Unexpected token 'T', 'The page c...' is not valid JSON" parsing crashes
- * by inspecting response content types, status codes, and network exceptions,
- * and returning structured, human-understandable error messages.
+ * by safely inspecting response body text, parsing JSON, handling non-JSON responses,
+ * and returning clear, actionable, user-friendly error messages.
  */
 
 export interface SafeFetchResponse<T = any> {
@@ -18,53 +18,92 @@ export async function safeAuthFetch<T = any>(
 ): Promise<SafeFetchResponse<T>> {
   try {
     const response = await fetch(url, options);
-    const contentType = response.headers.get("content-type") || "";
-
+    
+    // Read response as text first to safely inspect regardless of headers
+    const rawText = await response.text();
     let parsedData: any = null;
+    let isJson = false;
 
-    if (contentType.toLowerCase().includes("application/json")) {
+    if (rawText && rawText.trim().length > 0) {
       try {
-        parsedData = await response.json();
-      } catch (jsonErr: any) {
+        parsedData = JSON.parse(rawText);
+        isJson = true;
+      } catch {
+        isJson = false;
+      }
+    }
+
+    if (isJson && parsedData) {
+      if (response.ok) {
+        return {
+          ok: true,
+          status: response.status,
+          data: parsedData
+        };
+      }
+
+      // If server returned a JSON error payload
+      const extractedError = 
+        parsedData.error || 
+        parsedData.message || 
+        parsedData.detail || 
+        parsedData.msg || 
+        null;
+
+      if (extractedError && typeof extractedError === "string" && extractedError.trim().length > 0) {
         return {
           ok: false,
           status: response.status,
-          error: "The server response was not formatted as valid JSON. Please try again in a moment."
+          data: parsedData,
+          error: extractedError.trim()
         };
       }
-    } else {
-      // Non-JSON response (e.g., HTML error page, proxy timeout, "The page cannot be found...")
-      const text = await response.text();
-      let friendlyError = "The service is temporarily unavailable or restarting. Please try again in a few moments.";
 
-      if (response.status === 404) {
-        friendlyError = "The requested service endpoint could not be found. Please refresh and try again.";
+      // Fallback message based on status code
+      let statusError = `Request failed with status ${response.status}. Please check your inputs and try again.`;
+      if (response.status === 401) {
+        statusError = "Invalid email or password. Please verify your credentials and try again.";
+      } else if (response.status === 403) {
+        statusError = "Access denied. An active subscription or administrative authorization is required.";
+      } else if (response.status === 404) {
+        statusError = url.includes("register-worker")
+          ? "The specified Company Unique ID could not be found. Please check your company code or invitation link."
+          : "The requested account or company could not be found. Please check your credentials and try again.";
+      } else if (response.status === 409) {
+        statusError = "This email or identity is already registered in the system. Please sign in instead.";
       } else if (response.status >= 500) {
-        friendlyError = "The server encountered a temporary condition. Please wait a few moments and try again.";
-      } else if (text && text.length > 0 && text.length < 120 && !text.includes("<") && !text.includes("{")) {
-        friendlyError = text.trim();
+        statusError = "The server encountered a temporary condition. Please wait a few moments and try again.";
       }
 
-      return {
-        ok: false,
-        status: response.status,
-        error: friendlyError
-      };
-    }
-
-    if (!response.ok) {
       return {
         ok: false,
         status: response.status,
         data: parsedData,
-        error: parsedData?.error || `Request failed with status ${response.status}. Please check your inputs and try again.`
+        error: statusError
       };
     }
 
+    // Non-JSON response (e.g. HTML error page from proxy, cold restart, or network gateway)
+    let friendlyError = "The authentication service is temporarily unavailable or reconnecting. Please try again in a few moments.";
+
+    if (response.status === 404) {
+      if (url.includes("register-worker")) {
+        friendlyError = "The specified Company Unique ID could not be verified. Please check your company code and try again.";
+      } else if (url.includes("login")) {
+        friendlyError = "The authentication service is temporarily reconnecting. Please wait a few moments and try again.";
+      } else {
+        friendlyError = "The requested service is momentarily unavailable. Please refresh and try again.";
+      }
+    } else if (response.status >= 500) {
+      friendlyError = "The server encountered a temporary condition while processing your request. Please wait a few moments and try again.";
+    } else if (rawText && rawText.length > 0 && rawText.length < 120 && !rawText.includes("<") && !rawText.includes("{")) {
+      friendlyError = rawText.trim();
+    }
+
     return {
-      ok: true,
+      ok: false,
       status: response.status,
-      data: parsedData
+      error: friendlyError
     };
   } catch (err: any) {
     const msg = err?.message || "";

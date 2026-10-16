@@ -560,6 +560,13 @@ export default function AdminDashboard({
 
   // Open Create Attendance modal for currently selected worker
   const handleOpenCreateAttendance = () => {
+    if (isSubscriptionExpired) {
+      onNotifyAdmin(
+        "Subscription Plan Expired",
+        "Attendance records cannot be created while your subscription plan is expired. Please renew your subscription to restore full access."
+      );
+      return;
+    }
     if (!selectedAttendanceWorkerId && workers.length > 0) {
       setSelectedAttendanceWorkerId(workers[0].id);
     }
@@ -583,6 +590,13 @@ export default function AdminDashboard({
 
   // Open Edit Attendance modal for a specific record
   const handleOpenEditAttendance = (rec: any) => {
+    if (isSubscriptionExpired) {
+      onNotifyAdmin(
+        "Subscription Plan Expired",
+        "Attendance records cannot be modified while your subscription plan is expired. Please renew your subscription to restore full access."
+      );
+      return;
+    }
     const rawTimeIn = rec.timeIn || "07:00:00";
     const formattedTimeIn = rawTimeIn.length === 5 ? `${rawTimeIn}:00` : rawTimeIn;
     const computedStatusIn = calculateArrivalStatus(formattedTimeIn, settings);
@@ -606,17 +620,27 @@ export default function AdminDashboard({
   // Trigger Confirmation Modal from the Create / Edit Form
   const handlePromptAttendanceFormConfirm = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubscriptionExpired) {
+      onNotifyAdmin(
+        "Subscription Plan Expired",
+        "Attendance records cannot be created or updated while your subscription plan is expired. Please renew your subscription to restore full access."
+      );
+      return;
+    }
     const targetWorkerId = selectedAttendanceWorkerId || workers[0]?.id;
     const targetWorker = workers.find((w) => w.id === targetWorkerId);
     const workerName = targetWorker ? `${targetWorker.firstName} ${targetWorker.lastName}` : "Selected Employee";
 
     if (typeof navigator !== "undefined" && !navigator.onLine) {
-      alert("Internet connection required. Attendance records can only be created or updated when you have an active internet connection. Existing records remain accessible for viewing.");
+      onNotifyAdmin(
+        "Internet Connection Required",
+        "Attendance records can only be created or updated when you have an active internet connection. Existing records remain accessible for viewing."
+      );
       return;
     }
 
     if (!attendanceFormDate) {
-      alert("Please specify a valid shift date.");
+      onNotifyAdmin("Invalid Date", "Please specify a valid shift date.");
       return;
     }
 
@@ -674,8 +698,19 @@ export default function AdminDashboard({
   };
 
   const handlePromptDeleteAttendanceConfirm = (rec: any) => {
+    if (isSubscriptionExpired) {
+      onNotifyAdmin(
+        "Subscription Plan Expired",
+        "Attendance records cannot be deleted while your subscription plan is expired. Please renew your subscription to restore full access."
+      );
+      return;
+    }
+
     if (typeof navigator !== "undefined" && !navigator.onLine) {
-      alert("Internet connection required. Attendance records can only be deleted when you have an active internet connection. Existing records remain accessible for viewing.");
+      onNotifyAdmin(
+        "Internet Connection Required",
+        "Attendance records can only be deleted when you have an active internet connection. Existing records remain accessible for viewing."
+      );
       return;
     }
 
@@ -699,6 +734,15 @@ export default function AdminDashboard({
   // Execute the confirmed Attendance Action against the Backend API
   const handleExecuteAttendanceAction = async () => {
     if (!attendanceConfirmData) return;
+
+    if (isSubscriptionExpired) {
+      onNotifyAdmin(
+        "Subscription Plan Expired",
+        "Attendance modifications are disabled because your subscription plan is expired. Please renew your subscription to restore full access."
+      );
+      setAttendanceConfirmData(null);
+      return;
+    }
 
     if (typeof navigator !== "undefined" && !navigator.onLine) {
       onNotifyAdmin(
@@ -7501,41 +7545,62 @@ export default function AdminDashboard({
                             </button>
                           )}
                         </div>
-                        </div>{/* Update Attendance Setting Card */}
+                        </div>
+                        {/* Update Attendance Setting Card */}
                       <div
                         id="setting_update_attendance_card"
-                        className={`p-4 sm:p-5 rounded-2xl border space-y-3 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder}`}
+                        className={`p-4 sm:p-5 rounded-2xl border space-y-3 ${adminThemeClass.innerBg} ${adminThemeClass.accentBorder} ${isSubscriptionExpired ? "opacity-75" : ""}`}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-2">
-                            <ClipboardCheck className="h-4 w-4 text-cyan-400" />
+                            <ClipboardCheck className={`h-4 w-4 ${isSubscriptionExpired ? "text-neutral-400" : "text-cyan-400"}`} />
                             <span
                               className={`text-xs uppercase font-bold tracking-wider font-mono block ${adminThemeClass.textTitle}`}
                             >
                               Shift Attendance Ledger
                             </span>
                           </div>
-                          <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-                            Enterprise Audit
-                          </span>
+                          {isSubscriptionExpired ? (
+                            <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-neutral-500/10 text-neutral-400 border border-neutral-500/20 flex items-center gap-1">
+                              <Lock className="h-2.5 w-2.5" />
+                              Disabled
+                            </span>
+                          ) : (
+                            <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                              Enterprise Audit
+                            </span>
+                          )}
                         </div>
                         <p className={`text-xs ${adminThemeClass.textMuted}`}>
                           Directly create, modify, or delete official employee shift attendance records with two-step confirmation safeguards.
                         </p>
-                        <button
-                          id="btn_open_update_attendance_modal"
-                          type="button"
-                          onClick={() => {
-                            setShowUpdateAttendanceModal(true);
-                            if (workers.length > 0 && !selectedAttendanceWorkerId) {
-                              setSelectedAttendanceWorkerId(workers[0].id);
-                            }
-                          }}
-                          className="w-full py-3 px-5 bg-gradient-to-r from-cyan-600 via-cyan-500 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-cyan-950/45 cursor-pointer flex items-center justify-center space-x-2 active:scale-[0.99]"
-                        >
-                          <Edit3 className="h-4 w-4" />
-                          <span>Update Attendance</span>
-                        </button>
+                        {isSubscriptionExpired ? (
+                          <button
+                            id="btn_open_update_attendance_modal"
+                            type="button"
+                            disabled={true}
+                            className="w-full py-3 px-5 bg-neutral-500/20 text-neutral-400 text-xs font-bold rounded-xl border border-neutral-500/30 flex items-center justify-center space-x-2 cursor-not-allowed select-none opacity-60"
+                            title="Update Attendance is disabled because your subscription has expired. Please renew your subscription to restore full access."
+                          >
+                            <Lock className="h-4 w-4 text-neutral-400" />
+                            <span>Update Attendance (Disabled - Subscription Expired)</span>
+                          </button>
+                        ) : (
+                          <button
+                            id="btn_open_update_attendance_modal"
+                            type="button"
+                            onClick={() => {
+                              setShowUpdateAttendanceModal(true);
+                              if (workers.length > 0 && !selectedAttendanceWorkerId) {
+                                setSelectedAttendanceWorkerId(workers[0].id);
+                              }
+                            }}
+                            className="w-full py-3 px-5 bg-gradient-to-r from-cyan-600 via-cyan-500 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-cyan-950/45 cursor-pointer flex items-center justify-center space-x-2 active:scale-[0.99]"
+                          >
+                            <Edit3 className="h-4 w-4" />
+                            <span>Update Attendance</span>
+                          </button>
+                        )}
                       </div>
 
                       </div>
@@ -8407,10 +8472,16 @@ export default function AdminDashboard({
                 <div className="flex items-center space-x-2">
                   <button
                     type="button"
-                    onClick={handleOpenCreateAttendance}
-                    className="px-3.5 py-2 text-xs font-bold text-white bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 rounded-xl shadow-sm flex items-center space-x-1.5 cursor-pointer transition-all active:scale-95"
+                    disabled={isSubscriptionExpired}
+                    onClick={isSubscriptionExpired ? undefined : handleOpenCreateAttendance}
+                    className={`px-3.5 py-2 text-xs font-bold rounded-xl shadow-sm flex items-center space-x-1.5 transition-all ${
+                      isSubscriptionExpired
+                        ? "bg-neutral-500/20 text-neutral-400 border border-neutral-500/30 cursor-not-allowed opacity-60 select-none"
+                        : "text-white bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 cursor-pointer active:scale-95"
+                    }`}
+                    title={isSubscriptionExpired ? "Record creation disabled - subscription expired" : "Create new attendance record"}
                   >
-                    <Plus className="h-3.5 w-3.5" />
+                    {isSubscriptionExpired ? <Lock className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
                     <span>Create Record</span>
                   </button>
                   <button
@@ -8422,6 +8493,14 @@ export default function AdminDashboard({
                   </button>
                 </div>
               </div>
+
+              {/* Subscription Expiry Warning in Modal */}
+              {isSubscriptionExpired && (
+                <div className="bg-amber-500/10 border-b border-amber-500/20 px-6 py-2.5 flex items-center space-x-2 text-amber-500 dark:text-amber-400 text-xs font-semibold">
+                  <Lock className="h-4 w-4 shrink-0" />
+                  <span>Shift Attendance Ledger modifications are restricted because your subscription has expired. Please renew your subscription to restore full access.</span>
+                </div>
+              )}
 
               {/* Toast message if any */}
               {attendanceActionSuccess && (
@@ -8595,8 +8674,13 @@ export default function AdminDashboard({
                         </p>
                         <button
                           type="button"
-                          onClick={handleOpenCreateAttendance}
-                          className="px-4 py-2 text-xs font-bold text-cyan-400 border border-cyan-500/30 hover:bg-cyan-500/10 rounded-xl transition-all cursor-pointer"
+                          disabled={isSubscriptionExpired}
+                          onClick={isSubscriptionExpired ? undefined : handleOpenCreateAttendance}
+                          className={`px-4 py-2 text-xs font-bold rounded-xl transition-all ${
+                            isSubscriptionExpired
+                              ? "bg-neutral-500/20 text-neutral-400 border border-neutral-500/30 cursor-not-allowed opacity-60 select-none"
+                              : "text-cyan-400 border border-cyan-500/30 hover:bg-cyan-500/10 cursor-pointer"
+                          }`}
                         >
                           + Create First Shift Record
                         </button>
@@ -8661,18 +8745,28 @@ export default function AdminDashboard({
                                 <div className="flex items-center justify-end space-x-2">
                                   <button
                                     type="button"
-                                    onClick={() => handleOpenEditAttendance(rec)}
-                                    className="p-1.5 text-xs font-bold text-cyan-400 hover:bg-cyan-500/15 border border-cyan-500/30 rounded-lg transition-all cursor-pointer flex items-center space-x-1"
-                                    title="Edit Attendance Record"
+                                    disabled={isSubscriptionExpired}
+                                    onClick={isSubscriptionExpired ? undefined : () => handleOpenEditAttendance(rec)}
+                                    className={`p-1.5 text-xs font-bold border rounded-lg transition-all flex items-center space-x-1 ${
+                                      isSubscriptionExpired
+                                        ? "opacity-50 cursor-not-allowed text-neutral-400 border-neutral-500/20 select-none"
+                                        : "text-cyan-400 hover:bg-cyan-500/15 border-cyan-500/30 cursor-pointer"
+                                    }`}
+                                    title={isSubscriptionExpired ? "Edit disabled - subscription expired" : "Edit Attendance Record"}
                                   >
                                     <Edit3 className="h-3.5 w-3.5" />
                                     <span className="hidden sm:inline">Edit</span>
                                   </button>
                                   <button
                                     type="button"
-                                    onClick={() => handlePromptDeleteAttendanceConfirm(rec)}
-                                    className="p-1.5 text-xs font-bold text-red-400 hover:bg-red-500/15 border border-red-500/30 rounded-lg transition-all cursor-pointer flex items-center space-x-1"
-                                    title="Delete Attendance Record"
+                                    disabled={isSubscriptionExpired}
+                                    onClick={isSubscriptionExpired ? undefined : () => handlePromptDeleteAttendanceConfirm(rec)}
+                                    className={`p-1.5 text-xs font-bold border rounded-lg transition-all flex items-center space-x-1 ${
+                                      isSubscriptionExpired
+                                        ? "opacity-50 cursor-not-allowed text-neutral-400 border-neutral-500/20 select-none"
+                                        : "text-red-400 hover:bg-red-500/15 border-red-500/30 cursor-pointer"
+                                    }`}
+                                    title={isSubscriptionExpired ? "Delete disabled - subscription expired" : "Delete Attendance Record"}
                                   >
                                     <Trash2 className="h-3.5 w-3.5" />
                                     <span className="hidden sm:inline">Delete</span>
@@ -8876,10 +8970,15 @@ export default function AdminDashboard({
                   </button>
                   <button
                     type="submit"
-                    className="w-full py-3 px-4 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-bold rounded-xl shadow-md cursor-pointer transition-all active:scale-98 text-center flex items-center justify-center space-x-1.5"
+                    disabled={isSubscriptionExpired}
+                    className={`w-full py-3 px-4 text-xs font-bold rounded-xl shadow-md transition-all active:scale-98 text-center flex items-center justify-center space-x-1.5 ${
+                      isSubscriptionExpired
+                        ? "bg-neutral-500/20 text-neutral-400 border border-neutral-500/30 cursor-not-allowed opacity-60 select-none"
+                        : "bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white cursor-pointer"
+                    }`}
                   >
-                    <Check className="h-4 w-4" />
-                    <span>Proceed to Confirm</span>
+                    {isSubscriptionExpired ? <Lock className="h-4 w-4" /> : <Check className="h-4 w-4" />}
+                    <span>{isSubscriptionExpired ? "Action Disabled (Expired)" : "Proceed to Confirm"}</span>
                   </button>
                 </div>
               </form>
@@ -8978,18 +9077,27 @@ export default function AdminDashboard({
                 </button>
                 <button
                   type="button"
-                  disabled={isProcessingAttendanceAction}
+                  disabled={isProcessingAttendanceAction || isSubscriptionExpired}
                   onClick={handleExecuteAttendanceAction}
-                  className={`w-full py-3 px-4 text-white font-bold rounded-xl text-xs transition-all shadow-md cursor-pointer flex items-center justify-center space-x-2 disabled:opacity-50 active:scale-98 ${
-                    attendanceConfirmData.actionType === "delete"
-                      ? "bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500"
-                      : "bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500"
+                  className={`w-full py-3 px-4 font-bold rounded-xl text-xs transition-all shadow-md flex items-center justify-center space-x-2 active:scale-98 ${
+                    isSubscriptionExpired
+                      ? "bg-neutral-500/20 text-neutral-400 border border-neutral-500/30 cursor-not-allowed opacity-60 select-none"
+                      : isProcessingAttendanceAction
+                      ? "opacity-50 cursor-not-allowed text-white"
+                      : attendanceConfirmData.actionType === "delete"
+                      ? "text-white bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 cursor-pointer"
+                      : "text-white bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 cursor-pointer"
                   }`}
                 >
                   {isProcessingAttendanceAction ? (
                     <>
                       <RefreshCw className="h-4 w-4 animate-spin shrink-0" />
                       <span>Processing...</span>
+                    </>
+                  ) : isSubscriptionExpired ? (
+                    <>
+                      <Lock className="h-4 w-4 shrink-0" />
+                      <span>Action Blocked (Expired)</span>
                     </>
                   ) : (
                     <span>Confirm &amp; Execute</span>

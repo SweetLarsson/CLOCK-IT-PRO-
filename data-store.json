@@ -46,6 +46,13 @@
       "email": "testadmin999@test.com",
       "phone": "+2348000000000",
       "createdAt": "2026-10-13T14:46:38.178Z"
+    },
+    {
+      "id": "tenant-b2xthk56g",
+      "name": "Test Co",
+      "email": "newtest@company.com",
+      "phone": "+1234567890",
+      "createdAt": "2026-10-16T11:06:57.929Z"
     }
   ],
   "users": [
@@ -862,6 +869,41 @@
           "phone": "+2348000000001"
         }
       }
+    },
+    {
+      "id": "user-ocv809caj",
+      "tenant_id": "tenant-b2xthk56g",
+      "firstName": "Company",
+      "lastName": "Admin",
+      "email": "newtest@company.com",
+      "phone": "+1234567890",
+      "role": "company_admin",
+      "status": "active",
+      "password": "scrypt:91104e659bbef57a0fd83523b75622b8:242740acbe69933c5d8b776531d53e2c5346a1f3d3a86bf7df1098b33738d218d4f72be9969078c114a71b9c5bc4fc5756911caea0a44c1de9c93ee65e8d93f5",
+      "createdAt": "2026-10-16T11:06:57.977Z"
+    },
+    {
+      "id": "user-ap59w13t9",
+      "tenant_id": "default-tenant",
+      "firstName": "Jane",
+      "lastName": "Doe",
+      "email": "jane@apextech.com",
+      "phone": "+1234567899",
+      "role": "team_member",
+      "status": "active",
+      "password": "scrypt:87c96a15683532aee6f0dcfe814380ec:6e905f76de4792d01e1ebf69672b2e810ea974f0ac55d2e596881b0be8ac1509e500cba8fb33aa6d1156e6696d2aa3243773c2fb3d81f1c87267cf171764f713",
+      "title": "Associated Worker",
+      "createdAt": "2026-10-16T11:07:02.792Z",
+      "deviceBinding": {
+        "deviceId": "device-bind-amfuzubhcgv4dgvj",
+        "boundAt": "2026-10-16T11:07:02.792Z",
+        "verifiedFields": {
+          "email": "jane@apextech.com",
+          "userId": "user-ap59w13t9",
+          "name": "Jane Doe",
+          "phone": "+1234567899"
+        }
+      }
     }
   ],
   "departments": [
@@ -981,6 +1023,16 @@
     {
       "id": "dept-ops-tenant-9lxylxnwr",
       "tenant_id": "tenant-9lxylxnwr",
+      "name": "Operations & HR"
+    },
+    {
+      "id": "dept-eng-tenant-b2xthk56g",
+      "tenant_id": "tenant-b2xthk56g",
+      "name": "Engineering Solutions"
+    },
+    {
+      "id": "dept-ops-tenant-b2xthk56g",
+      "tenant_id": "tenant-b2xthk56g",
       "name": "Operations & HR"
     }
   ],
@@ -2358,6 +2410,19 @@
       "department_id": "unassigned",
       "date": "2026-10-13",
       "timeIn": "14:46:44",
+      "statusIn": "late",
+      "snapshotPhoto": "",
+      "timeOut": "17:00:00",
+      "statusOut": "Closing Time",
+      "coveredTime": 7996
+    },
+    {
+      "id": "att-4hq9ab3pq",
+      "tenant_id": "default-tenant",
+      "worker_id": "user-ap59w13t9",
+      "department_id": "unassigned",
+      "date": "2026-10-16",
+      "timeIn": "11:07:02",
       "statusIn": "late",
       "snapshotPhoto": ""
     }
@@ -5203,6 +5268,24 @@
       "message": "Sam Smith checked in (LATE) at 14:46:44",
       "timestamp": "2026-10-13T14:46:44.633Z",
       "read": false
+    },
+    {
+      "id": "notif-2irk37k2a",
+      "tenant_id": "default-tenant",
+      "worker_id": "user-jfbefgj89",
+      "title": "Auto Check-Out Recorded",
+      "message": "Sam Smith was automatically logged out at closing time (17:00)",
+      "timestamp": "2026-10-16T10:49:07.639Z",
+      "read": false
+    },
+    {
+      "id": "notif-3f60omvrc",
+      "tenant_id": "default-tenant",
+      "worker_id": "user-ap59w13t9",
+      "title": "Check-In Success",
+      "message": "Jane Doe checked in (LATE) at 11:07:02",
+      "timestamp": "2026-10-16T11:07:02.792Z",
+      "read": false
     }
   ],
   "subscriptions": [
@@ -5302,6 +5385,17 @@
       "status": "active",
       "startDate": "2026-10-13T14:46:38.245Z",
       "endDate": "2026-11-12T14:46:38.245Z",
+      "paymentMethod": "admin_authorization",
+      "verified": true
+    },
+    {
+      "id": "sub-5p84550pc",
+      "tenant_id": "tenant-b2xthk56g",
+      "planCode": "enterprise",
+      "price": 0,
+      "status": "active",
+      "startDate": "2026-10-16T11:06:57.977Z",
+      "endDate": "2026-11-15T11:06:57.977Z",
       "paymentMethod": "admin_authorization",
       "verified": true
     }
@@ -5539,6 +5633,49 @@
       },
       "overtimeHours": 2,
       "selectedIntervalDays": 20
+    },
+    {
+      "tenant_id": "tenant-b2xthk56g",
+      "theme": "light",
+      "language": "en",
+      "activityDays": {
+        "Sunday": false,
+        "Monday": true,
+        "Tuesday": true,
+        "Wednesday": true,
+        "Thursday": true,
+        "Friday": true,
+        "Saturday": false
+      },
+      "dailyShiftTimes": {
+        "Sunday": "08:00",
+        "Monday": "08:00",
+        "Tuesday": "08:00",
+        "Wednesday": "08:00",
+        "Thursday": "08:00",
+        "Friday": "08:00",
+        "Saturday": "08:00"
+      },
+      "dailyShiftOutTimes": {
+        "Sunday": "17:00",
+        "Monday": "17:00",
+        "Tuesday": "17:00",
+        "Wednesday": "17:00",
+        "Thursday": "17:00",
+        "Friday": "17:00",
+        "Saturday": "17:00"
+      },
+      "checkIn": {
+        "time": "08:00",
+        "latenessThreshold": 10,
+        "soundEnabled": true
+      },
+      "checkOut": {
+        "time": "17:00",
+        "soundEnabled": true
+      },
+      "overtimeHours": 2,
+      "selectedIntervalDays": 20
     }
   ],
   "reportJobs": [
@@ -5562,6 +5699,14 @@
     }
   ],
   "auditLogs": [
+    {
+      "id": "audit-7ltlfhb",
+      "tenant_id": "default-tenant",
+      "user_id": "worker-bob",
+      "action": "BIOMETRIC_AUTH_BYPASS_AUTHORIZED",
+      "details": "Emergency secondary authorization code accepted for team member Bob Aris.",
+      "timestamp": "2026-10-16T11:04:59.648Z"
+    },
     {
       "id": "audit-t3k1alx",
       "tenant_id": "default-tenant",
@@ -7057,6 +7202,30 @@
       "action": "QR_CHECK_IN",
       "timestamp": "2026-10-13T14:46:44.633Z",
       "details": "Worker Sam Smith auto checked-in upon successful portal registration (audited against Active Admin settings)."
+    },
+    {
+      "id": "log-wohdzfu64",
+      "tenant_id": "tenant-b2xthk56g",
+      "user_id": "user-ocv809caj",
+      "action": "COMPANY_REGISTERED",
+      "timestamp": "2026-10-16T11:06:57.977Z",
+      "details": "Registered company Test Co with active subscription plan enterprise"
+    },
+    {
+      "id": "log-8bnvy8ns4",
+      "tenant_id": "default-tenant",
+      "user_id": "user-ap59w13t9",
+      "action": "WORKER_REGISTERED",
+      "timestamp": "2026-10-16T11:07:02.792Z",
+      "details": "Worker Jane Doe joined company (standard web registration)"
+    },
+    {
+      "id": "log-mn0k9fv97",
+      "tenant_id": "default-tenant",
+      "user_id": "user-ap59w13t9",
+      "action": "QR_CHECK_IN",
+      "timestamp": "2026-10-16T11:07:02.792Z",
+      "details": "Worker Jane Doe auto checked-in upon successful portal registration (audited against Active Admin settings)."
     }
   ],
   "visitorLogs": [],
