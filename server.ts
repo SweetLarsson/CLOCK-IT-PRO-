@@ -935,15 +935,6 @@ app.post("/api/auth/register-company", async (req, res) => {
     }
   }
 
-  // Dispatch Welcome Email for newly registered company admin
-  sendWelcomeEmail({
-    email: newAdmin.email,
-    firstName: companyName,
-    lastName: "Admin",
-    role: newAdmin.role,
-    tenant_id
-  }).catch((e) => console.warn("Welcome email async notice:", e));
-
   const { password: _pwd, ...safeAdmin } = newAdmin;
   return res.json({ success: true, user: safeAdmin, tenant: newTenant, subscription: newSub });
 });
@@ -1137,15 +1128,6 @@ app.post("/api/auth/register-worker", async (req, res) => {
     notification: notif
   });
 
-  // Dispatch Welcome Email for newly registered worker
-  sendWelcomeEmail({
-    email: newWorker.email,
-    firstName: newWorker.firstName,
-    lastName: newWorker.lastName,
-    role: newWorker.role,
-    tenant_id: actualCompanyId
-  }).catch((e) => console.warn("Welcome email async notice:", e));
-
   const { password: _wPwd, ...safeWorker } = newWorker;
   return res.json({ success: true, user: safeWorker });
 });
@@ -1270,103 +1252,6 @@ function getResendClient(): Resend | null {
     }
   }
   return resendClient;
-}
-
-// In-memory set to prevent duplicate welcome emails within the active server process
-const sentWelcomeEmails = new Set<string>();
-
-/**
- * Dispatches a Welcome Email to newly registered users (both Admins and Workers).
- * Graceful error handling ensures registration workflow is never interrupted.
- */
-async function sendWelcomeEmail(user: { email: string; firstName: string; lastName: string; role: string; tenant_id: string }): Promise<boolean> {
-  const cleanEmail = (user.email || "").trim().toLowerCase();
-  if (!cleanEmail || !cleanEmail.includes("@")) return false;
-
-  // Prevent duplicate welcome emails for the same account registration
-  const dedupeKey = `${cleanEmail}:${user.tenant_id}`;
-  if (sentWelcomeEmails.has(dedupeKey)) return false;
-  sentWelcomeEmails.add(dedupeKey);
-
-  const resend = getResendClient();
-  const tenant = db.tenants.find(t => t.id === user.tenant_id);
-  const companyName = tenant?.name || "Clock-It-Pro Plus";
-  const fullName = `${user.firstName || ""} ${user.lastName || ""}`.trim() || "User";
-  const roleLabel = user.role === UserRole.COMPANY_ADMIN ? "Company Administrator" : "Team Member";
-
-  const rawFrom = (process.env.RESEND_FROM_EMAIL || "").replace(/^["']|["']$/g, "").trim();
-  const publicWebmailDomains = ["gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "icloud.com", "aol.com"];
-  const isPublicWebmail = publicWebmailDomains.some(domain => rawFrom.toLowerCase().includes(domain));
-  const fromEmail = (!rawFrom || !rawFrom.includes("@") || isPublicWebmail)
-    ? "Clock-It-Pro Plus <onboarding@resend.dev>"
-    : rawFrom;
-
-  const htmlContent = `
-    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 580px; margin: 0 auto; padding: 32px 24px; background-color: #0f172a; color: #f8fafc; border-radius: 20px; border: 1px solid #1e293b;">
-      <div style="text-align: center; margin-bottom: 24px;">
-        <div style="display: inline-block; background: linear-gradient(135deg, #06b6d4, #2563eb); padding: 12px 24px; border-radius: 14px; font-weight: 800; font-size: 18px; color: #ffffff; letter-spacing: 0.5px;">
-          CLOCK-IT-PRO+
-        </div>
-      </div>
-      
-      <div style="background-color: #1e293b; border-radius: 16px; padding: 24px; border: 1px solid #334155; margin-bottom: 20px;">
-        <h2 style="margin: 0 0 12px; font-size: 20px; color: #38bdf8; font-weight: 700;">Welcome to Clock-It-Pro Plus!</h2>
-        <p style="margin: 0 0 14px; font-size: 14px; line-height: 1.6; color: #cbd5e1;">
-          Hello <strong style="color: #f1f5f9;">${fullName}</strong>,
-        </p>
-        <p style="margin: 0 0 14px; font-size: 14px; line-height: 1.6; color: #cbd5e1;">
-          Your account for <strong style="color: #38bdf8;">${companyName}</strong> has been successfully registered. You are assigned as <strong style="color: #f1f5f9;">${roleLabel}</strong>.
-        </p>
-        <div style="background: rgba(6, 182, 212, 0.1); border: 1px solid rgba(6, 182, 212, 0.3); border-radius: 12px; padding: 14px 18px; margin: 18px 0;">
-          <p style="margin: 0; font-size: 12px; font-family: monospace; color: #7dd3fc; line-height: 1.8;">
-            &bull; Registered Email: <strong>${cleanEmail}</strong><br/>
-            &bull; Corporate Account: <strong>${companyName}</strong><br/>
-            &bull; Assigned Role: <strong>${roleLabel}</strong><br/>
-            &bull; Account Status: <strong style="color: #4ade80;">Active</strong>
-          </p>
-        </div>
-        <p style="margin: 0; font-size: 13px; line-height: 1.5; color: #94a3b8;">
-          You can now securely sign in to access your digital check-in terminal, attendance roster, and smart workforce analytics.
-        </p>
-      </div>
-
-      <div style="text-align: center; padding-top: 12px; border-top: 1px solid #1e293b; font-size: 11px; color: #64748b;">
-        <p style="margin: 0;">&copy; ${new Date().getFullYear()} ${companyName} &bull; Powered by Clock-It-Pro Plus</p>
-        <p style="margin: 4px 0 0;">This is an automated welcome notification sent upon successful registration.</p>
-      </div>
-    </div>
-  `;
-
-  if (resend) {
-    try {
-      await resend.emails.send({
-        from: fromEmail,
-        to: [cleanEmail],
-        subject: `Welcome to Clock-It-Pro Plus, ${user.firstName}!`,
-        html: htmlContent
-      });
-      console.log(`[Welcome Email] Successfully sent to ${cleanEmail}`);
-      return true;
-    } catch (err: any) {
-      console.warn(`[Welcome Email] Resend delivery notice for ${cleanEmail}:`, err?.message || err);
-      if (fromEmail !== "Clock-It-Pro Plus <onboarding@resend.dev>") {
-        try {
-          await resend.emails.send({
-            from: "Clock-It-Pro Plus <onboarding@resend.dev>",
-            to: [cleanEmail],
-            subject: `Welcome to Clock-It-Pro Plus, ${user.firstName}!`,
-            html: htmlContent
-          });
-          return true;
-        } catch {
-          // ignore
-        }
-      }
-    }
-  } else {
-    console.log(`[Welcome Email] Simulated dispatch for ${cleanEmail} (RESEND_API_KEY not configured)`);
-  }
-  return true;
 }
 
 // In-memory store for pending password reset PIN codes (valid for 15 minutes)
@@ -2172,15 +2057,6 @@ app.post("/api/tenant/workers/add", async (req, res) => {
     }
   }
 
-  // Dispatch Welcome Email for worker added by Admin
-  sendWelcomeEmail({
-    email: newWorker.email,
-    firstName: newWorker.firstName,
-    lastName: newWorker.lastName,
-    role: newWorker.role,
-    tenant_id
-  }).catch((e) => console.warn("Welcome email async notice:", e));
-
   const { password: _p, ...safeWorker } = newWorker;
   broadcastToTenant(tenant_id, "WORKERS_UPDATED", { action: "add", worker: safeWorker });
   return res.json({ success: true, worker: safeWorker });
@@ -2453,11 +2329,17 @@ app.post("/api/attendance/check-in", (req, res) => {
 
   db = loadDB();
 
-  // Subscription status check (Admin billing concern: update DB state if trial expired, without locking worker scanning)
-  const activeSub = db.subscriptions.find(s => s.tenant_id === tenant_id);
-  if (activeSub && activeSub.status === "trial" && new Date(activeSub.endDate).getTime() < Date.now()) {
+  // Validate Subscription and free trials
+  const activeSub = db.subscriptions.find(s => s.tenant_id === tenant_id && s.status !== "expired");
+  if (!activeSub) {
+    return res.status(403).json({ error: "All features locked. Unpaid / Expired billing." });
+  }
+
+  // Ensure current time is not expired trial
+  if (activeSub.status === "trial" && new Date(activeSub.endDate).getTime() < Date.now()) {
     activeSub.status = "expired";
     saveDB(db);
+    return res.status(403).json({ error: "trial_expired_lockout" });
   }
 
   const todayStr = localDate || new Date().toISOString().split("T")[0];

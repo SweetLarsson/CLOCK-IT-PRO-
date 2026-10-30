@@ -2037,16 +2037,6 @@ export default function AdminDashboard({
     }
   }, [activeTab]);
 
-  React.useEffect(() => {
-    if (showAddWorkerModal || showEditWorkerModal || activeLeaderModal) {
-      const originalOverflow = document.body.style.overflow;
-      document.body.style.overflow = "hidden";
-      return () => {
-        document.body.style.overflow = originalOverflow;
-      };
-    }
-  }, [showAddWorkerModal, showEditWorkerModal, activeLeaderModal]);
-
   const tabRowRef = useRef<HTMLDivElement>(null);
   const summaryTabRowRef = useRef<HTMLDivElement>(null);
   const adminPunchHistoryRef = useRef<HTMLDivElement>(null);
