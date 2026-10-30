@@ -73,7 +73,9 @@ function verifyPassword(password: string, storedHash: string): boolean {
 
 const app = express();
 const PORT = 3000;
-const DB_FILE = path.join(process.cwd(), "data-store.json");
+const DB_FILE = process.env.VERCEL
+  ? path.join("/tmp", "data-store.json")
+  : path.join(process.cwd(), "data-store.json");
 
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ extended: true, limit: "15mb" }));
@@ -113,9 +115,22 @@ interface DBState {
 }
 
 function loadDB(): DBState {
+  if (process.env.VERCEL && !fs.existsSync(DB_FILE)) {
+    const rootDbFile = path.join(process.cwd(), "data-store.json");
+    if (fs.existsSync(rootDbFile)) {
+      try {
+        fs.copyFileSync(rootDbFile, DB_FILE);
+      } catch (e) {
+        // fallback
+      }
+    }
+  }
+
   if (!fs.existsSync(DB_FILE)) {
     const initialState = getInitialState();
-    fs.writeFileSync(DB_FILE, JSON.stringify(initialState, null, 2), "utf8");
+    try {
+      fs.writeFileSync(DB_FILE, JSON.stringify(initialState, null, 2), "utf8");
+    } catch (e) {}
     return initialState;
   }
   try {
@@ -127,7 +142,9 @@ function loadDB(): DBState {
     return parsed;
   } catch (e) {
     const initialState = getInitialState();
-    fs.writeFileSync(DB_FILE, JSON.stringify(initialState, null, 2), "utf8");
+    try {
+      fs.writeFileSync(DB_FILE, JSON.stringify(initialState, null, 2), "utf8");
+    } catch (err) {}
     return initialState;
   }
 }
@@ -4287,4 +4304,9 @@ async function startServer() {
   });
 }
 
-startServer();
+if (!process.env.VERCEL && process.env.NODE_ENV !== "test") {
+  startServer();
+}
+
+export { app };
+export default app;

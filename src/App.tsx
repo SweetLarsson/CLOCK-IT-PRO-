@@ -301,7 +301,7 @@ export default function App() {
         if (parsed.tenant?.id) {
           fetch(`/api/tenant/subscription?tenant_id=${parsed.tenant.id}`)
             .then((res) => {
-              if (res.ok) return res.json();
+              if (res.ok && res.headers.get("content-type")?.includes("application/json")) return res.json();
             })
             .then((data) => {
               if (data && data.subscription) {
@@ -317,7 +317,7 @@ export default function App() {
 
           fetch(`/api/tenant/settings?tenant_id=${parsed.tenant.id}`)
             .then((res) => {
-              if (res.ok) return res.json();
+              if (res.ok && res.headers.get("content-type")?.includes("application/json")) return res.json();
             })
             .then((data) => {
               if (data && data.settings) {
@@ -342,7 +342,7 @@ export default function App() {
           if (parsed.user?.id) {
             fetch(`/api/user/preferences?user_id=${parsed.user.id}`)
               .then((res) => {
-                if (res.ok) return res.json();
+                if (res.ok && res.headers.get("content-type")?.includes("application/json")) return res.json();
               })
               .then((data) => {
                 if (data && data.preferences) {
@@ -374,7 +374,7 @@ export default function App() {
 
           fetch(`/api/tenant?tenant_id=${parsed.tenant.id}`)
             .then((res) => {
-              if (res.ok) return res.json();
+              if (res.ok && res.headers.get("content-type")?.includes("application/json")) return res.json();
             })
             .then((data) => {
               if (data && data.tenant) {

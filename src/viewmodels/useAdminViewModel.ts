@@ -212,17 +212,54 @@ export function useAdminViewModel({
   const [filterDateEnd, setFilterDateEnd] = useState("");
 
   // Billing simulation states
-  const [selectedPlanCode, setSelectedPlanCode] = useState<string>("");
+  const [selectedPlanCode, setSelectedPlanCode] = useState<string>(() => {
+    try {
+      return localStorage.getItem(`billing_plan_${tenant.id}`) || "";
+    } catch {
+      return "";
+    }
+  });
   const [gatewaySelected, setGatewaySelected] = useState<"opay" | "paystack" | "card" | null>(null);
-  const [selectedDurationKey, setSelectedDurationKey] = useState<SubscriptionDurationKey>("2m");
+  const [selectedDurationKey, setSelectedDurationKey] = useState<SubscriptionDurationKey>(() => {
+    try {
+      return (localStorage.getItem(`billing_duration_${tenant.id}`) as SubscriptionDurationKey) || "2m";
+    } catch {
+      return "2m";
+    }
+  });
   const [selectedDurationMonths, setSelectedDurationMonthsState] = useState<number>(2);
 
   const setSelectedDurationMonths = (val: any) => {
     const opt = getDurationOption(val);
     setSelectedDurationKey(opt.key);
     setSelectedDurationMonthsState(opt.monthsEquivalent);
+    try {
+      localStorage.setItem(`billing_duration_${tenant.id}`, opt.key);
+    } catch {}
   };
-  const [isRecurringSelected, setIsRecurringSelected] = useState<boolean>(false);
+  const [isRecurringSelected, setIsRecurringSelected] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(`billing_recurring_${tenant.id}`) === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      if (selectedPlanCode) {
+        localStorage.setItem(`billing_plan_${tenant.id}`, selectedPlanCode);
+      } else {
+        localStorage.removeItem(`billing_plan_${tenant.id}`);
+      }
+    } catch {}
+  }, [selectedPlanCode, tenant.id]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(`billing_recurring_${tenant.id}`, String(isRecurringSelected));
+    } catch {}
+  }, [isRecurringSelected, tenant.id]);
   const [billingProgress, setBillingProgress] = useState<string | null>(null);
 
   // Background Job report tracker
@@ -264,7 +301,9 @@ export function useAdminViewModel({
 
   useEffect(() => {
     if (showQrModal) {
-      const qrPayload = `${window.location.origin}/?action=check-in&tenant_id=${tenant.id}`;
+      const origin = window.location.origin;
+      const basePath = window.location.pathname.replace(/\/+$/, "");
+      const qrPayload = `${origin}${basePath}/?action=check-in&tenant_id=${encodeURIComponent(tenant.id)}`;
       
       QRCode.toDataURL(
         qrPayload, 

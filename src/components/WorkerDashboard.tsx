@@ -759,7 +759,9 @@ export default function WorkerDashboard({
           ? `Shift Overtime Reached: Your extended shift overtime limit (${closingTime} + ${overtimeHours}h) has been reached. You have been automatically checked out for today. You can continue using the application for other activities.`
           : `Company Closing Time Reached: The company closing time (${closingTime}) has been reached. You have been automatically checked out for today. You can continue using the application for other activities.`;
         
-        alert(alertMsg);
+        try {
+          onNotifyAdmin("Shift Checked Out", alertMsg);
+        } catch {}
       }).catch((err) => {
         console.error("Auto checkout error:", err);
       });
@@ -774,7 +776,9 @@ export default function WorkerDashboard({
         const alertMsg = todayRecord.statusOut === "Overtime"
           ? "Shift Overtime Ended: You have been automatically checked out at the end of your shift overtime. Departure status recorded as 'Overtime'."
           : "Company Closing Time Reached: You have been automatically checked out at company closing time. Hours recorded.";
-        alert(alertMsg);
+        try {
+          onNotifyAdmin("Company Closing Notice", alertMsg);
+        } catch {}
       }
     }
   }, [todayRecord]);
@@ -851,6 +855,41 @@ export default function WorkerDashboard({
     }
   };
 
+  // Automatically trigger check-in handshake when launched via QR scan URL or pending_check_in
+  React.useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const action = params.get("action");
+      const tenantIdParam = params.get("tenant_id");
+      const pendingRaw = localStorage.getItem("pending_check_in");
+      
+      let shouldTrigger = false;
+      if (action === "check-in") {
+        if (!tenantIdParam || tenantIdParam === tenant.id) {
+          shouldTrigger = true;
+        }
+      } else if (pendingRaw) {
+        const { tenantId: pendingTid, timestamp } = JSON.parse(pendingRaw);
+        if (Date.now() - timestamp < 900000 && (!pendingTid || pendingTid === tenant.id)) {
+          shouldTrigger = true;
+        }
+      }
+
+      if (shouldTrigger) {
+        localStorage.removeItem("pending_check_in");
+        if (window.history && window.history.replaceState) {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+        setIsSuccessScan(true);
+        setScannerFeedback(translations.authorizedCodeDetected || "Authorized code token verified!");
+        setScannedActionType(isCheckedInToday ? "check-out" : "check-in");
+        setShowVerifyAttendanceModal(true);
+      }
+    } catch {
+      // Safe fallback
+    }
+  }, [tenant.id, isCheckedInToday]);
+
   // Main QR detection algorithm using jsQR from the video canvas context
   React.useEffect(() => {
     let active = true;
@@ -863,26 +902,32 @@ export default function WorkerDashboard({
 
       const scanLoop = () => {
         if (!active) return;
-        if (video.readyState === video.HAVE_ENOUGH_DATA) {
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-          if (ctx) {
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const dataImg = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const decodedResult = jsQR(dataImg.data, dataImg.width, dataImg.height, {
-              inversionAttempts: "dontInvert"
-            });
-            if (decodedResult) {
-              const isVal = decodedResult.data.includes(`tenant_id=${tenant.id}`);
-              if (isVal) {
-                handleScannedCode(decodedResult.data);
-                return; // Halt scanning only when a valid code is decoded
-              } else {
-                setScannerFeedback("Access denied. Invalid enterprise QR token.");
-                setIsSuccessScan(false);
-                // Do not return, continue scanning!
+        if (video.readyState === video.HAVE_ENOUGH_DATA && video.videoWidth > 0 && video.videoHeight > 0) {
+          try {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            if (ctx) {
+              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+              const dataImg = ctx.getImageData(0, 0, canvas.width, canvas.height);
+              if (dataImg && dataImg.data && dataImg.width > 0 && dataImg.height > 0) {
+                const decodedResult = jsQR(dataImg.data, dataImg.width, dataImg.height, {
+                  inversionAttempts: "dontInvert"
+                });
+                if (decodedResult && decodedResult.data) {
+                  const isVal = decodedResult.data.includes(`tenant_id=${tenant.id}`);
+                  if (isVal) {
+                    handleScannedCode(decodedResult.data);
+                    return; // Halt scanning only when a valid code is decoded
+                  } else {
+                    setScannerFeedback("Access denied. Invalid enterprise QR token.");
+                    setIsSuccessScan(false);
+                    // Do not return, continue scanning!
+                  }
+                }
               }
             }
+          } catch {
+            // Guard against temporary canvas read issues
           }
         }
         frameId = requestAnimationFrame(scanLoop);
@@ -1984,7 +2029,10 @@ export default function WorkerDashboard({
                 {/* Developer Simulation Button (placed below preview, never on it) */}
                 <div className="w-full max-w-sm mb-4">
                   <button
-                    onClick={() => handleScannedCode(`${window.location.origin}/?action=check-in&tenant_id=${tenant.id}`)}
+                    onClick={() => {
+                      const basePath = window.location.pathname.replace(/\/+$/, "");
+                      handleScannedCode(`${window.location.origin}${basePath}/?action=check-in&tenant_id=${tenant.id}`);
+                    }}
                     className="w-full py-3 px-4 bg-gradient-to-r from-cyan-600/10 to-blue-600/10 hover:bg-cyan-600/25 text-cyan-400 font-bold rounded-2xl text-xs border border-cyan-500/30 transition-all cursor-pointer flex items-center justify-center space-x-2"
                   >
                     <RefreshCw className="h-4 w-4 shrink-0 animate-spin" />

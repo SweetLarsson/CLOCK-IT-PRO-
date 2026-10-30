@@ -900,7 +900,21 @@ export default function AdminDashboard({
   const [radarResult, setRadarResult] = React.useState<any>(null);
 
   const [isGatewayWorkspaceSelected, setIsGatewayWorkspaceSelected] =
-    React.useState(false);
+    React.useState<boolean>(() => {
+      try {
+        const stored = localStorage.getItem(`billing_workspace_selected_${tenant?.id || "default"}`) || localStorage.getItem("billing_workspace_selected");
+        return stored === "true";
+      } catch {
+        return false;
+      }
+    });
+
+  React.useEffect(() => {
+    try {
+      localStorage.setItem(`billing_workspace_selected_${tenant?.id || "default"}`, String(isGatewayWorkspaceSelected));
+      localStorage.setItem("billing_workspace_selected", String(isGatewayWorkspaceSelected));
+    } catch {}
+  }, [isGatewayWorkspaceSelected, tenant?.id]);
   const [analyticsViewTab, setAnalyticsViewTab] = React.useState<"workers" | "departments">(
     "workers",
   );
