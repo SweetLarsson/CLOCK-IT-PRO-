@@ -80,15 +80,6 @@ export interface User {
     theme?: "light" | "dark" | "army" | "navy";
     language?: "en" | "fr" | "es";
   };
-  biometricProfile?: {
-    enabled: boolean;
-    enrolledAt: string;
-    faceVector?: number[];
-    faceSnapshot?: string;
-    biometricId: string;
-    deviceName?: string;
-    lastVerifiedAt?: string;
-  };
 }
 
 export interface Department {

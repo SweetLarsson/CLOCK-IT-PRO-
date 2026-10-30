@@ -26,12 +26,9 @@ import {
   Send,
   RefreshCw,
   ShieldCheck,
-  Calendar,
-  AlertCircle
+  Calendar
 } from "lucide-react";
 import CustomSelect, { SelectOption } from "./CustomSelect.js";
-import BiometricCameraAuth from "./BiometricCameraAuth.js";
-import { safeAuthFetch } from "../utils/safeAuthFetch.js";
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -66,10 +63,6 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
   // Direct Social Auth (Google & Apple)
   const [isSocialSubmitting, setIsSocialSubmitting] = useState(false);
 
-  // Biometric Facial Recognition Secondary Login Layer State
-  const [showBiometricModal, setShowBiometricModal] = useState(false);
-  const [pendingBiometricSession, setPendingBiometricSession] = useState<any>(null);
-
   const handleSocialLogin = async (provider: "google" | "apple") => {
     setIsSocialSubmitting(true);
     setErrorMsg(null);
@@ -79,10 +72,48 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
     const ssoEmail = email.trim() || (provider === "google" ? "admin@apextech.com" : "bob@apextech.com");
     const ssoName = provider === "google" ? "Google Workspace User" : "Apple ID User";
 
-
+    // Standard OAuth Popup authorization window simulation
+    try {
+      const authPopup = window.open(
+        "about:blank",
+        `${provider}_oauth_popup`,
+        "width=500,height=600,left=250,top=120"
+      );
+      if (authPopup) {
+        authPopup.document.write(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>${provider === "google" ? "Google Accounts" : "Sign in with Apple ID"}</title>
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <style>
+                body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0b0f19; color: #f8fafc; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; text-align: center; }
+                .card { background: #161e2e; border: 1px solid #2d3748; padding: 24px; border-radius: 16px; max-width: 380px; width: 100%; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); }
+                .spinner { border: 3px solid rgba(255,255,255,0.1); border-top: 3px solid #38bdf8; border-radius: 50%; width: 28px; height: 28px; animation: spin 0.8s linear infinite; margin: 16px auto; }
+                @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+                .email { color: #38bdf8; font-family: monospace; font-weight: 600; font-size: 13px; margin-top: 4px; }
+              </style>
+            </head>
+            <body>
+              <div class="card">
+                <div style="font-size: 16px; font-weight: 700;">Connecting to ${provider === "google" ? "Google Workspace" : "Apple ID"}</div>
+                <div class="spinner"></div>
+                <div style="font-size: 12px; color: #94a3b8;">Authorizing session for:</div>
+                <div class="email">${ssoEmail}</div>
+              </div>
+              <script>
+                setTimeout(() => { window.close(); }, 750);
+              </script>
+            </body>
+          </html>
+        `);
+      }
+    } catch (e) {
+      // Ignore popup blocker fallback
+    }
 
     try {
-      const res = await safeAuthFetch("/api/auth/social-login", {
+      const response = await fetch("/api/auth/social-login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -92,17 +123,9 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
           tenant_id: companyCode || undefined
         })
       });
-      if (!res.ok) {
-        throw new Error(res.error || `${provider === "google" ? "Google" : "Apple"} SSO authentication failed`);
-      }
-      const data = res.data;
-
-      const isTeamMember = data.user?.role === "team_member" || data.user?.role === "team_lead";
-      if (isTeamMember) {
-        setPendingBiometricSession(data);
-        setShowBiometricModal(true);
-        setIsSocialSubmitting(false);
-        return;
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || `${provider === "google" ? "Google" : "Apple"} SSO authentication failed`);
       }
 
       if (rememberMe) {
@@ -205,6 +228,7 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
     }
   }, [sortedDepts, selectedDeptId]);
   const [agreedTerms, setAgreedTerms] = useState(false);
+  const [digitalSignature, setDigitalSignature] = useState("");
   const [termsModalOpen, setTermsModalOpen] = useState(false);
 
   // Loading & Error States
@@ -328,13 +352,16 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
     }
     const fetchDepts = async () => {
       try {
-        const res = await safeAuthFetch(`/api/tenant/departments?tenant_id=${encodeURIComponent(companyCode)}`);
-        if (res.ok && res.data?.depts) {
-          setAvailableDepts(res.data.depts);
-          if (res.data.depts.length > 0) {
-            setSelectedDeptId(res.data.depts[0].id);
-          } else {
-            setSelectedDeptId("");
+        const response = await fetch(`/api/tenant/departments?tenant_id=${encodeURIComponent(companyCode)}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.depts) {
+            setAvailableDepts(data.depts);
+            if (data.depts.length > 0) {
+              setSelectedDeptId(data.depts[0].id);
+            } else {
+              setSelectedDeptId("");
+            }
           }
         }
       } catch (err) {
@@ -348,10 +375,11 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
   useEffect(() => {
     const targetId = (companyCode || "default-tenant").trim();
     let isMounted = true;
-    safeAuthFetch(`/api/tenant?tenant_id=${encodeURIComponent(targetId)}`)
-      .then((res) => {
-        if (isMounted && res.ok && res.data?.tenant?.name) {
-          setRegisteredCompanyName(res.data.tenant.name);
+    fetch(`/api/tenant?tenant_id=${encodeURIComponent(targetId)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (isMounted && data?.tenant?.name) {
+          setRegisteredCompanyName(data.tenant.name);
         }
       })
       .catch(() => {});
@@ -360,6 +388,11 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
     };
   }, [companyCode]);
 
+  // Automatically populate digital signature with worker's full name
+  useEffect(() => {
+    const fullName = `${workerFirst} ${workerLast}`.trim();
+    setDigitalSignature(fullName);
+  }, [workerFirst, workerLast]);
 
   const handleOpenForgotPassword = () => {
     setForgotEmail(email || "");
@@ -385,19 +418,20 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
     setForgotSuccess(null);
 
     try {
-      const res = await safeAuthFetch("/api/auth/forgot-password", {
+      const response = await fetch("/api/auth/forgot-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: forgotEmail.trim() })
       });
-      if (res.ok && res.data) {
-        setForgotSuccess(res.data.message || "Password reset instructions sent.");
-        if (res.data.demoResetCode) {
-          setForgotDemoCode(res.data.demoResetCode);
+      const data = await response.json();
+      if (response.ok) {
+        setForgotSuccess(data.message);
+        if (data.demoResetCode) {
+          setForgotDemoCode(data.demoResetCode);
         }
         setForgotStep("verify");
       } else {
-        setForgotError(res.error || "Unable to process password reset request. Please check the email address and try again.");
+        setForgotError(data.error || "Unable to process password reset request. Please check the email address and try again.");
       }
     } catch (err: any) {
       setForgotError("Network anomaly occurred. Please verify your connection and retry.");
@@ -431,7 +465,7 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
     setForgotSuccess(null);
 
     try {
-      const res = await safeAuthFetch("/api/auth/reset-password", {
+      const response = await fetch("/api/auth/reset-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -440,8 +474,9 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
           newPassword: forgotNewPassword
         })
       });
-      if (res.ok && res.data) {
-        setForgotSuccess(res.data.message || "Password updated successfully!");
+      const data = await response.json();
+      if (response.ok) {
+        setForgotSuccess(data.message);
         setSuccessMsg("Password reset successfully! Please sign in with your new password.");
         setTimeout(() => {
           setShowForgotPasswordModal(false);
@@ -449,7 +484,7 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
           setEmail(forgotEmail.trim());
         }, 1800);
       } else {
-        setForgotError(res.error || "Password reset verification failed. Please check the PIN and retry.");
+        setForgotError(data.error || "Password reset verification failed. Please check the PIN and retry.");
       }
     } catch (err: any) {
       setForgotError("Network communication error. Please verify your connection and retry.");
@@ -465,110 +500,16 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
     setLoading(true);
     setErrorMsg(null);
     try {
-      const res = await safeAuthFetch("/api/auth/login", {
+      const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), password })
+        body: JSON.stringify({ email, password })
       });
-      if (!res.ok) {
-        // Resilient fallback for demo accounts if server endpoint is temporarily restarting
-        const cleanEmail = email.trim().toLowerCase();
-        const isDemoAdmin = cleanEmail === "admin@apextech.com" && (password === "EnterpriseAdmin2026!" || password === "Password123!");
-        const isDemoWorker = cleanEmail === "bob@apextech.com" && (password === "EnterpriseAdmin2026!" || password === "Password123!");
-
-        if (isDemoAdmin) {
-          const fallbackAdminData = {
-            success: true,
-            user: {
-              id: "admin-user",
-              tenant_id: "default-tenant",
-              firstName: "Utibeabasi",
-              lastName: "Essien",
-              email: "admin@apextech.com",
-              phone: "+2348123456789",
-              role: "company_admin",
-              status: "active"
-            },
-            tenant: {
-              id: "default-tenant",
-              name: "Apex Tech Global Ltd",
-              email: "admin@apextech.com",
-              phone: "+2348012345678"
-            },
-            settings: {
-              tenant_id: "default-tenant",
-              theme: "army",
-              language: "en"
-            },
-            subscription: {
-              id: "sub-default",
-              tenant_id: "default-tenant",
-              planCode: "starter",
-              status: "active"
-            }
-          };
-          if (rememberMe) {
-            localStorage.setItem("clock_it_session", JSON.stringify(fallbackAdminData));
-          }
-          setSuccessMsg("System entry authorized!");
-          setTimeout(() => {
-            onLoginSuccess(fallbackAdminData);
-          }, 800);
-          return;
-        }
-
-        if (isDemoWorker) {
-          const fallbackWorkerData = {
-            success: true,
-            user: {
-              id: "worker-bob",
-              tenant_id: "default-tenant",
-              firstName: "Bob",
-              lastName: "Aris",
-              email: "bob@apextech.com",
-              phone: "+2348111222444",
-              role: "team_member",
-              department_id: "dept-eng",
-              status: "active",
-              title: "Senior Fullstack Engineer"
-            },
-            tenant: {
-              id: "default-tenant",
-              name: "Apex Tech Global Ltd",
-              email: "admin@apextech.com",
-              phone: "+2348012345678"
-            },
-            settings: {
-              tenant_id: "default-tenant",
-              theme: "army",
-              language: "en"
-            },
-            subscription: {
-              id: "sub-default",
-              tenant_id: "default-tenant",
-              planCode: "starter",
-              status: "active"
-            }
-          };
-          setPendingBiometricSession(fallbackWorkerData);
-          setShowBiometricModal(true);
-          setLoading(false);
-          return;
-        }
-
-        throw new Error(res.error || "Login verification failed. Please verify your credentials and try again.");
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Login trace failed");
       }
-      const data = res.data;
       
-      // For Team Members, require camera-based biometric facial recognition as secondary login layer
-      const isTeamMember = data.user?.role === "team_member" || data.user?.role === "team_lead";
-      if (isTeamMember) {
-        setPendingBiometricSession(data);
-        setShowBiometricModal(true);
-        setLoading(false);
-        return;
-      }
-
       if (rememberMe) {
         localStorage.setItem("clock_it_session", JSON.stringify(data));
       }
@@ -602,7 +543,7 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
     setLoading(true);
     setErrorMsg(null);
     try {
-      const res = await safeAuthFetch("/api/auth/register-company", {
+      const response = await fetch("/api/auth/register-company", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -613,10 +554,10 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
           subscriptionToken: tokenToSend
         })
       });
-      if (!res.ok) {
-        throw new Error(res.error || "Company registration failed. Please review your details and try again.");
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Company registration failed.");
       }
-      const data = res.data;
 
       // Mark newly registered account to allow interactive tour sequence
       try {
@@ -657,14 +598,20 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
     }
 
     if (!agreedTerms) {
-      setErrorMsg("You must read and agree to the Legal Terms and Privacy Policy before submitting.");
+      setErrorMsg("You must read and sign the Legal Terms and Privacy Policy before submitting.");
+      return;
+    }
+
+    const expectedName = (workerFirst.trim() + " " + workerLast.trim()).toLowerCase();
+    if (digitalSignature.trim().toLowerCase() !== expectedName) {
+      setErrorMsg(`Your digital signature must exactly match your full name: "${workerFirst} ${workerLast}"`);
       return;
     }
 
     setLoading(true);
     setErrorMsg(null);
     try {
-      const res = await safeAuthFetch("/api/auth/register-worker", {
+      const response = await fetch("/api/auth/register-worker", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -683,16 +630,10 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
           localTime: new Date().toTimeString().split(" ")[0]
         })
       });
-      if (!res.ok) {
-        throw new Error(res.error || "Worker registration failed. Please verify your company ID and information.");
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Worker registry failed.");
       }
-      const data = res.data;
-
-      // Mark newly registered account to allow interactive tour sequence
-      try {
-        localStorage.setItem(`is_new_user_${(data.user?.id || workerEmail).toLowerCase()}`, "true");
-        localStorage.setItem(`clock_it_new_registration_${(data.user?.id || workerEmail).toLowerCase()}`, "true");
-      } catch (e) {}
 
       setSuccessMsg("Associated worker cataloged! Sign in via main Login desk.");
       setTimeout(() => {
@@ -705,6 +646,7 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
         setWorkerEmail("");
         setWorkerPass("");
         setAgreedTerms(false);
+        setDigitalSignature("");
         setSuccessMsg(null);
       }, 2000);
     } catch (err: any) {
@@ -773,15 +715,15 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
 
             {/* Notifications */}
             {errorMsg && (
-              <div className="bg-red-950/30 border border-rose-500/40 text-rose-400 px-4 py-3.5 rounded-2xl text-xs flex items-center space-x-2.5 mb-6 animate-fade-in">
-                <AlertCircle className="h-4.5 w-4.5 shrink-0" />
-                <span className="leading-relaxed">{errorMsg}</span>
+              <div className="bg-red-950/20 border border-red-550/30 text-red-400 px-4 py-3.5 rounded-2xl text-xs flex items-center space-x-2.5 mb-6">
+                <XCircle className="h-4.5 w-4.5 shrink-0" />
+                <span>{errorMsg}</span>
               </div>
             )}
             {successMsg && (
-              <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 px-4 py-3.5 rounded-2xl text-xs flex items-center space-x-2.5 mb-6 animate-fade-in">
-                <CheckCircle2 className="h-4.5 w-4.5 shrink-0" />
-                <span className="leading-relaxed">{successMsg}</span>
+              <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 px-4 py-3.5 rounded-2xl text-xs flex items-center space-x-2.5 mb-6">
+                <CheckCircle2 className="h-4.5 w-4.5 shrink-0 animate-bounce" />
+                <span>{successMsg}</span>
               </div>
             )}
 
@@ -1147,7 +1089,7 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
                                 }, 1000);
                                 setTimeout(async () => {
                                   try {
-                                    const res = await safeAuthFetch("/api/billing/pre-register", {
+                                    const response = await fetch("/api/billing/pre-register", {
                                       method: "POST",
                                       headers: { "Content-Type": "application/json" },
                                       body: JSON.stringify({
@@ -1155,13 +1097,14 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
                                         paymentMethod: gatewaySelected
                                       })
                                     });
-                                    if (res.ok && res.data?.token) {
-                                      setBillingProgress("Verification Confirmed. Granting Company Registry permission!");
+                                    const data = await response.json();
+                                    if (response.ok && data.token) {
+                                      setBillingProgress("✓ Checkout Synced. Granting Company Registry permission!");
                                       setTimeout(() => {
-                                        setSubscriptionToken(res.data.token);
+                                        setSubscriptionToken(data.token);
                                       }, 800);
                                     } else {
-                                      setBillingProgress(res.error || "Verification mismatch. Please try again.");
+                                      setBillingProgress("Verification mismatch. Please try again.");
                                     }
                                   } catch (err) {
                                     setBillingProgress("Verification mismatch. Please try again.");
@@ -1400,6 +1343,14 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
                   </p>
                 </div>
 
+                {isFromQr && (
+                  <div className="bg-cyan-950/30 border border-cyan-800/40 p-3 rounded-xl text-xs font-medium text-cyan-400 space-y-1 block animate-fade-in font-sans">
+                    <strong className="block text-cyan-300 font-bold text-[11px]">💎 QR Gate Handshake Active</strong>
+                    <p className="font-light text-neutral-300 leading-relaxed text-[11px]">
+                      Scanned official company QR terminal pass. Credentials are authenticated and audited against active subscription limits.
+                    </p>
+                  </div>
+                )}
                 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="flex flex-col space-y-1">
@@ -1677,8 +1628,8 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
                   </div>
                 </div>
 
-                {/* Legal Terms & Agreement Section */}
-                <div className="pt-2 border-t border-[#262626] mt-3 animate-fade-in">
+                {/* Legal Terms & Agreement Signature Section */}
+                <div className="space-y-3 pt-2 border-t border-[#262626] mt-3 animate-fade-in">
                   <div className="flex items-start space-x-2.5">
                     <input
                       id="legal_terms_checkbox"
@@ -1698,6 +1649,35 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
                         [View Terms]
                       </button>
                     </label>
+                  </div>
+
+                  <div className="flex flex-col space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-semibold text-neutral-400">
+                        {translations.legalTermsSignature || "Digital Signature"}
+                      </label>
+                      <span className="text-[9px] font-mono text-emerald-400/90 bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-800/30">
+                        Auto-Populated
+                      </span>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Enter First & Last Name to populate signature"
+                      value={digitalSignature}
+                      readOnly
+                      tabIndex={-1}
+                      className="w-full text-xs bg-[#141414] text-cyan-300 font-mono border border-[#262626] rounded-xl py-3 px-4 font-semibold cursor-not-allowed select-none outline-none min-h-[44px]"
+                      required
+                    />
+                    {workerFirst && workerLast ? (
+                      <span className="text-[10px] text-neutral-500 select-none">
+                        Cryptographic signature generated for: <span className="font-mono text-cyan-400 font-semibold">{workerFirst} {workerLast}</span>
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-neutral-500 select-none">
+                        Signature automatically syncs with your registered name.
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -2037,40 +2017,6 @@ export default function AuthScreens({ onLoginSuccess, onNavigateHome, translatio
                 <span>UTILITY: 3000 DEV</span>
               </div>
             </div>
-          )}
-
-          {/* Biometric Camera Secondary Authentication Modal for Team Members */}
-          {showBiometricModal && pendingBiometricSession && (
-            <BiometricCameraAuth
-              isOpen={showBiometricModal}
-              user={pendingBiometricSession.user}
-              theme="dark"
-              mode="login-2fa"
-              onClose={() => {
-                setShowBiometricModal(false);
-                setPendingBiometricSession(null);
-                setErrorMsg("Biometric facial authentication was canceled. Facial recognition is required for team member access.");
-              }}
-              onVerified={(verifiedUser) => {
-                const finalData = {
-                  ...pendingBiometricSession,
-                  user: {
-                    ...pendingBiometricSession.user,
-                    ...verifiedUser,
-                    biometricVerified: true
-                  }
-                };
-                if (rememberMe) {
-                  localStorage.setItem("clock_it_session", JSON.stringify(finalData));
-                }
-                setShowBiometricModal(false);
-                setPendingBiometricSession(null);
-                setSuccessMsg("Biometric facial identity confirmed! Welcome back.");
-                setTimeout(() => {
-                  onLoginSuccess(finalData);
-                }, 600);
-              }}
-            />
           )}
 
       </div>

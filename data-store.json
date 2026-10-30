@@ -39,20 +39,6 @@
       "phone": "08035328559",
       "fingerprint": null,
       "createdAt": "2026-07-24T08:07:24.113Z"
-    },
-    {
-      "id": "tenant-9lxylxnwr",
-      "name": "Test Co",
-      "email": "testadmin999@test.com",
-      "phone": "+2348000000000",
-      "createdAt": "2026-10-13T14:46:38.178Z"
-    },
-    {
-      "id": "tenant-b2xthk56g",
-      "name": "Test Co",
-      "email": "newtest@company.com",
-      "phone": "+1234567890",
-      "createdAt": "2026-10-16T11:06:57.929Z"
     }
   ],
   "users": [
@@ -358,19 +344,6 @@
       "preferences": {
         "theme": "army",
         "language": "es"
-      },
-      "biometricProfile": {
-        "enabled": true,
-        "enrolledAt": "2026-10-13T13:28:05.754Z",
-        "faceVector": [
-          0.1,
-          0.2,
-          0.3
-        ],
-        "faceSnapshot": "data:image/jpeg;base64,sample",
-        "biometricId": "bio-2df908c8ae0535f5",
-        "deviceName": "MacBook Pro FaceTime Camera",
-        "lastVerifiedAt": "2026-10-13T13:28:10.167Z"
       }
     },
     {
@@ -834,76 +807,6 @@
           "userId": "user-15xacrtck"
         }
       }
-    },
-    {
-      "id": "user-xak9kqzh4",
-      "tenant_id": "tenant-9lxylxnwr",
-      "firstName": "Company",
-      "lastName": "Admin",
-      "email": "testadmin999@test.com",
-      "phone": "+2348000000000",
-      "role": "company_admin",
-      "status": "active",
-      "password": "scrypt:63045c60a186b2f1f3c16fc1492e9d71:0aafd7ee3301f8c15645c1198df5abcee620c79ef73d90f9ed2420bf3584fa9eb5bf24e3f787152b099952160e7d46d576b086106db56934b426eafa329dccfd",
-      "createdAt": "2026-10-13T14:46:38.245Z"
-    },
-    {
-      "id": "user-jfbefgj89",
-      "tenant_id": "default-tenant",
-      "firstName": "Sam",
-      "lastName": "Smith",
-      "email": "samsmith999@test.com",
-      "phone": "+2348000000001",
-      "role": "team_member",
-      "status": "active",
-      "password": "scrypt:ef4bcaadbdbab4eb40fd47d4b436391b:065fed532c5f221b0d119087980a7c5661bd73858bf773d7de8657d6284ca2957ff3569fe417e56122641d25bf03bebac5ab84609fd481a0a5dfea50d08558ad",
-      "title": "Associated Worker",
-      "createdAt": "2026-10-13T14:46:44.633Z",
-      "deviceBinding": {
-        "deviceId": "device-bind-c2ftc21pdgg5otla",
-        "boundAt": "2026-10-13T14:46:44.633Z",
-        "verifiedFields": {
-          "email": "samsmith999@test.com",
-          "userId": "user-jfbefgj89",
-          "name": "Sam Smith",
-          "phone": "+2348000000001"
-        }
-      }
-    },
-    {
-      "id": "user-ocv809caj",
-      "tenant_id": "tenant-b2xthk56g",
-      "firstName": "Company",
-      "lastName": "Admin",
-      "email": "newtest@company.com",
-      "phone": "+1234567890",
-      "role": "company_admin",
-      "status": "active",
-      "password": "scrypt:91104e659bbef57a0fd83523b75622b8:242740acbe69933c5d8b776531d53e2c5346a1f3d3a86bf7df1098b33738d218d4f72be9969078c114a71b9c5bc4fc5756911caea0a44c1de9c93ee65e8d93f5",
-      "createdAt": "2026-10-16T11:06:57.977Z"
-    },
-    {
-      "id": "user-ap59w13t9",
-      "tenant_id": "default-tenant",
-      "firstName": "Jane",
-      "lastName": "Doe",
-      "email": "jane@apextech.com",
-      "phone": "+1234567899",
-      "role": "team_member",
-      "status": "active",
-      "password": "scrypt:87c96a15683532aee6f0dcfe814380ec:6e905f76de4792d01e1ebf69672b2e810ea974f0ac55d2e596881b0be8ac1509e500cba8fb33aa6d1156e6696d2aa3243773c2fb3d81f1c87267cf171764f713",
-      "title": "Associated Worker",
-      "createdAt": "2026-10-16T11:07:02.792Z",
-      "deviceBinding": {
-        "deviceId": "device-bind-amfuzubhcgv4dgvj",
-        "boundAt": "2026-10-16T11:07:02.792Z",
-        "verifiedFields": {
-          "email": "jane@apextech.com",
-          "userId": "user-ap59w13t9",
-          "name": "Jane Doe",
-          "phone": "+1234567899"
-        }
-      }
     }
   ],
   "departments": [
@@ -1014,26 +917,6 @@
       "tenant_id": "tenant-nk500tae2",
       "name": "Administration",
       "leadId": null
-    },
-    {
-      "id": "dept-eng-tenant-9lxylxnwr",
-      "tenant_id": "tenant-9lxylxnwr",
-      "name": "Engineering Solutions"
-    },
-    {
-      "id": "dept-ops-tenant-9lxylxnwr",
-      "tenant_id": "tenant-9lxylxnwr",
-      "name": "Operations & HR"
-    },
-    {
-      "id": "dept-eng-tenant-b2xthk56g",
-      "tenant_id": "tenant-b2xthk56g",
-      "name": "Engineering Solutions"
-    },
-    {
-      "id": "dept-ops-tenant-b2xthk56g",
-      "tenant_id": "tenant-b2xthk56g",
-      "name": "Operations & HR"
     }
   ],
   "departmentLeadHistory": [
@@ -2402,29 +2285,6 @@
       "statusOut": "Closing Time",
       "coveredTime": 59564,
       "snapshotPhoto": "data:image/webp;base64,UklGRnAEAABXRUJQVlA4WAoAAAAgAAAAMQAAMQAASUNDUMgBAAAAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADZWUDggggIAALAOAJ0BKjIAMgA+sUqdSackoqEx9xto4BYJZAC7NA2J5RpFS0C7Khe0WYlE6tSk+yh1jCZOon8PBX0w96eEod3kKkpYspv3tLt2pR6391uhuZrmGObUqZxKjeqErKR7aJ0SRYSqPqNoLKJKJc7d/Ul7RULQYxM18P62RB/4EAD+3tB8027ZCX9N9kIjqz1aAxwEDvTVEECd0UF5F/+Yoo5vT6h8DbUg0JvXmL066UzMuviyv+HwhCCa3Pn6CzQ956APPzZhkAE1/tFOaJ7PI17FHQ95bxw34CSJuyv5enQw4hxe0mre32gpfrQSPEx7JKeK/naMtCf2A5OTmwtE1MNR6BUa/nqEyVZgfcnEzJvM5u4D0f9WNQDi6iy6k5IwL8ET913ThqCO7DbXHJN6Y/aIV0GH9GlBy4nAIKr1mzbiIM+ICEpTX/0BWJbNraKOCZ64wDbP9knfpmWUwU0/knJuJQozQHagm52NnsFrWP85F/lIN52LV380Rnnk8lSsY/M+oWUQovk0mwWhTCTFGJ7cXg7uPVvpj7a9lOBGhjWD+uEAjhZw45X0GBUhjEaJHMnor8pSOfi6C34/yaN1y4FS2/8Lqf07W4AgtWr+o68cmSdD1eKsgXHVyR+HwNOT2isNKlZrg7fhX0k72VUlXUKorWRjLHNuPX6gnF+1z6kkQxWt/nrSQYneMbQwFDLMedDI0P7DmpwsIKurAVMAXtgPezBoLhZFE92opYzfVYAxw+u3konc/ZV4nJh0D71JV5aRgmTFtWtP7BkkrDI7XbdRae0q3woeKIF6XNQuZJMqovrPIKHYV47tcgeERh0yCIKwBGBB6eFTjyJ3H4CXA0QAAA=="
-    },
-    {
-      "id": "att-ofnm50h0s",
-      "tenant_id": "default-tenant",
-      "worker_id": "user-jfbefgj89",
-      "department_id": "unassigned",
-      "date": "2026-10-13",
-      "timeIn": "14:46:44",
-      "statusIn": "late",
-      "snapshotPhoto": "",
-      "timeOut": "17:00:00",
-      "statusOut": "Closing Time",
-      "coveredTime": 7996
-    },
-    {
-      "id": "att-4hq9ab3pq",
-      "tenant_id": "default-tenant",
-      "worker_id": "user-ap59w13t9",
-      "department_id": "unassigned",
-      "date": "2026-10-16",
-      "timeIn": "11:07:02",
-      "statusIn": "late",
-      "snapshotPhoto": ""
     }
   ],
   "permissions": [
@@ -5259,33 +5119,6 @@
       "timestamp": "2026-09-11T12:28:34.264Z",
       "read": false,
       "permission_id": null
-    },
-    {
-      "id": "notif-1w6yi2uqh",
-      "tenant_id": "default-tenant",
-      "worker_id": "user-jfbefgj89",
-      "title": "Check-In Success",
-      "message": "Sam Smith checked in (LATE) at 14:46:44",
-      "timestamp": "2026-10-13T14:46:44.633Z",
-      "read": false
-    },
-    {
-      "id": "notif-2irk37k2a",
-      "tenant_id": "default-tenant",
-      "worker_id": "user-jfbefgj89",
-      "title": "Auto Check-Out Recorded",
-      "message": "Sam Smith was automatically logged out at closing time (17:00)",
-      "timestamp": "2026-10-16T10:49:07.639Z",
-      "read": false
-    },
-    {
-      "id": "notif-3f60omvrc",
-      "tenant_id": "default-tenant",
-      "worker_id": "user-ap59w13t9",
-      "title": "Check-In Success",
-      "message": "Jane Doe checked in (LATE) at 11:07:02",
-      "timestamp": "2026-10-16T11:07:02.792Z",
-      "read": false
     }
   ],
   "subscriptions": [
@@ -5316,7 +5149,7 @@
       "tenant_id": "tenant-yp2fumg4p",
       "planCode": "starter",
       "price": 10000,
-      "status": "expired",
+      "status": "active",
       "startDate": "2026-08-27T10:28:42.423Z",
       "endDate": "2026-09-26T10:28:42.423Z",
       "paymentMethod": "paystack",
@@ -5375,28 +5208,6 @@
       "startDate": "2026-08-22T10:47:37.102Z",
       "endDate": "2026-09-21T10:47:37.102Z",
       "paymentMethod": "opay",
-      "verified": true
-    },
-    {
-      "id": "sub-uwg3l306v",
-      "tenant_id": "tenant-9lxylxnwr",
-      "planCode": "enterprise",
-      "price": 0,
-      "status": "active",
-      "startDate": "2026-10-13T14:46:38.245Z",
-      "endDate": "2026-11-12T14:46:38.245Z",
-      "paymentMethod": "admin_authorization",
-      "verified": true
-    },
-    {
-      "id": "sub-5p84550pc",
-      "tenant_id": "tenant-b2xthk56g",
-      "planCode": "enterprise",
-      "price": 0,
-      "status": "active",
-      "startDate": "2026-10-16T11:06:57.977Z",
-      "endDate": "2026-11-15T11:06:57.977Z",
-      "paymentMethod": "admin_authorization",
       "verified": true
     }
   ],
@@ -5590,92 +5401,6 @@
       "companyLogoUrl": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/4gHYSUNDX1BST0ZJTEUAAQEAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADb/2wBDAAkGBggGBQkIBwgKCQkKDRYODQwMDRoTFBAWHxwhIB8cHh4jJzIqIyUvJR4eKzssLzM1ODg4ISo9QTw2QTI3ODX/2wBDAQkKCg0LDRkODhk1JB4kNTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTX/wAARCADIAMgDASIAAhEBAxEB/8QAHAAAAAcBAQAAAAAAAAAAAAAAAAECAwQFBgcI/8QARhAAAgEDAwEFBAgBCQUJAAAAAQIDAAQRBRIhMQYTIkFRYXGBkQcUFSMyobHRQjNSVFWCkpSywRZDYuHxJDREU3J0k8Lw/8QAGwEBAQADAQEBAAAAAAAAAAAAAAECBAUDBgf/xAA1EQACAQMCAgYJBAIDAAAAAAAAAQIDBBESIQUxMkFRYZGhBhMicYGxwdHwFDNC4RXxI0NS/9oADAMBAAIRAxEAPwDoQwRSSuaZimBGDUlTuFZGIyUpBWpOM0hkx1oCMVpJSpBQUhloCOVosU8VpJWgGsUWPUU5tpJFAIIwT0osUvFFtoURigRSsUWKgEn2UoSMkbRjGG68VP0u0guXPeTCNwcgEgD31ZXOh295Mn1e5QSYzJ57vbjyoDOhmCFQTtOMj1rQW2hxXthbSlDE23xD+d7aDaLZ2VwrTO7Iu084AJz7un71eLKkiDumDLjyNQpXy6Pbd1hUXfjHSqa70Obf9xsfzYDjb860c8pQEVUym5uZHW2YKuMFqAzpUqSCORwaLFTJNMnSYptyR59BQmse5iy0gMn80c0BDoYo8UMUAnFClYoVSC1YqetS4bj1qMVzRDwjpVIWqOGHWlYBPFV0U5GKmxShhQCitIK8VF1fUzptvGybC7uB42wAo5Y/IGpdvNHdQJLDyjjIP+lANlc0hlqNNqyJK6RQvNtwBsIBZtxUgAkc8H2HB9DhLanIY90dhcv4SwGBk8465xz165wOlASCtIK4p9l4pDLQDJFFinGHFJxQojFFil4oiKgEEVJsJBDI0jTGPaM7V6v7Kj4pmW7t4LiKCWeNJp891GWG6THJ2jqcDrjpQE/UNVaa1fvQxVCX3BSzEDPAUZJPsHpQ0DU7ZZe/EpaM5A2jIyOD8QePnUNI9hPjZhxhWOcfHr86ehdI33Mm/HkaA1soErKRxnrmkNOkLFQoBPoKqF1kRxBSnPtOajSao7HAXCe05NQpe7I2Tc6AkeZqr1mGBIQ6BRITxg0xNqjTRqjEqPMLUCRzI5ZmJ9poQRj2UWKVihVAmhR0KAlMlNMvFTWTPlTLJiqQi4x0pccpXzpTJTZHWgEXGlw390J5Z51PHhDDaccgYIPGQDjpkVM0nTV0yOZUuZ5xNIZD3xU4J64wBgeyoocqalRXBBwaAH2LYmSJzCxMLBowZGKqRnGBnHGSB6DA6AVJEKRIEjQIo6KowBRpKDzTnWgGSuPKm2WpBHHFNsmDQDDLSCKpO3f1lOzrPbNgCRRIPUE4H57ai9gb68u9Inj1Bg00MuQd2Ttbnnz658zV07ZGTRkUk0e7xlT5UZFYlEEURFKJAIBPXpSAsneMSylPIBDkdPPPv8v0oBJVu8BDeAAgrjqeMHPz+dKokiEZYgsdxydzE/LPSlUAXTmgeSTUC717TbJd0t3H7FQ7ifgKGma1Z6vv+qSEsn4lZcEVh6yGdOdzZdpcKm6rg9Pbh4J1Cj5oVmawVDFH50KATQo6FAWxXim2SnivNJIqkIrRmokEn1m1jmEbx71zscAMvsOPOrGSMSKysOCMHyqp020GmWENrDZSxQgttTerFOSTnnoevU9fKgHWXNI5B4qSycU0y80AqOYqeTUuK4z51XEc0ayFTQFtvBoHkcVBiuPWpKShqAia3Y/aGi3VruKtLGQpBxhvL86yfYmO4tdTnWdVVZkwoBGSRk5PHtOMHzPw3Kyo7FVcMV6gHOKoFtPqWqb18IWTg+w/8qmXyRv2tKlUjNT6WNiZeSdxeJngOPzFPoQy5qo7cS3Nj2ea8tCoe3kVmLDPhJwcfEj4Zrncmv6jqH8tdzMMfhVtqjHsHFa1a4VLbGTb4bwifEE5Kail4+H9nULzVrCwYrc3cMbjqhbxdPTrVHd9u7CFmW2iluMdDjYp+fP5Vkrfs/qlzMsa2M65lWFmeMgRs2Mb+PD+IdfWpsPZRxZG4vr61t1YHu8TI3i25VWyw27sj3DkgDmtOV1Wl0Vg+jpcC4dQ/eqOT8PJb+Y9d9utQm3C3SK3BPBA3MB8ePyqlutVvL0EXN1LKp/hZzj5Uq605XvRDpDzagCoJKQnOecjAz6Z/aplr2Q1GVIprrurO2kwe9lkXhSpcnAOeFVmwcdPUitaTq1Hu8nbpQsLSKdOKj8N/Pcpi9aTsCc67N/7Zv8AMtZm4UQ3MkYbcEYqG45wfYSPkT760f0e5bXpzzgWzc/2lrK3jirE8+L1dVjU9x0Ghijoq7h+WAoUeKHnQCcUKOhQF2Vz1psrTxxjJ6CksM8VSDBHqKQRmn2U4qHqN9BplhLd3LERRLk45J8gB7zgVG0llmUIynJRistgdKZeP2Vjr/6SJGJWws1UfzpmyT8B0+Zqhve1urXrHfdtGvOFi8AHy5+ZrTne0o8tz6Oh6NXtXeeIrve/lk6Jc3Nva/8AeJ4ovPxuFqkuu2GlwEhHknI/8tOPmcVz95WdyzsWZjkknJJqfpulJqEDSPew2+GKBXODu2kr1wME8cZxySMddZ3tSTxBYOzT9GrSgtVxUcvdsvqy4n7d3LA/V7aKLPmxLY/Sqe97RanexlZryUqRgqp2g+8CrGPs/pttJLDeX7z3cWSLW3if7wd3v3BgpwMeoHXywaD2RbTbi1ttGm23Ene2kt1IscmNq+FAQDIeRgA85GF658ZSqz6Uvz4HRpUuH2/7NJe9/Ry38Bn6O9S+q9qngcnbdxFR0/EPECT7t3zreaqiS3iCZ17lkyU2kkkZXOOnV1P9muP2N+dL1u0vASBDKrNjHK55HPszXXb94nt45ZIxIisNxyeEP4jx5Y8ulbtF5pY7D5riK9XxBS/9LG3P85Em6tPtXszPZq+95YHh3yEjxgFcnr/EPb8a4vpt3JaXcUiMYpYXDAlclSD6H9K7PpVwrRyrDt+ro+Iiq4BGBnHxzXJO0ely2PbS+s4EeXvJDLGqISSrDdgDnOMkfClxHVBSROFVvUXFSlLk9/8Af1NhrF/HDcXJk7RSRBpyRHb2ojZtzkO42seNvC7mDFSRwv4qe51bQ7RY006xkuNskneSXIUsw5EZycjockbVGQMhsZpnT+xGtX/Jtxbx/wA+dtv5dfyqWvZnRrJN+pa4kxx/JWi7uf8A1c+XsFarjN7tY9/9nchVt4+xGTm+yK+elfN8yHqPa25uo44bKKPTrdE2d3B55UqTn0IZuBxlmPUkmvZ9S1mXOLm8YE8KGfbkk4AHTkk49pq+XUuz+nJiw0g3MmP5S7bPPrjkfLFN3XbDUpoxFC8drEowEgQLgeQz1HwrBuH8pZ9xtU6dw/2qOldsn9Fl+OCPD2I1aSLvJxBaJ1zPKB+mcVoNJl0Lsojqt6bq4kxvkjUkY9BjgfPPNZC5vZ7uTfcTSSt6uxOKZL1FXUHmEfEzqcMncx03NXbsisLxeW/I63YX9vqVqtxavvjPHTBB9DUisj9HjE217zxvX9DWurr0ZupBSZ+e8Rto2l1OjB5S+2QUKFCvU0AjQoUKAvA2RQPI9KKKJnHGKlQW6r/K/DFCDIt3cZVCRjPSqvtDo8mqaHc2R+7eZPAW4G4EEZ9mQK0QmCnavlwKfYJcQ4f/AKVJJSWGelOpKlNVIc08r4HmuaOSC4eGRCssbFGU9QQcEU+tjLDNGb+Ge3hY43tGR8s11+97I29t2nGtlQxCYZQvG4dH9+OPhQ1K00ftY8VvfpLvibwgOV/69K5X6TDe596vSBVFFqLxjd9j7jmlv2YhuVaVb9O6528cn0zUSyuP9ntUJvIUuotjfdlUdSccHDqw6+zOM1eaz2L1y3v5NNs7Um1Rt0cxcKCpJ6k9T7v9aZh+j6VATq+rW0BAyI423v05HOOenTOax9VLqWD2/wAhRkmqlTUn1Ld+W5V/7WzQ2kcNlZ2lswWPdKkKiTch6qwAIyM5ySTlucEAQbjWNS1IxxvPLJsQRqkY2jABUZCgZOCRk8nNXrL2V0tGWO2utSnB6zNsX0PpjzPQ0UnbGWKMx6ZZWlghOfu4xn9vyrF6V0p+H5g9YKrN5o0PjLC+8vIz03ZfVZot7WjxKfOXw4+B5/Kuk6E0l12Zte8kJmEPds4YklgNpOeueM1z3UdVvL8f9puZJB1wW4+XStP9G9402nXloxJ7iUOuSeAw6D4qT8TW1bVIN6Yo4fG7SvCCrVZLKfJJ/N/Yv7Bu6vHQRbyOHlErPg+hJH6fGs927ubnTNRtLy1kCd8hjbCgkFTkH25B9PKruVZoLmRyrmNJC5G8IhXGenUkcnpzUHt9ZrddlZJgebd1lUgjnyPww35Cvfd05JbNHLWiN1SqTSlGXx8c5/18TFyajdXiff3E0wHk7kgVMg7Parcxl47KUKoLHcNpC4B3YPOMEc9OR6iofZmdWvu4kmSKO5jMbM6lgTwyr7MsqjJBAznHFa2bWNOiuLu31jW7u9hLB+6tVTZJiZmZSV4BKqrZU/ic88HPLVNN5kz7md3KnFRoxXg/JLbzKhuzJsr8QaveRWi91v3jLc5Axj4nnodp2lsco1B9Fgs7gafBfN3pZIZbgKRw6kENx/Cp42g+PGeOXLftfFpWBpdkoXcJAJyWCOeW2jr1wuc5Kr5E8V2pdprzVNNS0uVg2rJ3ryLHh5G55Y/2j0A6854q4glsYxncTmnPl78eW/zK8tSS1SbLRtR1FlFpZzSBujbcL/ePH51bw9iLmN1bU7y0sY+rbpAWx7B068dakaUpbpGdXiFCm9MprPZzfgtzQfR4q/Ydw4HiNwQT7Aq4/U1qazOn69oOiWaWdrM7ovJcRnxHzJ4FaSORJY1kidXRhkMpyCK61Bx0KKecH59xSFZ3Eq1SDipPbKwKoUWaFe5yweVCizQoC5jl2dDSzdEdOfbUTyoZqkJQuD606l06jg5qCDS1bFAL1ntbZaDaJLfljvO1VQZZj7KorP6Q9JJkuUt44WHAAA3N7zxUbt5o8mraIJYNzTWhLhFGd6nr8eM/CuVb65tzWqU54XI+y4NwyzvLXXJvXnffl2be46lr/aTSe0UKyXGoXFsqoyGGN8bsjzx191c/1Fba1uVk0+4MsR/CDww99VZei34rSnUdTdo+ntbSFmtNOTx2bF5pWkR6tb3F7d38NrDFKscm/wDEWdWKY8uSuOvHJPANWVvpGlb2gsXutXYkK8kVuNgyy93nnKghWz4gfEASMGocGt9nrCdZodGkuXHRZnACjYVxht6udzbslQPCPCMmouqdqWukWHT7f6hbBcd0JDJnw7epHTbx7yx6k1klCK35mvOdxVn7OVHqzhJfX5eW6tctpRFLHFpotIrb71g4USqjuShYfixhkHJbGBzzTP0f3Pcds44/6TC8fT0G7/61GlvNW1tu6aS7vCTkRjc4HuUcDHs6UcfZzVdNv7a+ngEC28qy5kYZO1gcY5/Ovainrykc/icoq2dOpJJvv++/M6Rq8Ko7Ss7qDGSVQDxbc8ZPqGPlThgTUdFmtG3KGje3cZ5HBU8/8qmXjQPY/WNkVwgAdMkFT6EHp8abs7v61JKrGINGdpRH3EY88+ldFJKfvPkJTnUtlt0Xz/o4vp1jeXEzww28sjxsVYKpOCPWtFF2K1Hue9vJLayTOMzSj/TI/OnO1F5eaT2mu7eGR4Y5SJVKjBOeSQevXPT2ioKwahqMD3QhurmNDh5gjOqn0J8uo+dcyrohJrDbPtLFXNejGfrIwi/i/PC+ZZLpPZ3Typur+a/cHlIF2qR7f04OeaX9v6dYkfZej28ZU5WSbxsD5H1BB9tRrTs1f3MPfSobW32NIZ5lbu1Vd2ScAnquMY6keoy9NoWn2AjF9q0LSFgJI4MOI/FhgxBzwPRT0PszhrqY9lJfnebX6a01YqzlUfZl48I4XiM3farVbtjuu2jU5wsXgA+XPzqqeVpHLuxZmOSSckmkyd337rAzPGGOxnXaxHkSATg+zJqVYRwtKvfDIz614vVN+08nRgqNtH/igku5YIy7pHCoCzMcAAcmuu9k9Kkk7OWvf74iIhwV5PNY+0i021kWaKMLIDkHrit/p+omTSLYlxkoCSK6FnT0ybPkfSK69fShFLZP6Mn/AGBHKr9zM24Dwhh51TzwvbymOQYYeVW9rqaRPyeD1p+6KX2x4lid1Ycu5XA+Rz7q6J8aQ4dAkkte9eTaduQgXJoVYPelLgQox37d20A9OnXoP9efQ0KAqqZ70MwSVhH3oIWMnD5GckEH0x06fosvg4AySCRxx86PkN1GPTHNUgqgDRUfvoBW7j2VybtpoDaJq7PDHizn8URXJC+qkn2/lXVqoO0nauz0gmzlg+uSunjiyNuD5NnPl5YP51rXMYShmbwdrgte4pXGmhHVnmuXx7Fg5RFHLcPthjeRsZwiknHwq8sOwuu6ggf6p9WjJ/FcNsx/Z/F+VWEnbq8hiMOmW1rp0RbcBDEM/nx6eVVFzqWpaqj/AFi4ublIh3jAsWVB03EdB1xn21ytVJdr8j7r1d9U56YLv9p+CwvNloeyOkacinV9fjMh/FDaLvI9meccY5IFOfaPZfTNosNHe+dcgyXjcH27eQfPyFU66JfkZkt3g5AHfAoSdwXgH2sKsG0G00nUO5164lgCGNmWIKxZfEJFGCfEGXaPI4J4GKy1y/jFL87zzdtQ/wC6rKb7E8J/COH5sVc9t9Tk8Nt3NnEOAkMY4HvOfdWd1G8uLwlrmeWZsYzI5b9a08Eel6fJPJb2V3fxIqK7XEG1Q6sDIu4kBP4BkgnDYwM1UdqYXSeMvZW9kyKYJI4XD5dDhmYjw5Oeg446eset7ylkzp/poexRpqPftn7m/wCyNyuq9i7TJUsIjAwOG2lcqMj3AHB9aesQ8d4scDSSRDcJSYRGi+m3gc59/Ws19FF/uj1DT2blGWeMc8g8N7PJfnWqu7CR7x3S3zK0isl1uH3YGPLOfI8Ywc+01003KMZI+HnGNOvVozeE91nGN/f2Z6n1cmY76UbEpPYX6qdpBgdvT+JR/m+VVvZrWdQtLG5isrxbcRgzBWmSPceBxvOG6A7cE8cVtO3+ntf9kLru03vb4nHTgKfEef8Ah3VzbTNC1TUUU2tlM6t0Yjap4z1OBWvcQanmJ1+D3FOVroqtYT6/E1cuq9nUuZDf32o6wJEdAQuEiJ2AFUbaBwDjyXavhPQZTULqG6vHlt7dbWNsYiQkqvHOM81orT6OL+Xabu5hgU9QuXYcfAfnV5adgNKtm3Td7dHHR3wvvwMV5q3qVOawbb4rZWvRm5Pu/EjnClmcKgJY8ADqat9O0LV7skw2MirgeKUbBz6Z6/Cuk2um2dgD9UtYYcjBKIAT7z1qQa94WaXSZza/pHKW1KHj9l9zI2HY25kwdRuVReMxw5JPsz5fnWrijWCFIoxtSNQqr6AcCjJos1twpxp9E4FzeVrp5qPl1CsmlC5eJWKsw45xyabzRZr0NQeg1q5niimhcgEggTRMp255BU4IOM9enoaFRwzb33AbQfCQeSMDkjy5z6/6AVAWQbNKBpsGjBzVIOZo+lIzR5zQCqwf0h6MY5l1SEeF8Rzc/wAWOD8uPgK3eaZvLWK+s5bacbopVKMPYa8a1NVYOLOhw69lY3Eay5cn3o4mWqXp+rT6cJlhEbCdNhEqhgD5MAeAw8j5UnWtLn0XU5bW4VhtbwORgOvkRUe2sru9bFrbTTnOPu0LfpXFUJReOs/TJV6dWnqbTi/A1mpXVqk051HXDfrGwEKWeI0XawUYRfD0BbhgMKPFlsrUw9oINPt7IWVsGurC77+K5dQhdd2cOq9c8efGCMkEbZNp9HmtXLDvlhtlPUySZPX0XPNaCw+jGyicNe3ktxj+FFCA+/qf0raVGrJ5SwcKpxCxoR0yqau5eHVsZK77Y6zeNue87t9wYPDGkbDClQNygHADMMZxyaj22matr8oMUN1dAcGQgsFHXqePbjNdY07szo+mMHttPhDjGHcb2HuLZx8KuEICgDAA6CvaNo305HLq8fpwWLeljv2Xkvuc6+j3shrGmalFqt0IIYJoSrxFiXYEAggDgc46n14866C0fpTkVvDEFEUSRhVCAKoGFHQe4elLxkVuwgoLCPnLi4ncT1z5kKWIOjI3IYEGqzT4WhUo3VTg1etH7vZUM2+2ZiB+LmsjwEEVNtNDuLyIS5SOIjIZj1FRmjKgEggHofWpN9p8us9irm0iKrNEwmi3LuDbW3FcYPJAZc4JGQQCRQCpLbRNPQtqGqREqV3BXAC7iQN3XALKwBOORjrUXR+1uj3WvppVnpc0bEb2kuQobuydqyBcltrNsA3bTh1YAjJGItFntpLT7LJ1IwXRRFvGjLyloCHUFnwBmPLPjlpPMqQZVpq9vbiyvm0wvLI4W3+0pFtMyRbWCorAgOFjVdwRFyeGBYIsKabU7c2mpzxeSuSvuPIqIeKu+0axzS217Ad0dzEGBHn6H5EVSkVSCcfAetET1oyPWkmqAZ4oUXWhQFhR5oUXGKEFZpQNNZow1AOgnNHmmw3FHuoBNza295H3d1BFPGDnbIgYZ9cGnQABgcDyxSc0eahcvGA6PNFmgKEFbqUHpvzqWLVJEHdyAMOoNChRAzSKnGWPnVpb2GwkO43egqut7CSSTbkDHQip8ZlglCytnPQ4oCabWJ0wyjPrUG8svqWlyd1FJctnoCNwGfUkdB+nnVhE5YUqS4jhX7xwPfUBznV31SHtVp622xLO4+4d3YsGO2R8BM8Fe7PiyMiTGDt412hTNHemJidrrwPaP+WalxWNrc5ZcgEcYbpR29va2ExLyqZBypPGBVByfVrKBu1ckSQyWepq0j298luk01z3RYGTc2TvxDJkJGvJGN2Fqw0zsFq+oQXE+64smZo7aaK7tbd2uUhJRWyy4GUZv4WyoClupboV1qENk0h0+KBXlbdIyp+M46nHU++qq51S9n4edgPRPCPy60wUW2mPpnYvTrC8mia7so1j8LKcqPCMYVOMY/h8vPrVORTrc5JOTSGoQbIpBFOH9aQaoEkUKB6UKAsKKjoiahAj7KLNK2koWAO0EAn2/wD4Gk0AAaUGrlWta1qSa5fIl/dIiXDqqrMwAAYgAAGkT3evW1uk8t3frG5wG79uD6Hnj40Kda3c0ea439uap/WV5/8AO/70Pt3Vf6zvf8Q/70B2QGjzXGvt3Vf6zvf8Q/70Pt3Vf6zvf8Q/70B2bNXVh3H1ZWG3d5++vP8A9var/Wd7/iH/AHp+07Q6jHNmbVNQCYwdk7ZPzNQHoNiFAZVAPXilJMJT+9cSX6QdQhsjAlzPICxwzuSwXPrn0pFt9IWqRSATSySxg+Ed4wx+9CnclcQRux52jNUN5dJPdNJGCAa53d/SRd3VkdoZGU8hZSCRWau+0mpXFw0kd9dwhj+BZ2wPdzQh22DUGijVQOAc5HX3UVw6MwKOzA8nPUVw+LWdZnlWOHUL+R26Kk7kn4ZpSavrkhOy/wBRbapc7ZnOFHU9entqg7QcEcU26A1xx9W12Jisl9qSMM8NNIDwSD5+oI+Boo9X1yVQU1DUGDHaMTvyfQc8mmRg67JFjpTLLiuZaHrmqSa/YJJqN26PcRqyvMzAgsAQQTXVXQGgIZpJp54iKaIIqgQeuelCgeKFATM0M0jdQ3VAO9+/cd1nw5zTZNEWzSSaA5JrZI7Qahg/+Jl/zGmGvJWhkiZhscgkBQAMenp16Ditbq/Zl7nUri47tfvJC3hGKrJOzLr/ALsioUou+fKnI8IwMqPTFG11IxydnTH8mvt9ntqzfs/IP5wpl9Bl8nYfCppXYZ+sn2sii+mCbR3eCS38kvmMenTFJmu5bhcSFSM54RV/QU82hXHlK3yFIOhXflM3yFTRHngjqSaw2RqsbPXLiy082aJE8LSiVldc7jlDz6/gHzb1NRDoV75Tt8hSfsG//pDf3R+1ZGJY6t2jutZnmmuorcyTKquwj5OCTn35PX0GOmRUuz7a39k++GKBZO4aASLuVwhdWA3BgeNgA9AT61R/YOof0hv7o/ajGg3/APSG/uj9qAu9R7aX+pWupwTRW6x6nIksu1TlWXbjaST/ADR1z1NZ+nxoF95zt/dH7U4vZ+785m+QoBWk3Npa3glvEuGVen1eTYw9x8v+o88ifb6ppVvP3kceqRN3GzdHdgEtk48s7fw8Z8vPrUJez9x5yt8qdXs/L5ux+FAPpqWlQWJS2h1KGfOQy3Q2g5PooydpxnioMF5CLQwTLkEDomSCCSGB3DnxEY5H+k1OzrnyY1Ij7MO3+7JoQrdEbd2lsG55u4zyf+MV2PcDWB0jsy9rqVvcd2v3cgbxDNbQSEVUCQRmmnQGgJaPcDVBHePFCnm5oUAjcKLdQoVAFuobqFCgEkg9eaQ0aN1AoUKAae1hb+EU02nwt5ChQoBptLiPQCmzpKeQFChQCfskegofZS+lChQBjSh6ClDSV9BQoUAsaQvoKWukoD5UKFAODSovOnV02FfKhQoBa2kK9FFOCNE4AoUKAPgeQoiaFCqAicUA5FChQChL60KFCgP/2Q==",
       "layout": "top",
       "sideNavCollapsed": false
-    },
-    {
-      "tenant_id": "tenant-9lxylxnwr",
-      "theme": "light",
-      "language": "en",
-      "activityDays": {
-        "Sunday": false,
-        "Monday": true,
-        "Tuesday": true,
-        "Wednesday": true,
-        "Thursday": true,
-        "Friday": true,
-        "Saturday": false
-      },
-      "dailyShiftTimes": {
-        "Sunday": "08:00",
-        "Monday": "08:00",
-        "Tuesday": "08:00",
-        "Wednesday": "08:00",
-        "Thursday": "08:00",
-        "Friday": "08:00",
-        "Saturday": "08:00"
-      },
-      "dailyShiftOutTimes": {
-        "Sunday": "17:00",
-        "Monday": "17:00",
-        "Tuesday": "17:00",
-        "Wednesday": "17:00",
-        "Thursday": "17:00",
-        "Friday": "17:00",
-        "Saturday": "17:00"
-      },
-      "checkIn": {
-        "time": "08:00",
-        "latenessThreshold": 10,
-        "soundEnabled": true
-      },
-      "checkOut": {
-        "time": "17:00",
-        "soundEnabled": true
-      },
-      "overtimeHours": 2,
-      "selectedIntervalDays": 20
-    },
-    {
-      "tenant_id": "tenant-b2xthk56g",
-      "theme": "light",
-      "language": "en",
-      "activityDays": {
-        "Sunday": false,
-        "Monday": true,
-        "Tuesday": true,
-        "Wednesday": true,
-        "Thursday": true,
-        "Friday": true,
-        "Saturday": false
-      },
-      "dailyShiftTimes": {
-        "Sunday": "08:00",
-        "Monday": "08:00",
-        "Tuesday": "08:00",
-        "Wednesday": "08:00",
-        "Thursday": "08:00",
-        "Friday": "08:00",
-        "Saturday": "08:00"
-      },
-      "dailyShiftOutTimes": {
-        "Sunday": "17:00",
-        "Monday": "17:00",
-        "Tuesday": "17:00",
-        "Wednesday": "17:00",
-        "Thursday": "17:00",
-        "Friday": "17:00",
-        "Saturday": "17:00"
-      },
-      "checkIn": {
-        "time": "08:00",
-        "latenessThreshold": 10,
-        "soundEnabled": true
-      },
-      "checkOut": {
-        "time": "17:00",
-        "soundEnabled": true
-      },
-      "overtimeHours": 2,
-      "selectedIntervalDays": 20
     }
   ],
   "reportJobs": [
@@ -5699,38 +5424,6 @@
     }
   ],
   "auditLogs": [
-    {
-      "id": "audit-7ltlfhb",
-      "tenant_id": "default-tenant",
-      "user_id": "worker-bob",
-      "action": "BIOMETRIC_AUTH_BYPASS_AUTHORIZED",
-      "details": "Emergency secondary authorization code accepted for team member Bob Aris.",
-      "timestamp": "2026-10-16T11:04:59.648Z"
-    },
-    {
-      "id": "audit-t3k1alx",
-      "tenant_id": "default-tenant",
-      "user_id": "worker-david",
-      "action": "BIOMETRIC_AUTH_BYPASS_AUTHORIZED",
-      "details": "Emergency secondary authorization code accepted for team member David Ade.",
-      "timestamp": "2026-10-13T13:28:15.037Z"
-    },
-    {
-      "id": "audit-8nlyorh",
-      "tenant_id": "default-tenant",
-      "user_id": "worker-david",
-      "action": "BIOMETRIC_FACIAL_AUTH_VERIFIED",
-      "details": "Secondary facial recognition login verified successfully via device camera for team member David Ade (david@apextech.com).",
-      "timestamp": "2026-10-13T13:28:10.167Z"
-    },
-    {
-      "id": "audit-p44tqmk",
-      "tenant_id": "default-tenant",
-      "user_id": "worker-david",
-      "action": "BIOMETRIC_PROFILE_ENROLLED",
-      "details": "Biometric facial profile registered via device camera (Biometric ID: bio-2df908c8ae0535f5) for team member David Ade.",
-      "timestamp": "2026-10-13T13:28:05.754Z"
-    },
     {
       "id": "log-2t731j1dk",
       "tenant_id": "tenant-nk500tae2",
@@ -7178,54 +6871,6 @@
       "action": "PASSWORD_RESET_COMPLETED",
       "timestamp": "2026-08-24T08:36:02.923Z",
       "details": "Password was successfully reset for account solomonjakes@gmail.com."
-    },
-    {
-      "id": "log-9uymjo495",
-      "tenant_id": "tenant-9lxylxnwr",
-      "user_id": "user-xak9kqzh4",
-      "action": "COMPANY_REGISTERED",
-      "timestamp": "2026-10-13T14:46:38.245Z",
-      "details": "Registered company Test Co with active subscription plan enterprise"
-    },
-    {
-      "id": "log-qkhg7iw7z",
-      "tenant_id": "default-tenant",
-      "user_id": "user-jfbefgj89",
-      "action": "WORKER_REGISTERED",
-      "timestamp": "2026-10-13T14:46:44.633Z",
-      "details": "Worker Sam Smith joined company (standard web registration)"
-    },
-    {
-      "id": "log-mnifghw3t",
-      "tenant_id": "default-tenant",
-      "user_id": "user-jfbefgj89",
-      "action": "QR_CHECK_IN",
-      "timestamp": "2026-10-13T14:46:44.633Z",
-      "details": "Worker Sam Smith auto checked-in upon successful portal registration (audited against Active Admin settings)."
-    },
-    {
-      "id": "log-wohdzfu64",
-      "tenant_id": "tenant-b2xthk56g",
-      "user_id": "user-ocv809caj",
-      "action": "COMPANY_REGISTERED",
-      "timestamp": "2026-10-16T11:06:57.977Z",
-      "details": "Registered company Test Co with active subscription plan enterprise"
-    },
-    {
-      "id": "log-8bnvy8ns4",
-      "tenant_id": "default-tenant",
-      "user_id": "user-ap59w13t9",
-      "action": "WORKER_REGISTERED",
-      "timestamp": "2026-10-16T11:07:02.792Z",
-      "details": "Worker Jane Doe joined company (standard web registration)"
-    },
-    {
-      "id": "log-mn0k9fv97",
-      "tenant_id": "default-tenant",
-      "user_id": "user-ap59w13t9",
-      "action": "QR_CHECK_IN",
-      "timestamp": "2026-10-16T11:07:02.792Z",
-      "details": "Worker Jane Doe auto checked-in upon successful portal registration (audited against Active Admin settings)."
     }
   ],
   "visitorLogs": [],

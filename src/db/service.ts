@@ -1,4 +1,4 @@
-import { db, isPgConfigured, isPgOnline, checkPgConnection, setPgOffline } from './index.ts';
+import { db, isPgConfigured } from './index.ts';
 import { 
   tenants, 
   users, 
@@ -223,17 +223,17 @@ function mapPendingSubscription(ps: any) {
  */
 export async function seedPostgresDatabase(initialState: any) {
   if (!isPgConfigured()) return;
-  const isOnline = await checkPgConnection();
-  if (!isOnline) return;
 
-  try {
-    const existingTenants = await db.select().from(tenants);
-    if (existingTenants.length > 0) {
-      console.log('PostgreSQL database already initialized with tenants.');
-      return;
-    }
+  const maxRetries = 4;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const existingTenants = await db.select().from(tenants);
+      if (existingTenants.length > 0) {
+        console.log('PostgreSQL database already initialized with tenants.');
+        return;
+      }
 
-    console.log('Seeding PostgreSQL database with initial data...');
+      console.log('Seeding PostgreSQL database with initial data...');
 
       if (initialState.tenants && initialState.tenants.length > 0) {
         for (const t of initialState.tenants) {
@@ -315,17 +315,21 @@ export async function seedPostgresDatabase(initialState: any) {
 
       console.log('PostgreSQL database seeded successfully.');
       return;
-    } catch (_error: any) {
-      setPgOffline();
-      return;
+    } catch (error: any) {
+      if (attempt < maxRetries) {
+        await new Promise((res) => setTimeout(res, attempt * 1200));
+      } else {
+        console.warn('PostgreSQL database unavailable or timed out during seeding (continuing with local data store):', error?.message || error);
+      }
     }
+  }
 }
 
 /**
  * Synchronizes entire DBState to PostgreSQL table storage.
  */
 export async function syncStateToPostgres(state: any) {
-  if (!isPgConfigured() || !isPgOnline()) return;
+  if (!isPgConfigured()) return;
   try {
     if (state.tenants && state.tenants.length > 0) {
       for (const t of state.tenants) {
@@ -510,13 +514,13 @@ export async function getUserByUid(uid: string): Promise<User | undefined> {
 }
 
 export async function getUserByEmail(email: string): Promise<User | undefined> {
-  if (!isPgConfigured() || !isPgOnline()) return undefined;
+  if (!isPgConfigured()) return undefined;
   try {
     const clean = email.trim().toLowerCase();
     const all = await db.select().from(users);
     return all.find(u => u.email && u.email.toLowerCase() === clean) as User | undefined;
-  } catch (_error) {
-    setPgOffline();
+  } catch (error) {
+    console.error(`Failed to fetch user by email ${email}:`, error);
     return undefined;
   }
 }
@@ -968,11 +972,11 @@ export async function upsertVisitorLog(logData: VisitorLog): Promise<VisitorLog>
  */
 export async function getFullDBStateFromPostgres(tenant_id?: string): Promise<any> {
   if (!isPgConfigured()) return null;
-  const isOnline = await checkPgConnection();
-  if (!isOnline) return null;
 
-  try {
-    const allTenants = await db.select().from(tenants);
+  const maxRetries = 3;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const allTenants = await db.select().from(tenants);
 
       const [
         allUsers,
@@ -1017,8 +1021,14 @@ export async function getFullDBStateFromPostgres(tenant_id?: string): Promise<an
         visitorLogs: allVisitors,
         pendingSubscriptions: allPendingSubs
       };
-    } catch (_error: any) {
-      setPgOffline();
-      return null;
+    } catch (error: any) {
+      if (attempt < maxRetries) {
+        await new Promise((res) => setTimeout(res, attempt * 1000));
+      } else {
+        console.warn("PostgreSQL not reachable or timed out (falling back to local data store):", error?.message || error);
+        return null;
+      }
     }
+  }
+  return null;
 }

@@ -30,7 +30,7 @@ import {
 } from "./src/types.js";
 import { getDateInTimezone, getHolidayForDate } from "./src/utils/holidayUtils.js";
 import crypto from "crypto";
-import { isPgConfigured, isPgOnline, checkPgConnection } from "./src/db/index.js";
+import { isPgConfigured } from "./src/db/index.js";
 import { 
   seedPostgresDatabase, 
   syncStateToPostgres, 
@@ -58,37 +58,17 @@ function verifyPassword(password: string, storedHash: string): boolean {
       const expectedHash = parts[2];
       try {
         const derivedHash = crypto.scryptSync(password, salt, 64).toString("hex");
-        if (crypto.timingSafeEqual(
+        return crypto.timingSafeEqual(
           Buffer.from(expectedHash, "hex"),
           Buffer.from(derivedHash, "hex")
-        )) {
-          return true;
-        }
-        // Allow EnterpriseAdmin2026! and Password123! interchangeably for demo/seed accounts
-        if (password === "EnterpriseAdmin2026!") {
-          const demoHash = crypto.scryptSync("Password123!", salt, 64).toString("hex");
-          if (crypto.timingSafeEqual(Buffer.from(expectedHash, "hex"), Buffer.from(demoHash, "hex"))) {
-            return true;
-          }
-        }
-        if (password === "Password123!") {
-          const demoHash2 = crypto.scryptSync("EnterpriseAdmin2026!", salt, 64).toString("hex");
-          if (crypto.timingSafeEqual(Buffer.from(expectedHash, "hex"), Buffer.from(demoHash2, "hex"))) {
-            return true;
-          }
-        }
+        );
       } catch (e) {
         return false;
       }
     }
   }
   // Safe comparison for legacy plain-text passwords during seamless migration
-  if (password === storedHash) return true;
-  if ((password === "EnterpriseAdmin2026!" && storedHash === "Password123!") || 
-      (password === "Password123!" && storedHash === "EnterpriseAdmin2026!")) {
-    return true;
-  }
-  return false;
+  return password === storedHash;
 }
 
 const app = express();
@@ -158,8 +138,10 @@ function saveDB(state: DBState) {
   } catch (err) {
     console.error("Error writing DB_FILE:", err);
   }
-  if (isPgConfigured() && isPgOnline()) {
-    syncStateToPostgres(state).catch(() => {});
+  if (isPgConfigured()) {
+    syncStateToPostgres(state).catch((err) => {
+      console.error("Error in background PostgreSQL sync:", err);
+    });
   }
 }
 
@@ -170,10 +152,12 @@ async function persistDB(state: DBState): Promise<void> {
   } catch (err) {
     console.error("Error writing DB_FILE in persistDB:", err);
   }
-  if (isPgConfigured() && isPgOnline()) {
+  if (isPgConfigured()) {
     try {
       await syncStateToPostgres(state);
-    } catch {}
+    } catch (err) {
+      console.error("Error syncing state to PostgreSQL in persistDB:", err);
+    }
   }
 }
 
@@ -633,31 +617,40 @@ function ensureDbReady(): Promise<void> {
     dbReadyPromise = (async () => {
       if (isPgConfigured()) {
         try {
-          const isOnline = await checkPgConnection();
-          if (isOnline) {
-            await seedPostgresDatabase(db);
-            const pgState = await getFullDBStateFromPostgres(db.tenants[0]?.id || "default-tenant");
-            if (pgState && pgState.tenants && pgState.tenants.length > 0) {
-              db = mergeDBStates(db, pgState);
+          await seedPostgresDatabase(db);
+          const pgState = await getFullDBStateFromPostgres(db.tenants[0]?.id || "default-tenant");
+          if (pgState && pgState.tenants && pgState.tenants.length > 0) {
+            db = mergeDBStates(db, pgState);
+            // Migrate any plain text passwords to secure scrypt hashes
+            let migrated = false;
+            for (const u of db.users) {
+              if (u.password && !u.password.startsWith("scrypt:")) {
+                u.password = hashPassword(u.password);
+                migrated = true;
+              }
+            }
+            if (migrated) {
+              await persistDB(db);
+            } else {
+              saveDB(db);
             }
           }
-        } catch {
-          // Gracefully continue with persistent local JSON store
+        } catch (e: any) {
+          console.warn("ensureDbReady initial PostgreSQL load:", e?.message || e);
+          dbReadyPromise = null;
         }
-      }
-
-      // Ensure all passwords in local store are upgraded to scrypt hashes
-      let migrated = false;
-      for (const u of db.users) {
-        if (u.password && !u.password.startsWith("scrypt:")) {
-          u.password = hashPassword(u.password);
-          migrated = true;
-        }
-      }
-      if (migrated) {
-        await persistDB(db);
       } else {
-        saveDB(db);
+        // Even without Postgres, migrate plain text passwords to scrypt hashes locally
+        let migrated = false;
+        for (const u of db.users) {
+          if (u.password && !u.password.startsWith("scrypt:")) {
+            u.password = hashPassword(u.password);
+            migrated = true;
+          }
+        }
+        if (migrated) {
+          saveDB(db);
+        }
       }
     })();
   }
@@ -1170,8 +1163,8 @@ app.post("/api/auth/login", async (req, res) => {
   // Find user by email (case-insensitive)
   let user = db.users.find(u => u.email.toLowerCase() === cleanEmail);
 
-  // Fallback: If not found in local memory or file store, query PostgreSQL if online
-  if (!user && isPgConfigured() && isPgOnline()) {
+  // Fallback: If not found in local memory or file store, query PostgreSQL directly
+  if (!user && isPgConfigured()) {
     try {
       const pgUser = await getUserByEmail(cleanEmail);
       if (pgUser) {
@@ -1179,7 +1172,9 @@ app.post("/api/auth/login", async (req, res) => {
         db.users.push(user);
         saveDB(db);
       }
-    } catch {}
+    } catch (e) {
+      console.warn("Direct PostgreSQL lookup error during login:", e);
+    }
   }
 
   if (!user) {
@@ -1191,7 +1186,7 @@ app.post("/api/auth/login", async (req, res) => {
   let isMatch = verifyPassword(password, expectedPassword);
 
   // If match failed, verify if PostgreSQL has an updated password for this user
-  if (!isMatch && isPgConfigured() && isPgOnline()) {
+  if (!isMatch && isPgConfigured()) {
     try {
       const pgUser = await getUserByEmail(cleanEmail);
       if (pgUser && pgUser.password && verifyPassword(password, pgUser.password)) {
@@ -1199,7 +1194,9 @@ app.post("/api/auth/login", async (req, res) => {
         user.password = pgUser.password;
         saveDB(db);
       }
-    } catch {}
+    } catch (e) {
+      console.warn("PostgreSQL re-check lookup error during login:", e);
+    }
   }
 
   if (!isMatch) {
@@ -1259,173 +1256,6 @@ app.post("/api/auth/logout", (req, res) => {
   }
   return res.json({ success: true, message: "Session terminated successfully" });
 });
-
-// Biometric Facial Recognition Secondary Layer Endpoints
-app.post("/api/auth/biometric/status", async (req, res) => {
-  const { userId, email } = req.body || {};
-  await ensureDbReady();
-  db = loadDB();
-  const user = db.users.find(u => (userId && u.id === userId) || (email && u.email.toLowerCase() === email.trim().toLowerCase()));
-  if (!user) {
-    return res.status(404).json({ error: "User not found" });
-  }
-  const isEnrolled = Boolean(user.biometricProfile?.enabled && user.biometricProfile?.faceVector?.length);
-  return res.json({
-    success: true,
-    enrolled: isEnrolled,
-    profile: isEnrolled ? {
-      enabled: user.biometricProfile?.enabled,
-      enrolledAt: user.biometricProfile?.enrolledAt,
-      biometricId: user.biometricProfile?.biometricId,
-      lastVerifiedAt: user.biometricProfile?.lastVerifiedAt
-    } : null
-  });
-});
-
-app.post("/api/auth/biometric/enroll", async (req, res) => {
-  const { userId, faceVector, snapshot, deviceName } = req.body || {};
-  if (!userId || !faceVector || !Array.isArray(faceVector)) {
-    return res.status(400).json({ error: "User ID and valid biometric face vector are required." });
-  }
-  await ensureDbReady();
-  db = loadDB();
-  const user = db.users.find(u => u.id === userId);
-  if (!user) {
-    return res.status(404).json({ error: "User profile not found." });
-  }
-
-  const bioId = "bio-" + crypto.randomBytes(8).toString("hex");
-  const now = new Date().toISOString();
-  user.biometricProfile = {
-    enabled: true,
-    enrolledAt: now,
-    faceVector,
-    faceSnapshot: snapshot || user.biometricProfile?.faceSnapshot || "",
-    biometricId: bioId,
-    deviceName: deviceName || "Camera Biometric Sensor",
-    lastVerifiedAt: now
-  };
-
-  // Record audit log
-  const auditLog: AuditLog = {
-    id: "audit-" + Math.random().toString(36).substring(2, 9),
-    tenant_id: user.tenant_id,
-    user_id: user.id,
-    action: "BIOMETRIC_PROFILE_ENROLLED",
-    details: `Biometric facial profile registered via device camera (Biometric ID: ${bioId}) for team member ${user.firstName} ${user.lastName}.`,
-    timestamp: now
-  };
-  db.auditLogs.unshift(auditLog);
-
-  await persistDB(db);
-
-  const { password: _p, ...safeUser } = user;
-  return res.json({
-    success: true,
-    profile: {
-      enabled: true,
-      enrolledAt: now,
-      biometricId: bioId,
-      lastVerifiedAt: now
-    },
-    user: safeUser
-  });
-});
-
-app.post("/api/auth/biometric/verify", async (req, res) => {
-  const { userId, email, biometricProof, snapshot } = req.body || {};
-  await ensureDbReady();
-  db = loadDB();
-  const user = db.users.find(u => (userId && u.id === userId) || (email && u.email.toLowerCase() === email.trim().toLowerCase()));
-  if (!user) {
-    return res.status(404).json({ error: "User profile not found." });
-  }
-
-  const now = new Date().toISOString();
-  if (user.biometricProfile) {
-    user.biometricProfile.lastVerifiedAt = now;
-    if (snapshot && !user.biometricProfile.faceSnapshot) {
-      user.biometricProfile.faceSnapshot = snapshot;
-    }
-  } else {
-    user.biometricProfile = {
-      enabled: true,
-      enrolledAt: now,
-      biometricId: "bio-" + crypto.randomBytes(8).toString("hex"),
-      lastVerifiedAt: now,
-      faceSnapshot: snapshot || ""
-    };
-  }
-
-  // Record audit log
-  const auditLog: AuditLog = {
-    id: "audit-" + Math.random().toString(36).substring(2, 9),
-    tenant_id: user.tenant_id,
-    user_id: user.id,
-    action: "BIOMETRIC_FACIAL_AUTH_VERIFIED",
-    details: `Secondary facial recognition login verified successfully via device camera for team member ${user.firstName} ${user.lastName} (${user.email}).`,
-    timestamp: now
-  };
-  db.auditLogs.unshift(auditLog);
-
-  await persistDB(db);
-
-  const { password: _p, ...safeUser } = user;
-  return res.json({
-    success: true,
-    verified: true,
-    user: safeUser,
-    timestamp: now
-  });
-});
-
-app.post("/api/auth/biometric/bypass", async (req, res) => {
-  const { userId, passcode } = req.body || {};
-  if (!userId || !passcode) {
-    return res.status(400).json({ error: "User ID and emergency bypass code are required." });
-  }
-
-  await ensureDbReady();
-  db = loadDB();
-  const user = db.users.find(u => u.id === userId);
-  if (!user) {
-    return res.status(404).json({ error: "User not found." });
-  }
-
-  const tenant = db.tenants.find(t => t.id === user.tenant_id);
-  const cleanCode = (passcode || "").trim().toUpperCase();
-  const validCodes = [
-    "ADMIN_AUTH_CODE",
-    "ADMIN_BYPASS_TOKEN",
-    "CLOCK-BYPASS-2026",
-    tenant?.fingerprint ? tenant.fingerprint.toUpperCase() : ""
-  ].filter(Boolean);
-
-  if (!validCodes.includes(cleanCode) && cleanCode !== "SUPERVISOR2026") {
-    return res.status(401).json({ error: "Invalid emergency supervisor passcode. Please contact your company administrator." });
-  }
-
-  const now = new Date().toISOString();
-  const auditLog: AuditLog = {
-    id: "audit-" + Math.random().toString(36).substring(2, 9),
-    tenant_id: user.tenant_id,
-    user_id: user.id,
-    action: "BIOMETRIC_AUTH_BYPASS_AUTHORIZED",
-    details: `Emergency secondary authorization code accepted for team member ${user.firstName} ${user.lastName}.`,
-    timestamp: now
-  };
-  db.auditLogs.unshift(auditLog);
-  await persistDB(db);
-
-  const { password: _p, ...safeUser } = user;
-  return res.json({
-    success: true,
-    verified: true,
-    user: safeUser,
-    timestamp: now
-  });
-});
-
 
 // Resend Email Client Lazy Initializer
 let resendClient: Resend | null = null;
@@ -1507,14 +1337,12 @@ async function sendWelcomeEmail(user: { email: string; firstName: string; lastNa
     </div>
   `;
 
-  const greetingName = user.role === UserRole.COMPANY_ADMIN ? (companyName || "Admin") : (user.firstName || "Team Member");
-
   if (resend) {
     try {
       await resend.emails.send({
         from: fromEmail,
         to: [cleanEmail],
-        subject: `Welcome to Clock-It-Pro Plus, ${greetingName}!`,
+        subject: `Welcome to Clock-It-Pro Plus, ${user.firstName}!`,
         html: htmlContent
       });
       console.log(`[Welcome Email] Successfully sent to ${cleanEmail}`);
@@ -1526,7 +1354,7 @@ async function sendWelcomeEmail(user: { email: string; firstName: string; lastNa
           await resend.emails.send({
             from: "Clock-It-Pro Plus <onboarding@resend.dev>",
             to: [cleanEmail],
-            subject: `Welcome to Clock-It-Pro Plus, ${greetingName}!`,
+            subject: `Welcome to Clock-It-Pro Plus, ${user.firstName}!`,
             html: htmlContent
           });
           return true;
@@ -1731,14 +1559,16 @@ app.post("/api/auth/reset-password", async (req, res) => {
   db = loadDB();
   let user = db.users.find(u => u.email.toLowerCase() === cleanEmail);
 
-  if (!user && isPgConfigured() && isPgOnline()) {
+  if (!user && isPgConfigured()) {
     try {
       const pgUser = await getUserByEmail(cleanEmail);
       if (pgUser) {
         user = pgUser;
         db.users.push(user);
       }
-    } catch {}
+    } catch (e) {
+      console.warn("PostgreSQL lookup error during reset-password:", e);
+    }
   }
 
   if (!user) {
@@ -1814,15 +1644,6 @@ app.post("/api/auth/social-login", (req, res) => {
     db.users.push(user);
     saveDB(db);
     syncStateToPostgres(db).catch(() => {});
-
-    // Dispatch Welcome Email for newly registered user via social authentication
-    sendWelcomeEmail({
-      email: user.email,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      role: user.role,
-      tenant_id: user.tenant_id
-    }).catch((e) => console.warn("Welcome email async notice:", e));
   }
 
   if (user.status !== "active") {
@@ -2300,7 +2121,7 @@ app.post("/api/tenant/workers/add", async (req, res) => {
   db = loadDB();
   const cleanEmail = email.trim().toLowerCase();
   let emailExists = db.users.some(u => u.email.toLowerCase() === cleanEmail);
-  if (!emailExists && isPgConfigured() && isPgOnline()) {
+  if (!emailExists && isPgConfigured()) {
     try {
       const pgUser = await getUserByEmail(cleanEmail);
       if (pgUser) emailExists = true;
@@ -4564,25 +4385,6 @@ async function startServer() {
       console.warn("Background monitor exception:", e);
     }
   }, 10000);
-
-  // Catch unhandled /api/* routes to prevent HTML SPA fallback for API calls
-  app.all("/api/*", (req, res) => {
-    return res.status(404).json({ error: `API route ${req.method} ${req.path} not found.` });
-  });
-
-  // Global Express error handler ensuring API failures always return valid JSON
-  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-    console.error("Unhandled error on", req.method, req.path, ":", err);
-    if (res.headersSent) {
-      return next(err);
-    }
-    if (req.path.startsWith("/api/")) {
-      return res.status(500).json({
-        error: err?.message || "An unexpected internal server error occurred. Please try again."
-      });
-    }
-    next(err);
-  });
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
